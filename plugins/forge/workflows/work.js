@@ -5,9 +5,7 @@ export const meta = {
     'Run /forge:work <issue-id> to execute an issue written by /forge:issue, or pass a cut to run its increments. No user interaction is possible during the run.',
   phases: [
     { title: 'Implement', detail: 'a worktree per increment where the issue was cut' },
-    { title: 'Review', detail: 'judge each increment against its criteria' },
-    { title: 'Commit', detail: 'commit the increment' },
-    { title: 'Merge', detail: 'accepted increments onto the issue branch, in order' },
+    { title: 'Review', detail: 'judge each increment, and merge the one that holds' },
   ],
 }
 
@@ -25,7 +23,8 @@ const RESULT = {
     branch: { type: 'string', description: 'increment branch, empty when blocked' },
     worktree: { type: 'string', description: 'absolute path of this increment worktree, empty when blocked' },
     base: { type: 'string', description: 'commit the increment branch was cut from' },
-    summary: { type: 'string', description: 'one line, what changed - for the commit message' },
+    sha: { type: 'string', description: 'the commit this round produced, empty when blocked' },
+    summary: { type: 'string', description: 'one line, what changed - the commit subject' },
     files: { type: 'array', items: { type: 'string' } },
     blocker: { type: 'string', description: 'why it could not be done, empty otherwise' },
   },
@@ -52,35 +51,8 @@ const VERDICT = {
       items: { type: 'string' },
       description: 'true remarks that block nothing - every criterion still met, no behaviour changed',
     },
-  },
-}
-
-const COMMIT = {
-  type: 'object',
-  required: ['committed'],
-  properties: {
-    committed: { type: 'boolean' },
-    sha: { type: 'string' },
-  },
-}
-
-const MERGE = {
-  type: 'object',
-  required: ['results'],
-  properties: {
-    results: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['increment', 'merged'],
-        properties: {
-          increment: { type: 'string' },
-          merged: { type: 'boolean' },
-          sha: { type: 'string' },
-          conflict: { type: 'string', description: 'what conflicted, empty when it merged' },
-        },
-      },
-    },
+    merged: { type: 'boolean', description: 'true when you merged the increment, false on a conflict' },
+    conflict: { type: 'string', description: 'what conflicted, empty when it merged' },
   },
 }
 
@@ -125,6 +97,19 @@ const criteriaLine = (inc) =>
 // to create, nothing to clean up.
 const solo = increments.length === 1
 
+// The reviewer that accepts an increment merges it, and one checkout cannot
+// take two merges at once. The gate hands the review on, one at a time, so a
+// cut issue implements in parallel and reviews in turn.
+let gate = Promise.resolve()
+const serialized = (fn) => {
+  const next = gate.then(fn, fn)
+  gate = next.then(
+    () => {},
+    () => {},
+  )
+  return next
+}
+
 async function runIncrement(inc) {
   const label = solo ? issue : `${issue}/${inc.id}`
   const branch = solo ? '' : `forge/${issue}/${inc.id}`
@@ -147,12 +132,13 @@ async function runIncrement(inc) {
             '   Prefix every command with a `cd` into that worktree.',
           ]),
       '5. Implement the change. Run forge-test once when you are done.',
-      '6. Stage with `git add -A`. Do not commit. Unstaged files are invisible to the review.',
+      `6. Commit: \`git add -A\`, message "${issue}: <what changed>", a blank line, then one bullet`,
+      '   per criterion met. Unstaged work is invisible to the review. Do not push. Do not merge.',
       '',
       'Return status "blocked" with a blocker rather than guessing where the increment is unworkable.',
       solo
-        ? 'Return an empty worktree path and the sha the branch was cut from.'
-        : 'Return the absolute path of the worktree and the sha the branch was cut from.',
+        ? 'Return an empty worktree path, the sha the branch was cut from, and the sha you committed.'
+        : 'Return the worktree path, the sha the branch was cut from, and the sha you committed.',
       '',
       RULES,
     ].join('\n'),
@@ -161,6 +147,7 @@ async function runIncrement(inc) {
 
   if (!run) return { inc, status: 'error', reason: 'Implementer returned nothing.' }
   if (run.status === 'blocked') return { inc, status: 'blocked', blocker: run.blocker || 'unspecified', branch }
+  if (!run.sha) return { inc, status: 'uncommitted', branch, summary: run.summary }
 
   const wt = solo ? '' : run.worktree || worktree
   const base = run.base || 'HEAD'
@@ -168,8 +155,8 @@ async function runIncrement(inc) {
 
   const reviewBrief = [
     wt
-      ? `The work sits in the worktree ${wt}, on branch ${branch}, staged and uncommitted.`
-      : 'The work sits in the checkout, on its current branch, staged and uncommitted.',
+      ? `The work is committed in the worktree ${wt}, on branch ${branch}.`
+      : 'The work is committed in the checkout, on its current branch.',
     `The diff to judge is \`${where}git diff ${base}\`. Use exactly that base.`,
     ...(wt ? [`Run every check there too: \`${where}<command>\`. The main checkout lacks this change.`] : []),
     `Read issue ${issue} yourself, through the project's issue-backend skill.`,
@@ -186,7 +173,8 @@ async function runIncrement(inc) {
   while (true) {
     // A fresh reviewer each round, judging the whole accumulated diff. Judging
     // only the latest edit would miss a repair that broke an earlier criterion.
-    verdict = await agent(
+    const review = () =>
+      agent(
       [
         `Review increment ${inc.id} of issue ${issue}.`,
         '',
@@ -196,11 +184,23 @@ async function runIncrement(inc) {
         'break a criterion that used to hold. Run each verify command the issue names.',
         'Judge only the criteria. Style opinions are out of scope.',
         'Set pass true only when every criterion of this increment holds.',
+        ...(wt
+          ? [
+              '',
+              'When - and only when - you pass it, merge it, from the main checkout, never the worktree:',
+              `  git merge --no-ff ${branch}`,
+              'On a conflict: `git merge --abort`, report merged false and what conflicted. Never',
+              `resolve one. When it merged cleanly, remove the worktree: \`git worktree remove ${wt}\`.`,
+              'Report merged true. This is the only write you make outside your own scratch worktrees.',
+            ]
+          : ['', 'The work is already on the issue branch. Merge nothing. Report merged true when you pass it.']),
         '',
         RULES,
       ].join('\n'),
       { agentType: REVIEWER, schema: VERDICT, label: `review:${label}:${round}`, phase: 'Review' },
-    )
+      )
+
+    verdict = solo ? await review() : await serialized(review)
 
     if (!verdict) return { inc, status: 'error', reason: 'Reviewer returned no verdict.', branch, worktree: wt }
     if (verdict.pass) break
@@ -229,7 +229,7 @@ async function runIncrement(inc) {
         '',
         'Reproduce each finding before you change anything.',
         'Change nothing else. Re-run only the checks covering these criteria.',
-        'Stage with `git add -A`, do not commit.',
+        'Commit the repair on top: `git add -A`, subject `' + issue + ': <what the repair fixed>`.',
         '',
         RULES,
       ].join('\n'),
@@ -240,32 +240,17 @@ async function runIncrement(inc) {
     if (repair.status === 'blocked') {
       return { inc, status: 'blocked', blocker: repair.blocker || 'unspecified', branch, worktree: wt }
     }
+    if (!repair.sha) return { inc, status: 'uncommitted', branch, worktree: wt, rounds: round, summary: repair.summary }
     run = { ...repair, worktree: wt, branch, base }
-  }
-
-  const commit = await agent(
-    [
-      `Commit increment ${inc.id} of issue ${issue}.`,
-      '',
-      wt ? `Commit inside ${wt}, on ${branch}. Everything is staged.` : `Commit in the checkout, on ${branch}.`,
-      'Do not push. Do not merge.',
-      `Message: "${issue}: ${run.summary}", a blank line, then one bullet per criterion met.`,
-      '',
-      RULES,
-    ].join('\n'),
-    { agentType: inc.agent, schema: COMMIT, label: `commit:${label}`, phase: 'Commit' },
-  )
-
-  if (!commit || !commit.committed) {
-    return { inc, status: 'uncommitted', branch, worktree: wt, rounds: round, summary: run.summary }
   }
 
   return {
     inc,
-    status: 'accepted',
+    status: verdict.merged === false ? 'conflicted' : 'merged',
     branch,
     worktree: wt,
-    sha: commit.sha || '',
+    sha: run.sha,
+    conflict: verdict.merged === false ? verdict.conflict || 'unspecified' : undefined,
     rounds: round,
     summary: run.summary,
     preexisting: verdict.preexisting || [],
@@ -294,70 +279,24 @@ while (pending.size) {
   phase('Implement')
   const wave = (await parallel(ready.map((inc) => () => runIncrement(inc)))).filter(Boolean)
 
-  const accepted = wave.filter((r) => r.status === 'accepted')
-  for (const r of wave.filter((r) => r.status !== 'accepted')) {
+  for (const r of wave) {
+    if (r.status === 'merged') mergedIds.add(r.inc.id)
     outcomes.push({
       increment: r.inc.id,
       status: r.status,
       branch: r.branch || '',
       worktree: r.worktree || '',
+      sha: r.sha,
       rounds: r.rounds,
+      summary: r.summary,
       failed: r.verdict ? r.verdict.failed : undefined,
       notes: r.verdict ? r.verdict.notes || [] : undefined,
       blocker: r.blocker,
+      conflict: r.conflict,
       reason: r.reason,
+      preexisting: r.preexisting,
+      observations: r.observations,
     })
-  }
-
-  if (!accepted.length) continue
-
-  // Serialized: two merges into one branch cannot run at once. A conflict is
-  // reported, never resolved.
-  phase('Merge')
-  const merge =
-    solo
-      ? { results: [{ increment: accepted[0].inc.id, merged: true, sha: accepted[0].sha }] }
-      : await agent(
-          [
-            `Merge accepted increments of issue ${issue} onto the checkout's current branch, in this order:`,
-            ...accepted.map((r) => `  ${r.inc.id}: ${r.branch}`),
-            '',
-            'Merge each in turn. Stay on the branch the checkout is already on; switch to nothing else.',
-            'On a conflict: abort that merge, record it, carry on with the next. Never resolve one.',
-            'Remove the worktree of each branch that merged cleanly. Leave the rest.',
-            'Do not push.',
-            '',
-            RULES,
-          ].join('\n'),
-          { agentType: IMPLEMENTER, schema: MERGE, label: `merge:${issue}`, phase: 'Merge' },
-        )
-
-  const byIncrement = new Map((merge && merge.results ? merge.results : []).map((r) => [String(r.increment), r]))
-
-  for (const r of accepted) {
-    const m = byIncrement.get(String(r.inc.id))
-    if (m && m.merged) {
-      mergedIds.add(r.inc.id)
-      outcomes.push({
-        increment: r.inc.id,
-        status: 'merged',
-        branch: r.branch,
-        sha: m.sha || r.sha,
-        rounds: r.rounds,
-        summary: r.summary,
-        preexisting: r.preexisting,
-        observations: r.observations,
-      })
-    } else {
-      outcomes.push({
-        increment: r.inc.id,
-        status: 'conflicted',
-        branch: r.branch,
-        worktree: r.worktree,
-        rounds: r.rounds,
-        conflict: m ? m.conflict || 'unspecified' : 'the merge step reported nothing for this increment',
-      })
-    }
   }
 }
 

@@ -35,9 +35,9 @@ Persist through the project's `issue-backend` skill. Where it does not exist, st
 
 You are the only place that sees the whole issue at once. Decide now.
 
-**What an increment costs.** Three agent dispatches as a floor - implement, review, commit - plus
-two per repair round, plus a share of the merge. Every dispatch re-pays a fresh system prompt, the
-CLAUDE.md hierarchy and the project rules. A cut adds a dispatch set. It halves nothing.
+**What an increment costs.** Two agent dispatches as a floor - implement, review - plus one per
+repair round. Every dispatch re-pays a fresh system prompt, the CLAUDE.md hierarchy and the project
+rules. A cut adds a dispatch set, and its reviews run one after another. It halves nothing.
 
 **Cut only where one holds:**
 

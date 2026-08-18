@@ -238,33 +238,37 @@ const fs=require('fs')
 const src=fs.readFileSync('plugins/forge/workflows/work.js','utf8').replace('export const meta','const meta')
 const run=(a,{verdicts={},conflicts=[]}={})=>{
   const calls=[]
+  const live={review:0,peak:0}
   const agent=async(prompt,o)=>{
     calls.push(o.label)
-    if(o.label.startsWith('merge')){
-      const ids=[...prompt.matchAll(/^ {2}(\S+): /gm)].map(m=>m[1])
-      return {results:ids.map(id=>({increment:id,merged:!conflicts.includes(id),sha:'s',conflict:'x'}))}
+    if(o.label.startsWith('review')){
+      live.review++;live.peak=Math.max(live.peak,live.review)
+      await new Promise(r=>setTimeout(r,1))
+      live.review--
     }
     const inc=(o.label.split(':')[1]||'').split('/')[1]||'1'
-    if(/^(implement|repair)/.test(o.label)) return {status:'implemented',branch:'b',worktree:a.increments?'/wt':'',base:'b0',summary:'s'}
-    if(o.label.startsWith('review')){const q=verdicts[inc]||[];return q.shift()??{pass:true,failed:[]}}
-    return {committed:true,sha:'c'}
+    if(/^(implement|repair)/.test(o.label)) return {status:'implemented',branch:'b',worktree:a.increments?'/wt':'',base:'b0',sha:'c',summary:'s'}
+    const q=verdicts[inc]||[]
+    return q.shift()??{pass:true,failed:[],merged:!conflicts.includes(inc)}
   }
   return new Function('agent','phase','log','parallel','args',`return (async () => {${src}})()`)
-    (agent,()=>{},()=>{},t=>Promise.all(t.map(f=>f())),a).then(r=>({r,calls}))
+    (agent,()=>{},()=>{},t=>Promise.all(t.map(f=>f())),a).then(r=>({r,calls,peak:live.peak}))
 }
 const st=r=>Object.fromEntries((r.increments||[]).map(i=>[i.increment,i.status]))
 const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.stringify(a));process.exit(1)}}
 ;(async()=>{
   let {r,calls}=await run('1')
   eq(r.status,'done','uncut issue')
-  eq(calls,['implement:1','review:1:0','commit:1'],'uncut dispatch order')
+  eq(calls,['implement:1','review:1:0'],'uncut dispatch order')
 
-  ;({r,calls}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:[]}]}))
+  let peak
+  ;({r,calls,peak}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:[]}]}))
   eq(calls.slice(0,2),['implement:1/a','implement:1/b'],'independent increments did not run together')
   eq(st(r),{a:'merged',b:'merged'},'independent outcomes')
+  eq(peak,1,'two reviewers merged into the issue branch at once')
 
   ;({r,calls}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:['a']}]}))
-  eq(calls.indexOf('implement:1/b')>calls.indexOf('merge:1'),true,'a dependent started before its dependency merged')
+  eq(calls.indexOf('implement:1/b')>calls.indexOf('review:1/a:0'),true,'a dependent started before its dependency merged')
 
   ;({r}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:['a']},{id:'c',dependsOn:[]}]},
     {verdicts:{a:[{pass:false,failed:['AC1']},{pass:false,failed:['AC1']}]}}))

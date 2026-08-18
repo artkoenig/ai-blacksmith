@@ -5,8 +5,11 @@ paths:
 
 # The run loop
 
-- `work.js` is the only workflow. It runs one wave per dependency level: implement, review, repair,
-  merge.
+- `work.js` is the only workflow. It runs one wave per dependency level: implement, review, repair.
+  The implementer commits every round; the reviewer merges the increment it passes. No step of the
+  run does either on its own.
+- Reviews of a cut issue are serialized through one gate: two reviewers merging into the issue
+  branch at once would race in the one checkout. Implementations still run in parallel.
 - Every intermediate result stays in a script variable. Nothing an agent returns is echoed into the
   orchestrator context.
 - `agentPrefix` resolves the agent names. Installed it is `forge:`; in this repository it is `""`.
