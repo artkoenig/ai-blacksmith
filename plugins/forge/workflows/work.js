@@ -180,6 +180,8 @@ async function runIncrement(inc) {
           ]),
       '5. Implement the change. Run forge-test once when you are done.',
       '6. Stage with `git add -A`. Do not commit. Unstaged files are invisible to the review.',
+      '   Your memory file is part of the work: write it inside your workspace, never in the',
+      '   main checkout, or it stays uncommitted.',
       '',
       'Return status "blocked" with a blocker rather than guessing where the increment is unworkable.',
       solo
@@ -354,6 +356,8 @@ while (pending.size) {
             `Switch the main checkout to ${issueBranch} and merge each in turn.`,
             'On a conflict: abort that merge, record it, carry on with the next. Never resolve one.',
             'Remove the worktree of each branch that merged cleanly. Leave the rest.',
+            `If \`.claude/agent-memory/\` is dirty in the checkout afterwards, an implementer wrote`,
+            `its memory outside its worktree. Commit it on ${issueBranch} as "${issue}: agent memory".`,
             'Do not push.',
             '',
             RULES,

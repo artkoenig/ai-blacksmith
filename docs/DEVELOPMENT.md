@@ -12,6 +12,7 @@ skills and agents, from the working tree.
 .claude/skills/issue-backend  this repository's own adapter - GitHub Issues, not a symlink
 .forge/config.json            forge-test runs test.sh
 .forge/context.jsonl          one line per agent start, plus copies under .forge/context/ (both ignored)
+.claude/agent-memory/         the implementer's map of this project - tracked, and it must stay tracked
 ```
 
 Edit the file under `plugins/forge/`. Never edit through the symlink path.
@@ -53,13 +54,13 @@ to a new one, restart.
 ## Checks
 
 ```bash
-./test.sh          # five suites, no Claude Code session needed
+./test.sh          # six suites, no Claude Code session needed
 forge-test         # the same, through the wrapper: 0 or 1
 ```
 
 `test.sh` covers the manifest and syntax, the wrapper contract against a fixture project, every hook
-decision, the startup measurement against a fixture agent and a synthetic transcript, and the
-workflow's control flow against stubbed agents - wave order, stall detection,
+decision, the startup measurement against a fixture agent and a synthetic transcript, that the agent memory
+is tracked and inside its budget, and the workflow's control flow against stubbed agents - wave order, stall detection,
 skipped dependents, merge conflicts, a missing issue id.
 
 ## Where an agent's transcript lives
@@ -77,6 +78,19 @@ measure anything it cannot attribute by `agentId` - measuring the file it was ha
 the session's tokens and tool calls under the agent's name. A missing number is the expected
 failure; a wrong one is not. The estimate from `SubagentStart` reads files, not the transcript, so
 it holds either way.
+
+## Auto memory, observed off
+
+`.claude/agent-memory/implementer/MEMORY.md` is tracked, and `/forge:context` measures it at 640
+estimated tokens. It does not reach the agent here. Adding it moved `est` by 709 tokens and `start`
+by 29 - the longer task prompt, nothing else - and an implementer asked what it knew answered `no
+memory`. Its transcript carries the task, the preloaded skill and the skill listing, and no memory
+attachment.
+
+Nothing in the repository causes this: `autoMemoryEnabled` defaults to on and no setting or
+environment variable here turns it off, so the gate is account-side. The file is committed and
+correct; it starts paying the moment auto memory is on. `/forge:context` is what makes the
+difference visible - a source that never moves `start` reaches nobody.
 
 ## Still unverified
 

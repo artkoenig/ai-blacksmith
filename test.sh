@@ -159,6 +159,21 @@ echo '{"cwd":"/nonexistent","agent_type":"forge:prober"}' | node plugins/forge/s
   || { fail context "--dump did not list the saved copies"; S=1; }
 [ "$S" = 0 ] && ok "context measurement"
 
+# --- committed memory -------------------------------------------------------
+# Project memory is the whole reason an agent gets cheaper over time. Ignored or
+# untracked, it is rebuilt from scratch on every issue and nobody notices.
+if git -C . rev-parse --git-dir >/dev/null 2>&1; then
+  S=0
+  git check-ignore -q .claude/agent-memory/probe/MEMORY.md \
+    && { fail memory ".gitignore swallows .claude/agent-memory/"; S=1; }
+  for f in .claude/agent-memory/*/MEMORY.md; do
+    [ -e "$f" ] || { fail memory "no agent memory is checked in"; S=1; break; }
+    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail memory "$f is not tracked"; S=1; }
+    [ "$(wc -l < "$f")" -le 200 ] || { fail memory "$f is past the 200 line index budget"; S=1; }
+  done
+  [ "$S" = 0 ] && ok "committed memory"
+fi
+
 # --- workflow control flow --------------------------------------------------
 node - <<'JS' || fail workflow "the control flow did not behave as expected"
 const fs=require('fs')

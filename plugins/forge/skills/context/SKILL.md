@@ -20,6 +20,9 @@ runs. Then one line of interpretation.
 
 - `est` rising run over run means a source file is growing. Almost always `MEMORY.md` past its
   200-line index, or a skill that turned into prose.
+- A source that appears in `--sources` but never moves `start` is on disk and reaches nobody. For
+  `MEMORY.md` that means auto memory is off for the account: the file is committed, the agent never
+  sees it, and every issue pays for a search it should not need.
 - `start` rising while `est` is flat is not the project's doing. Say so instead of hunting for it.
 - `start` minus `est` is roughly fixed per agent. A jump means the agent gained tools or skills.
 

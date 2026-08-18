@@ -26,6 +26,10 @@ conventions apply.
 As you write code, update your agent memory with patterns, conventions, and recurring issues you
 discover. As you write it, not at the end.
 
+Write it at `.claude/agent-memory/<you>/MEMORY.md` inside the worktree you were given. It is a
+tracked file, so `git add -A` there carries it into the commit. Written into the main checkout
+instead, it belongs to no commit and nobody will ever commit it.
+
 - One line per durable fact.
 - Detail goes in a topic file beside the index, linked from it.
 - Merge or delete stale lines.
