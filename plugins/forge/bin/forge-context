@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# What each agent carried into its first turn.
+#
+#   forge-context                    -> one line per recent run: measured start, estimate, tool calls
+#   forge-context --sources [id]     -> that run's context broken down by source
+#   forge-context --dump [id]        -> the saved copies of that run's sources
+#   forge-context --agent <name>     -> only that agent's runs
+#
+# `id` is an agent id from the table, or `latest`. Always exits 0.
+set -uo pipefail
+
+ROOT="$("$(dirname "$0")/forge-cfg" root)"
+exec node -e '
+const fs = require("fs")
+const path = require("path")
+const [root, mode, arg] = process.argv.slice(1)
+
+const read = (file) => {
+  try {
+    return fs.readFileSync(path.join(root, ".forge", file), "utf8").split("\n").filter(Boolean)
+      .map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  } catch { return [] }
+}
+const runs = read("context.jsonl")
+if (!runs.length) { console.log("no context recorded yet - it is written when an agent starts"); process.exit(0) }
+
+const metrics = new Map()
+for (const m of read("metrics.jsonl")) if (m.agentId) metrics.set(m.agentId, m)
+
+const short = (id) => String(id).slice(0, 8)
+const num = (n) => (n == null ? "-" : String(n))
+const table = (rows) => {
+  const w = rows[0].map((_, i) => Math.max(...rows.map((r) => String(r[i]).length)))
+  for (const r of rows) console.log(r.map((c, i) => (i ? String(c).padStart(w[i]) : String(c).padEnd(w[i]))).join("  "))
+}
+
+const pick = (id) => (!id || id === "latest" ? runs[runs.length - 1] : runs.find((r) => r.agentId === id || r.agentId.startsWith(id)))
+
+if (mode === "--sources" || mode === "--dump") {
+  const run = pick(arg)
+  if (!run) { console.log("no such run: " + arg); process.exit(0) }
+  const m = metrics.get(run.agentId) || {}
+  if (mode === "--dump") {
+    console.log(run.dump)
+    for (const s of run.sources) if (s.dump) console.log("  " + s.dump + "  <- " + s.path)
+    process.exit(0)
+  }
+  console.log(`${run.agent}  ${short(run.agentId)}  ${run.at}`)
+  const rows = [["source", "est tok", "lines", "loaded"]]
+  for (const s of [...run.sources].sort((a, b) => b.estTokens - a.estTokens)) {
+    rows.push([`${s.kind}: ${s.path}`, s.estTokens, s.lines, s.loaded ? "yes" : "on demand"])
+  }
+  rows.push(["estimated from sources", run.estTokens, "", ""])
+  if (m.startTokens != null) {
+    rows.push(["measured at first turn", m.startTokens, "", ""])
+    rows.push(["unattributed (system prompt, tools, task)", m.startTokens - run.estTokens, "", ""])
+  }
+  table(rows)
+  process.exit(0)
+}
+
+const wanted = mode === "--agent" ? arg : null
+const rows = [["agent", "start", "est", "prompt", "peak", "calls", "id"]]
+for (const run of runs.slice(-40)) {
+  if (wanted && !String(run.agent).endsWith(wanted)) continue
+  const m = metrics.get(run.agentId) || {}
+  rows.push([run.agent, num(m.startTokens), run.estTokens, num(m.promptTokens), num(m.peakTokens), num(m.toolCalls), short(run.agentId)])
+}
+if (rows.length === 1) { console.log("no runs recorded for " + wanted); process.exit(0) }
+table(rows)
+console.log("start = tokens the model actually saw on its first turn. est = sum of the source files.")
+' "$ROOT" "${1:-}" "${2:-}"

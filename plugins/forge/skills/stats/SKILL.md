@@ -16,4 +16,7 @@ consulted or not being written well - say that, and name the likely cause.
 
 `toolCalls` comes from a transcript written asynchronously. Treat it as a trend, not an audit.
 
+`startTokens`, `promptTokens` and `peakTokens` are read from the same transcript. They answer what a
+run cost to start and how far it grew - `/forge:context` breaks the start down by source.
+
 Report the table and one line of interpretation. Nothing else.

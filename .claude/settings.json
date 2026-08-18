@@ -1,4 +1,6 @@
 {
+  "autoMemoryEnabled": true,
+  "env": { "CLAUDE_CODE_REMOTE_MEMORY_DIR": "~/.claude/remote-memory" },
   "hooks": {
     "PreToolUse": [
       {
@@ -19,6 +21,13 @@
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/plugins/forge/scripts/compact-output.js"], "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/plugins/forge/scripts/subagent-start.js"], "timeout": 10 }
         ]
       }
     ],

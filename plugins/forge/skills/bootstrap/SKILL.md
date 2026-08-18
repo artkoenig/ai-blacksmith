@@ -27,7 +27,9 @@ Report each in one line, and what breaks without it.
 
 - **Auto memory.** Read `autoMemoryEnabled` from user and project settings, check
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. Off means the agents' `memory:` field does nothing and they
-  relearn the project every run.
+  relearn the project every run - the subagent launches without the memory instructions and without
+  the memory tool. In a cloud session it is off until `CLAUDE_CODE_REMOTE_MEMORY_DIR` is set; set it
+  in the project settings `env` block, which a cloud session reads from the repository.
 - **Workflows.** `/forge:work` is a workflow. Needs Claude Code v2.1.154 or later and a paid plan;
   on Pro, enabled in `/config`. Off means there is no execution path.
 
@@ -67,6 +69,7 @@ Merge into `.claude/settings.json`, keeping existing keys:
   "permissions": {
     "allow": [
       "Bash(forge-test:*)", "Bash(forge-lint:*)", "Bash(forge-typecheck:*)", "Bash(forge-build:*)",
+      "Bash(forge-context:*)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
       "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)",
       "Bash(git merge:*)", "Bash(cd:*)"
@@ -81,10 +84,18 @@ runs checks at the base commit, and because cut issues get a worktree per increm
 Never add deny rules for the raw runners. A deny rule is evaluated whatever the guard hook returns,
 so it blocks the rewrite instead of saving a turn.
 
-Append to `.gitignore`: `.forge/last/`, `.forge/metrics.jsonl`, `.claude/agent-memory-local/`,
-`.claude/worktrees/`.
+Append to `.gitignore`: `.forge/last/`, `.forge/metrics.jsonl`, `.forge/context.jsonl`,
+`.forge/context/`, `.claude/agent-memory-local/`, `.claude/worktrees/`.
 
-Commit `.claude/agent-memory/`. That is how agent knowledge is shared.
+`.claude/agent-memory/` is committed. That is how agent knowledge is shared, and an agent that
+starts from a map it cannot read costs a search on every issue. Prove it is not ignored:
+
+```bash
+git check-ignore -v .claude/agent-memory/probe/MEMORY.md
+```
+
+Anything printed names the rule that swallows it - usually a blanket `.claude/`. Append
+`!.claude/agent-memory/` and check again.
 
 ## 4. Verify, then report
 
