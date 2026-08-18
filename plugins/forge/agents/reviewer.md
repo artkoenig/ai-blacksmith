@@ -4,7 +4,7 @@ description: Judges a staged change against the acceptance criteria of an issue 
 model: inherit
 effort: medium
 maxTurns: 18
-tools: Read, Grep, Bash, Write, Edit, Skill
+tools: Read, Grep, Bash, Write, Edit, Skill, ToolSearch, mcp__github__issue_read
 skills:
   - forge:agent-protocol
   - agent-protocol

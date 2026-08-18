@@ -4,7 +4,7 @@ description: Implements one increment of an issue - branch, code, checks, commit
 model: inherit
 effort: medium
 maxTurns: 30
-tools: Read, Edit, Write, Bash, Grep, Glob, Skill
+tools: Read, Edit, Write, Bash, Grep, Glob, Skill, ToolSearch, mcp__github__issue_read
 skills:
   - forge:agent-protocol
   - agent-protocol
