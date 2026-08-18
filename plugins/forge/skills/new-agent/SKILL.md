@@ -28,9 +28,9 @@ Copy `${CLAUDE_SKILL_DIR}/agent-template.md` to `.claude/agents/<domain>.md`:
 
 ## 3. Write down what the domain needs
 
-Auto memory is off, so the agent carries nothing between runs. Put what it must know - where the
-domain's code lives, which command exercises it, which conventions apply - in a `paths`-scoped
-rule under `.claude/rules/`, or in the agent's own body where it is short.
+The agent carries nothing between runs. Put what it must know - where the domain's code lives,
+which command exercises it, which conventions apply - in a `paths`-scoped rule under
+`.claude/rules/`, or in the agent's own body where it is short.
 
 ## 4. Report
 

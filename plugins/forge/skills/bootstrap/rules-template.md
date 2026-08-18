@@ -5,4 +5,4 @@
   or `1`; escalate with `--failing`, then `--detail <id>`.
 - Raw runners are rewritten or refused.
 - Issue storage: `.claude/skills/issue-backend/SKILL.md`.
-- Agent knowledge: `.claude/agent-memory/<agent>/MEMORY.md`, committed, index under 200 lines.
+- Project knowledge: `.claude/rules/*.md`, committed, one topic per file.

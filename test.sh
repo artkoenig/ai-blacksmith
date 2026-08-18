@@ -84,13 +84,11 @@ node -e '
 # --- context measurement ----------------------------------------------------
 CTX="$(mktemp -d)"
 trap 'rm -rf "$FIX" "$CTX"' EXIT
-mkdir -p "$CTX/.forge" "$CTX/.claude/agents" "$CTX/.claude/skills/probe" \
-  "$CTX/.claude/agent-memory/prober" "$CTX/.claude/rules"
+mkdir -p "$CTX/.forge" "$CTX/.claude/agents" "$CTX/.claude/skills/probe" "$CTX/.claude/rules"
 printf '{ "version": 1 }\n' > "$CTX/.forge/config.json"
 cat > "$CTX/.claude/agents/prober.md" <<'MD'
 ---
 name: prober
-memory: project
 skills:
   - forge:probe
   - probe
@@ -98,8 +96,6 @@ skills:
 The agent body.
 MD
 printf '# probe\nA skill body.\n' > "$CTX/.claude/skills/probe/SKILL.md"
-printf 'memory line\n%.0s' $(seq 250) > "$CTX/.claude/agent-memory/prober/MEMORY.md"
-printf 'detail\n' > "$CTX/.claude/agent-memory/prober/topic.md"
 printf 'a project rule\n' > "$CTX/.claude/rules/forge.md"
 # The layout Claude Code writes: the session transcript, and one file per agent
 # beside it. The session file is a decoy here - measuring it is the bug.
@@ -129,11 +125,8 @@ CTX="$CTX" node -e '
   const bad=(m)=>{console.log(m);process.exit(1)}
   const run=last("context.jsonl")
   const kinds=run.sources.map(s=>s.kind)
-  for (const k of ["agent","memory","skill","rules"]) if(!kinds.includes(k)) bad("no "+k+" source recorded")
+  for (const k of ["agent","skill","rules"]) if(!kinds.includes(k)) bad("no "+k+" source recorded")
   if (kinds.filter(k=>k==="skill").length!==1) bad("a skill named twice was counted twice")
-  const mem=run.sources.find(s=>s.kind==="memory")
-  if (mem.lines!==200||!(mem.bytesFull>mem.bytes)) bad("MEMORY.md was not capped at its index")
-  if (!run.sources.some(s=>s.kind==="memory-topic"&&s.loaded===false)) bad("a topic file was counted as loaded")
   if (run.estTokens!==run.sources.filter(s=>s.loaded).reduce((n,s)=>n+s.estTokens,0)) bad("the estimate does not add up")
   const dump=path.join(root,run.dump)
   if (!fs.existsSync(path.join(dump,"index.json"))) bad("no index.json beside the copies")
@@ -155,23 +148,22 @@ echo '{"cwd":"/nonexistent","agent_type":"forge:prober"}' | node plugins/forge/s
   || { fail context "forge-context did not list the run"; S=1; }
 (cd "$CTX" && "$BIN/forge-context" --sources latest) | grep -q "unattributed" \
   || { fail context "--sources did not name the unattributed remainder"; S=1; }
-(cd "$CTX" && "$BIN/forge-context" --dump latest) | grep -q "MEMORY.md" \
+(cd "$CTX" && "$BIN/forge-context" --dump latest) | grep -q "SKILL.md" \
   || { fail context "--dump did not list the saved copies"; S=1; }
 [ "$S" = 0 ] && ok "context measurement"
 
-# --- committed memory -------------------------------------------------------
-# Project memory is the whole reason an agent gets cheaper over time. Ignored or
-# untracked, it is rebuilt from scratch on every issue and nobody notices.
+# --- committed rules --------------------------------------------------------
+# The rules are the only channel that carries project knowledge into an agent.
+# Ignored or untracked, every run rediscovers what was already written down.
 if git -C . rev-parse --git-dir >/dev/null 2>&1; then
   S=0
-  git check-ignore -q .claude/agent-memory/probe/MEMORY.md \
-    && { fail memory ".gitignore swallows .claude/agent-memory/"; S=1; }
-  for f in .claude/agent-memory/*/MEMORY.md; do
-    [ -e "$f" ] || { fail memory "no agent memory is checked in"; S=1; break; }
-    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail memory "$f is not tracked"; S=1; }
-    [ "$(wc -l < "$f")" -le 200 ] || { fail memory "$f is past the 200 line index budget"; S=1; }
+  git check-ignore -q .claude/rules/probe.md \
+    && { fail rules ".gitignore swallows .claude/rules/"; S=1; }
+  for f in .claude/rules/*.md; do
+    [ -e "$f" ] || { fail rules "no project rule is checked in"; S=1; break; }
+    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail rules "$f is not tracked"; S=1; }
   done
-  [ "$S" = 0 ] && ok "committed memory"
+  [ "$S" = 0 ] && ok "committed rules"
 fi
 
 # --- workflow control flow --------------------------------------------------
