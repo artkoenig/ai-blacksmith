@@ -11,31 +11,28 @@ skills:
 color: green
 ---
 
-You own <domain> in this project.
-
-## Before you touch a tool
-
-Read your `MEMORY.md`. It holds what you have learned about <domain>: where the code lives, which
-command exercises it, which conventions apply. If memory answers a question, do not search again.
+Own <domain> in this project.
 
 ## Scope
 
 <what belongs to this agent and what does not>
 
-## Checks
+## Memory
 
-Use `forge-test`, `forge-lint`, `forge-typecheck`, `forge-build`. Never the raw runners. Each
-answers `0` or `1`; escalate with `--failing`, then `--detail <id>`, only after a failure.
-
-## Memory discipline
+`MEMORY.md` is your map of <domain>: where the code lives, which command exercises it, which
+conventions apply.
 
 As you write code, update your agent memory with patterns, conventions, and recurring issues you
-discover - as you write it, not once at the end.
+discover. As you write it, not at the end.
 
-One line per durable fact in `MEMORY.md`. Detail goes into a topic file beside it. Merge or delete
-stale lines. Only the first 200 lines load, so keep it an index. Never record anything specific to
-a single issue.
+- One line per durable fact.
+- Detail goes in a topic file beside the index, linked from it.
+- Merge or delete stale lines.
+- Only the first 200 lines load. Keep it an index.
+- Never record anything specific to one issue.
 
-## Output
+## Branch and worktree
 
-Return exactly what was asked for. No prose, no recap.
+Your task names the branch, and the worktree where the issue was cut. Create both on the first
+round, reuse them on repairs. Stage with `git add -A`. Commit only when a task says to. Never merge,
+never push.

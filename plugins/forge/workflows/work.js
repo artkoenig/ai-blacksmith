@@ -12,22 +12,12 @@ export const meta = {
   ],
 }
 
-// Each increment's loop runs until its verdict converges. Convergence is one of
-// two things:
-//
-//   pass      every criterion holds - the fixed point we want
-//   stalled   a round produced exactly the same failed set as the round before
-//             it, so the implementer is no longer moving and further rounds
-//             would burn tokens on the same wall
-//
-// MAX_ROUNDS is only a runaway backstop for a loop that oscillates between two
-// different failed sets forever. Stall detection normally ends the loop first.
+// A loop converges on `pass`, or stalls when a round repeats the previous
+// round's failed set. MAX_ROUNDS is the backstop for a verdict that oscillates.
 const MAX_ROUNDS = 8
 
-// The reviewer reads the issue itself and judges the diff. It is handed nothing
-// the implementer wrote about its own work - no summary of what was built, no
-// restatement of the criteria - because a reviewer reading the implementer's
-// account of the change is grading the account, not the change.
+// The reviewer reads the issue itself. Nothing the implementer wrote about its
+// own work reaches it: an account of the change would be what it graded.
 const RESULT = {
   type: 'object',
   required: ['status', 'branch', 'worktree', 'summary'],
@@ -99,10 +89,7 @@ const MERGE = {
   },
 }
 
-// ---------------------------------------------------------------------------
-// Input. A bare issue id is one increment covering every criterion in the
-// issue, which is what an uncut issue means.
-// ---------------------------------------------------------------------------
+// A bare issue id is one increment covering every criterion.
 const input = typeof args === 'string' ? { issue: args.trim() } : args || {}
 const issue = input.issue ? String(input.issue).trim() : ''
 const maxRounds = Number(input.maxRounds) > 0 ? Number(input.maxRounds) : MAX_ROUNDS
@@ -122,12 +109,9 @@ const increments =
       }))
     : [{ id: '1', title: '', criteria: [], dependsOn: [], agent: 'forge:implementer' }]
 
-const RULES = [
-  'You cannot ask the user anything. Decide and proceed.',
-  'Use forge-test, forge-lint, forge-typecheck, forge-build. Never call the raw runners.',
-  'Escalate detail only after a failure: bare command, then --failing, then --detail <id>.',
-  'Return the requested object. No prose, no summary of your steps.',
-].join('\n')
+// Everything else an agent works by is in the agent-protocol skill, preloaded
+// into both. Repeating it here would only let the two drift apart.
+const RULES = 'You cannot ask the user anything. Decide and proceed.'
 
 const criteriaLine = (inc) =>
   inc.criteria.length
@@ -161,15 +145,9 @@ if (!prep) {
 
 const issueBranch = prep.branch
 
-// ---------------------------------------------------------------------------
-// One increment: implement, review until the verdict converges, commit on its
-// own branch.
-//
-// A worktree exists only to keep concurrent implementers off each other - two
-// editing one checkout would overwrite each other. An uncut issue has nothing
-// running beside it, so it works in the checkout on the issue branch directly:
-// no worktree to create, none to clean up, and the common case stays cheap.
-// ---------------------------------------------------------------------------
+// A worktree exists only to keep concurrent implementers off each other. An
+// uncut issue has none running beside it, so it works in the checkout: nothing
+// to create, nothing to clean up.
 const solo = increments.length === 1
 
 async function runIncrement(inc) {
@@ -182,12 +160,10 @@ async function runIncrement(inc) {
       `Implement increment ${inc.id} of issue ${issue}.${inc.title ? ` ${inc.title}` : ''}`,
       '',
       'Steps:',
-      `1. Read issue ${issue} through the project's issue-backend skill. It gives you a goal and`,
-      '   acceptance criteria and nothing else - no file list, no plan. Finding your way is your job.',
+      `1. Read issue ${issue} through the project's issue-backend skill. Goal and criteria only -`,
+      '   no file list, no plan. Find your own way.',
       `2. ${criteriaLine(inc)}`,
-      '3. Consult your memory before any search tool. It holds the project map you built on earlier',
-      '   runs. Search only for what memory does not answer. As you write code, update your agent',
-      '   memory with patterns, conventions, and recurring issues you discover.',
+      '3. Read your memory before any search tool. Search only what it does not answer.',
       ...(solo
         ? [`4. The checkout is already on ${branch}. Work there.`]
         : [
@@ -197,11 +173,9 @@ async function runIncrement(inc) {
             '   Prefix every command with a `cd` into that worktree.',
           ]),
       '5. Implement the change. Run forge-test once when you are done.',
+      '6. Stage with `git add -A`. Do not commit. Unstaged files are invisible to the review.',
       '',
-      'Stage everything with `git add -A`. Do not commit.',
-      'Staging is what makes your work visible to the review, new files included.',
-      '',
-      'Return status "blocked" with a blocker instead of guessing when the increment is unworkable.',
+      'Return status "blocked" with a blocker rather than guessing where the increment is unworkable.',
       solo
         ? 'Return an empty worktree path and the sha the branch was cut from.'
         : 'Return the absolute path of the worktree and the sha the branch was cut from.',
@@ -222,22 +196,11 @@ async function runIncrement(inc) {
     wt
       ? `The work sits in the worktree ${wt}, on branch ${branch}, staged and uncommitted.`
       : `The work sits in the checkout, on branch ${branch}, staged and uncommitted.`,
-    `The diff to judge is \`${where}git diff ${base}\`: everything this increment produced, new`,
-    'files included. Use exactly that base; do not guess a base branch name.',
-    ...(wt ? ['Run every check inside that worktree too. The main checkout does not carry this change.'] : []),
-    '',
-    `Read issue ${issue} yourself, through the project's issue-backend skill. Nobody hands you a`,
-    'summary of the change - you have the issue and the diff, and that is the point.',
-    `${criteriaLine(inc)}`,
-    '',
-    'A red check is a fact you report. It is a finding only if this change caused it. When the diff',
-    `touched the failing code, prove it: \`git worktree add <tmp-dir> ${base}\`, run the same check`,
-    'there, remove the worktree. Red at the base too means it was already broken - list it under',
-    'preexisting and move on.',
-    '',
-    'You may write and run code to settle a doubt - a probe, a repro, a throwaway harness - but only',
-    'inside a worktree you built outside the checkout. Writes into the checkout are refused. A probe',
-    'that reaches the diff becomes a change no criterion asked for.',
+    `The diff to judge is \`${where}git diff ${base}\`. Use exactly that base.`,
+    ...(wt ? [`Run every check there too: \`${where}<command>\`. The main checkout lacks this change.`] : []),
+    `Read issue ${issue} yourself, through the project's issue-backend skill.`,
+    criteriaLine(inc),
+    `Prove a red check at the base before filing it: \`git worktree add <tmp-dir> ${base}\`.`,
   ].join('\n')
 
   let verdict = null
@@ -245,10 +208,8 @@ async function runIncrement(inc) {
   let round = 0
 
   while (true) {
-    // A fresh reviewer every round, with no memory, judging the whole
-    // accumulated diff rather than the last round's increment. Judging only the
-    // increment would report criteria an earlier round already satisfied as
-    // unmet, and would miss a repair that broke one of them.
+    // A fresh reviewer each round, judging the whole accumulated diff. Judging
+    // only the latest edit would miss a repair that broke an earlier criterion.
     verdict = await agent(
       [
         `Review increment ${inc.id} of issue ${issue}.`,
@@ -290,9 +251,8 @@ async function runIncrement(inc) {
         `Fix only these criteria: ${(verdict.failed || []).join(', ')}.`,
         ...(verdict.notes || []).map((n) => `- ${n}`),
         '',
-        "Each line above carries the reviewer's reproduction. Reproduce it before you change",
-        'anything, so you fix the defect rather than the sentence describing it.',
-        'Change nothing else. Re-run only the checks that cover these criteria.',
+        'Reproduce each finding before you change anything.',
+        'Change nothing else. Re-run only the checks covering these criteria.',
         'Stage with `git add -A`, do not commit.',
         '',
         RULES,
@@ -311,12 +271,9 @@ async function runIncrement(inc) {
     [
       `Commit increment ${inc.id} of issue ${issue}.`,
       '',
-      wt
-        ? `Commit inside ${wt}, which is checked out on ${branch}. Everything is staged.`
-        : `Commit in the checkout, on ${branch}. Everything is staged.`,
-      'Do not push. Do not open a pull request. Do not merge.',
-      `Message: first line "${issue}: ${run.summary}", then a blank line, then one bullet per`,
-      'acceptance criterion this increment met.',
+      wt ? `Commit inside ${wt}, on ${branch}. Everything is staged.` : `Commit in the checkout, on ${branch}.`,
+      'Do not push. Do not merge.',
+      `Message: "${issue}: ${run.summary}", a blank line, then one bullet per criterion met.`,
       '',
       RULES,
     ].join('\n'),
@@ -339,11 +296,8 @@ async function runIncrement(inc) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Waves. An increment runs once every increment it depends on has merged, so a
-// wave is a barrier by necessity. Within a wave the increments are independent
-// by the cut's own assertion and run concurrently.
-// ---------------------------------------------------------------------------
+// An increment runs once everything it depends on has merged, so a wave is a
+// barrier. Within a wave the cut asserts independence, so they run concurrently.
 const pending = new Map(increments.map((inc) => [inc.id, inc]))
 const mergedIds = new Set()
 const outcomes = []
@@ -380,10 +334,8 @@ while (pending.size) {
 
   if (!accepted.length) continue
 
-  // Merging is serialized: two merges into one branch cannot run at the same
-  // time. A conflict is reported, never resolved - two agent-written changes to
-  // the same lines are exactly where an automatic resolution would produce
-  // something neither agent intended.
+  // Serialized: two merges into one branch cannot run at once. A conflict is
+  // reported, never resolved.
   phase('Merge')
   const merge =
     solo
@@ -393,11 +345,9 @@ while (pending.size) {
             `Merge accepted increments of issue ${issue} onto ${issueBranch}, in this order:`,
             ...accepted.map((r) => `  ${r.inc.id}: ${r.branch}`),
             '',
-            `Switch the main checkout to ${issueBranch} and merge each branch in turn.`,
-            'On a conflict: abort that merge, leave its branch untouched, record the conflict, and',
-            'carry on with the next one. Never resolve a conflict yourself.',
-            'After a branch merges cleanly, remove its worktree with `git worktree remove`.',
-            'Leave the worktree of a branch that conflicted.',
+            `Switch the main checkout to ${issueBranch} and merge each in turn.`,
+            'On a conflict: abort that merge, record it, carry on with the next. Never resolve one.',
+            'Remove the worktree of each branch that merged cleanly. Leave the rest.',
             'Do not push.',
             '',
             RULES,

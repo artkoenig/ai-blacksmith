@@ -1,62 +1,52 @@
 # forge
 
-Interview issues into shape, then execute them autonomously on the smallest possible token budget.
+Interview issues into shape. Execute them autonomously on the smallest token budget that works.
 
 ## The split
 
-**You and the main conversation write issues.** `/forge:issue` interviews you and stores an issue
-that holds a goal, numbered acceptance criteria, and what is out of scope. Nothing else - no file
-list, no plan. An issue enriched with a map rots: the next change to that area moves the code, and
-the run then trusts a map of somewhere the work no longer lives. The implementer finds its own way
-from the project map in its memory, and writes back what it learns; that map is maintained by the
-runs that use it. How issues are stored is up to the project: `/forge:bootstrap` writes an adapter
-skill for GitHub Issues, markdown files, or anything else you describe.
+**`/forge:issue` writes issues.** It interviews you and stores a goal, numbered acceptance criteria,
+and what is out of scope. Nothing else - no file list, no plan. A map written into an issue is
+maintained by nobody; the implementer navigates by the project map in its memory, which the runs
+maintain. Storage is per project: `/forge:bootstrap` writes an adapter for GitHub Issues, markdown
+files, or whatever you describe.
 
-**The same session decides whether to cut.** It has just settled the criteria, so it is the only
-place that sees the whole issue at once. It weighs what cutting costs - every increment is a floor
-of three agent dispatches, each re-paying a fresh system prompt and memory index - and cuts only
-when the parts can run in parallel, when one diff would be too large to review in a pass, or when
-one part must land before the next.
+**The same session decides the cut**, then starts the run. It is the only place that sees the whole
+issue at once.
 
-**A workflow executes them.** `/forge:work <id>` loops implementer and reviewer until the verdict
-converges, then commits. A cut issue runs one loop per increment: increments with no dependency
-between them run at the same time, each in its own worktree and on its own branch, and merge onto
-the issue branch in order once accepted. An uncut issue skips all of that and works in the checkout. No user interaction is possible during a run, by design. The result is a
-branch and a commit; push and pull requests stay your call.
-
-Each increment's loop ends on one of three things:
-
-- **pass** - every criterion holds. The work is committed.
-- **stalled** - a round produced exactly the same failed criteria as the round before it. The
-  implementer has stopped moving, so further rounds would burn tokens on the same wall. The staged
-  work stays on the branch for you.
-- **cap** - a runaway backstop at eight rounds, for a loop that oscillates between different failure
-  sets. Stall detection normally ends things first. Override with `maxRounds`.
-
-Every round gets a fresh reviewer with no memory. It reads the issue itself and judges the whole
-accumulated diff against the commit the branch was cut from - not just the latest edit, and never a
-summary written by whoever did the work. That is what catches a repair which fixed one criterion and
-broke another.
+**`/forge:work` executes.** One loop per increment: implement, review, repair until the verdict
+converges, commit. Independent increments run at the same time, each in its own worktree and branch,
+merged onto the issue branch in order. An uncut issue skips all of that and works in the checkout.
+No user interaction is possible during a run, by design. You get a branch and a commit; push and
+pull requests stay yours.
 
 ## Why it is cheap
 
 | Lever | What it does |
 | --- | --- |
-| The interview | The expensive exploration happens once, with you present, and lands in the issue. The implementer starts with the answer instead of searching. |
-| The workflow | The loop and every intermediate result live in script variables, not in a context window. Your conversation pays for the invocation and the final line. |
-| Wrapper commands | `forge-test` answers `0` or `1`. Details cost extra on purpose: `--failing`, then `--detail <id>`. |
+| Agent memory | The implementer's project map is committed to `.claude/agent-memory/` and grows. The first issue in an area pays for a search; the tenth pays for a read of the index. Nothing else in the plugin carries a file map. |
+| The workflow | The loop and every intermediate result live in script variables. Your conversation pays for the invocation and the final line. |
+| Wrapper commands | `forge-test` answers `0` or `1`. Detail costs extra on purpose: `--failing`, then `--detail <id>`. |
 | The guard hook | A raw `npm test` is rewritten to the wrapper before it runs, or refused with the wrapper named. |
-| The compaction hook | Bash output past a line budget reaches the agent as head + tail plus a path to the full log. stderr is never touched. |
-| Agent memory | The implementer's project map is committed to `.claude/agent-memory/` and grows. The first issue in an area pays for a search; the tenth should pay for a read of the index. This is the lever the whole budget rests on, which is why nothing else in the plugin carries a file map. |
-| Pre-existing red | The reviewer proves whether a failing check was already failing before it hands back a repair round. A round spent fixing something the change never broke is the most expensive kind of waste. |
+| The compaction hook | Bash output past a line budget arrives as head + tail plus a path to the full log. stderr is never touched. |
+| The cut | Cutting adds a dispatch set, so `/forge:issue` cuts only for parallelism, for a diff too large to review in one pass, or for a real dependency. |
+| Pre-existing red | The reviewer proves a failing check was already failing before it spends a repair round on it. |
+
+## Each increment's loop ends on
+
+- **pass** - every criterion holds. Committed.
+- **stalled** - a round repeated the previous round's failed set. The implementer stopped moving.
+- **cap** - eight rounds, for a verdict that oscillates. Override with `maxRounds`.
+
+A failed increment leaves its branch standing and its dependents skipped; its independent siblings
+still merge. A merge conflict is reported, never resolved.
 
 ## Commands
 
 | Command | Does |
 | --- | --- |
 | `/forge:bootstrap` | One-time project setup. Run this first. |
-| `/forge:issue` | Interview, write one issue, decide the cut, start the run. |
-| `/forge:work <id>` | Execute an issue autonomously - one loop per increment, looping until each review converges. Usually started for you by `/forge:issue`. |
+| `/forge:issue` | Interview, write the issue, decide the cut, start the run. |
+| `/forge:work <id>` | Execute an issue. Usually started for you by `/forge:issue`. |
 | `/forge:new-agent` | Add a project agent with its own memory. |
 | `/forge:stats` | Tool calls per agent run, over time. |
 
@@ -64,17 +54,15 @@ broke another.
 
 Two, on purpose.
 
-- **`forge:implementer`** - `memory: project`. Does all file, git and shell work. Records the
-  project map as it goes, so it stops rediscovering it.
-- **`forge:reviewer`** - no memory, on purpose. A reviewer that remembers its own verdicts drifts
-  toward confirming them. Every round gets a fresh one.
+- **`forge:implementer`** - `memory: project`. All file, git and shell work. Records the project map
+  as it goes.
+- **`forge:reviewer`** - no memory. A reviewer that remembers its own verdicts drifts toward
+  confirming them. It reads the issue itself, writes nothing into the checkout it judges, and builds
+  throwaway worktrees outside the checkout to run checks at the base or to settle a doubt with a
+  probe.
 
-  It reads the issue itself rather than being handed a summary, writes nothing into the checkout it
-  judges, and builds throwaway worktrees outside the checkout when it needs to run something against
-  another revision. That is how it separates a failure this change caused from one that was already
-  red - and how it settles a doubt with a probe without that probe landing in the diff.
-
-`/forge:new-agent` adds project agents from the same template when an area deserves its own memory.
+`/forge:new-agent` adds project agents from the same template. `/forge:issue` selects one per
+increment.
 
 ## Install
 
@@ -83,39 +71,33 @@ Two, on purpose.
 /plugin install forge@artkoenig-marketplace
 ```
 
-Install at user scope. A project-scope plugin loads only after the workspace trust dialog.
-
-Then, in the target repository:
-
-```
-/forge:bootstrap
-```
+Install at user scope - a project-scope plugin loads only after the workspace trust dialog. Then, in
+the target repository: `/forge:bootstrap`.
 
 ## Requirements
 
-- Claude Code v2.1.154 or later, and workflows available on your plan. On Pro, enable **Dynamic
-  workflows** in `/config`. Without workflows there is no `/forge:work`.
-- Auto memory enabled. With it off, the `memory:` field does nothing and the agents relearn the
-  project every run.
-- Node on `PATH`. The wrappers and hook scripts use it.
+- Claude Code v2.1.154 or later, workflows available on your plan. On Pro, enable **Dynamic
+  workflows** in `/config`. Without them there is no `/forge:work`.
+- Auto memory enabled. Off, the `memory:` field does nothing and agents relearn the project each run.
+- Node on `PATH`.
 
-`/forge:bootstrap` checks both preconditions and tells you what breaks if one is missing.
+`/forge:bootstrap` checks both and says what breaks.
 
 ## Output style
 
-The plugin ships **Forge Terse** with `force-for-plugin: true`, so it applies while the plugin is
-enabled. It is read once at session start, so it takes effect after `/clear` or in a new session.
+**Forge Terse** ships with `force-for-plugin: true`, so it applies while the plugin is enabled. It is
+read once at session start - `/clear` or a new session to pick it up.
 
-It does not reach subagents - Claude Code does not pass output styles into them. Agent brevity comes
-from the `agent-protocol` skill instead.
+It does not reach subagents; Claude Code does not pass output styles into them. Agent brevity comes
+from the `agent-protocol` skill.
 
 ## What it writes into your project
 
 ```
 .forge/config.json                       check commands and parsers
-.claude/worktrees/                       one per increment while a cut issue runs (gitignored)
 .forge/last/                             cached raw output (gitignored)
 .forge/metrics.jsonl                     one line per agent run (gitignored)
+.claude/worktrees/                       one per increment of a cut issue (gitignored)
 .claude/skills/issue-backend/SKILL.md    your issue storage, as commands
 .claude/rules/forge.md                   the short version, loaded every session
 .claude/agent-memory/implementer/        project knowledge - commit this

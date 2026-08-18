@@ -1,43 +1,39 @@
 ---
 name: bootstrap
-description: Set up a project for forge - interview once, then write the issue backend adapter, the check commands, the rules and the settings. Use before the first /forge:issue or /forge:work in a repository.
+description: Set up a project for forge - interview once, then write the issue backend adapter, the check commands, the rules and the settings. Use before the first /forge:issue in a repository.
 argument-hint: "[no arguments]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
 
 # Bootstrap a project for forge
 
-Set this project up once. Interview the user, then write the files. Ask only what you cannot
-determine yourself.
+## 1. Detect, then confirm
 
-## 1. Look before you ask
+Read `package.json` scripts, `pyproject.toml`, `Makefile`, `go.mod`, `Cargo.toml` or the CI
+workflow. Look for the issue backend: issues in use on GitHub, an `issues/` or `docs/issues/`
+folder, a `.jira` config.
 
-Detect the stack and the commands first. Read `package.json` scripts, `pyproject.toml`,
-`Makefile`, `go.mod`, `Cargo.toml`, or the CI workflow. Detect the issue backend: a `.github/`
-directory with issues in use, an `issues/` or `docs/issues/` folder of markdown files, a
-`.jira` config.
+Propose what you found. Ask the user to confirm or correct it in one round:
 
-Propose what you found. Ask the user to confirm or correct it, in one round of questions:
+- **Issue backend** - GitHub Issues, markdown files, or other. For markdown, settle directory and
+  file naming.
+- **Commands** - test, lint, typecheck, build. Leave any that do not exist empty.
+- **Subset flag** - how the test runner takes a pattern: `-t {pattern}`, `-k {pattern}`,
+  `-run {pattern}`.
 
-- **Issue backend** - GitHub Issues, markdown files in the repo, or something else. If markdown,
-  agree on the directory and the file naming.
-- **Commands** - test, lint, typecheck, build. Any that do not exist stay empty.
-- **Subset flag** - how the test runner runs a subset, for example `-t {pattern}` for jest,
-  `-k {pattern}` for pytest, `-run {pattern}` for go.
+## 2. Check two preconditions
 
-## 2. Check the two preconditions
+Report each in one line, and what breaks without it.
 
-Both are load-bearing. Report each in one line, and say plainly what breaks if it is off.
-
-- **Auto memory.** Read `autoMemoryEnabled` from the user and project settings and check
-  `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. When auto memory is off, the agents' `memory:` field does
-  nothing, agents relearn the project on every run, and the token budget will not hold.
-- **Workflows.** `/forge:work` is a workflow. It needs Claude Code v2.1.154 or later and a paid
-  plan; on Pro it must be enabled in `/config`. Without it there is no execution path at all.
+- **Auto memory.** Read `autoMemoryEnabled` from user and project settings, check
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. Off means the agents' `memory:` field does nothing and they
+  relearn the project every run.
+- **Workflows.** `/forge:work` is a workflow. Needs Claude Code v2.1.154 or later and a paid plan;
+  on Pro, enabled in `/config`. Off means there is no execution path.
 
 ## 3. Write the files
 
-Write `.forge/config.json`:
+`.forge/config.json`:
 
 ```json
 {
@@ -54,16 +50,16 @@ Write `.forge/config.json`:
 }
 ```
 
-`failingPattern` is only read by the `generic` parser: a grep extended regex whose match is the
-identifier of one failure. Leave it empty when the built-in parser fits.
+`failingPattern` is read by the `generic` parser only: a grep extended regex whose match is one
+failure's identifier. Leave it empty where a built-in parser fits.
 
-Then write, each from the matching file in `${CLAUDE_PLUGIN_ROOT}/templates/`:
+From `${CLAUDE_PLUGIN_ROOT}/templates/`:
 
-- `.claude/skills/issue-backend/SKILL.md` from `issue-backend-skill.md`, with every placeholder
-  replaced by a real command. Test each command once before you write it down.
-- `.claude/rules/forge.md` from `forge-rules.md`. Keep it under 20 lines; it loads every session.
+- `.claude/skills/issue-backend/SKILL.md` from `issue-backend-skill.md`. Replace every placeholder
+  with a real command. Run each one before you write it down.
+- `.claude/rules/forge.md` from `forge-rules.md`. It loads every session.
 
-Merge into `.claude/settings.json` without discarding existing keys:
+Merge into `.claude/settings.json`, keeping existing keys:
 
 ```json
 {
@@ -79,23 +75,21 @@ Merge into `.claude/settings.json` without discarding existing keys:
 }
 ```
 
-`git worktree` is on the list because the reviewer builds throwaway worktrees to run a check against
-the base commit - that is how it tells a failure this change caused from one that was already red.
-Narrow any of these if your project needs it; every entry you drop turns into a prompt mid-run.
+Every entry you drop turns into a prompt mid-run. `git worktree` is on the list because the reviewer
+runs checks at the base commit, and because cut issues get a worktree per increment.
 
-Do not add deny rules for the raw runners. A deny rule is evaluated regardless of what the guard
-hook returns, so it would block the rewrite the hook performs and cost a turn instead of saving one.
+Never add deny rules for the raw runners. A deny rule is evaluated whatever the guard hook returns,
+so it blocks the rewrite instead of saving a turn.
 
 Append to `.gitignore`: `.forge/last/`, `.forge/metrics.jsonl`, `.claude/agent-memory-local/`,
 `.claude/worktrees/`.
 
-Commit `.claude/agent-memory/`. That is the point of it: the agents' project knowledge is shared
-through version control.
+Commit `.claude/agent-memory/`. That is how agent knowledge is shared.
 
 ## 4. Verify, then report
 
-Run `forge-test` once. It must print exactly `0` or `1`. If it prints anything else, the config is
-wrong; fix it before reporting success.
+Run `forge-test`. It prints exactly `0` or `1`. Anything else means the config is wrong - fix it
+before reporting success.
 
-Report in at most five lines: backend, commands wired, the two preconditions, and the next step
+Report in five lines at most: backend, commands wired, the two preconditions, next step
 (`/forge:issue`).
