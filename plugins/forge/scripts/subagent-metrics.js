@@ -30,19 +30,25 @@ const parse = (file) => {
   }
 }
 
-// The transcript may be the agent's own, or the session's with the agent's turns
-// folded in as a sidechain. Narrow to this agent's turns, from the widest signal
-// down to the narrowest.
+// An agent writes its own transcript beside the session's:
+//   <project>/<session>/subagents/agent-<agentId>.jsonl
+// The path a SubagentStop hook is handed is the session's, so derive the agent's
+// from it. Verified on Claude Code 2.1.234.
+function transcriptOf(input) {
+  const given = input.transcript_path || ''
+  const id = input.agent_id || ''
+  if (!id) return given
+  const bases = [given.replace(/\.jsonl$/, ''), path.join(path.dirname(given), input.session_id || '')]
+  const own = bases.map((b) => path.join(b, 'subagents', `agent-${id}.jsonl`)).find((p) => fs.existsSync(p))
+  return own || given
+}
+
+// Narrow to this agent's turns. A transcript that does not name them is not this
+// agent's, and measuring it would report the session's numbers as the agent's.
 function ownTurns(entries, agentId) {
   const byId = entries.filter((e) => e.agentId && e.agentId === agentId)
   if (byId.length) return { turns: byId, matched: true }
-  const side = entries.filter((e) => e.isSidechain)
-  if (!side.length) return { turns: entries, matched: false }
-  let start = 0
-  side.forEach((e, i) => {
-    if (e.type === 'user' && !e.parentUuid) start = i
-  })
-  return { turns: side.slice(start), matched: true }
+  return { turns: [], matched: false }
 }
 
 const contextTokens = (usage) =>
@@ -62,13 +68,8 @@ let startTokens = null
 let peakTokens = null
 let promptTokens = null
 try {
-  const dir = path.dirname(input.transcript_path || '')
-  const id = input.agent_id || ''
-  const file =
-    [path.join(dir, id + '.jsonl'), path.join(dir, input.session_id || '', id + '.jsonl')].find(
-      (p) => id && fs.existsSync(p),
-    ) || input.transcript_path
-  const { turns, matched } = ownTurns(parse(file), id)
+  const file = transcriptOf(input)
+  const { turns, matched } = ownTurns(parse(file), input.agent_id || '')
 
   toolCalls = turns.reduce(
     (n, e) =>
@@ -78,20 +79,19 @@ try {
         : 0),
     0,
   )
-  if (!toolCalls && !matched) {
-    // a transcript that does not mark its turns at all: count what is there
-    const raw = fs.readFileSync(file, 'utf8')
-    toolCalls = (raw.match(/"type"\s*:\s*"tool_use"/g) || []).length
-  }
-
   const replies = turns.filter((e) => e.type === 'assistant' && e.message && e.message.usage)
   startTokens = replies.length ? contextTokens(replies[0].message.usage) : null
   peakTokens = replies.reduce((n, e) => Math.max(n, contextTokens(e.message.usage) || 0), 0) || null
 
   const first = turns.find((e) => e.type === 'user' && e.message)
   promptTokens = first ? Math.round(text(first.message).length / 4) : null
+
+  if (!matched) {
+    // a hole is worth more than the session's numbers wearing the agent's name
+    toolCalls = startTokens = peakTokens = promptTokens = null
+  }
 } catch {
-  toolCalls = toolCalls || null
+  toolCalls = startTokens = peakTokens = promptTokens = null
 }
 
 try {

@@ -101,7 +101,14 @@ printf '# probe\nA skill body.\n' > "$CTX/.claude/skills/probe/SKILL.md"
 printf 'memory line\n%.0s' $(seq 250) > "$CTX/.claude/agent-memory/prober/MEMORY.md"
 printf 'detail\n' > "$CTX/.claude/agent-memory/prober/topic.md"
 printf 'a project rule\n' > "$CTX/.claude/rules/forge.md"
-cat > "$CTX/transcript.jsonl" <<'JSONL'
+# The layout Claude Code writes: the session transcript, and one file per agent
+# beside it. The session file is a decoy here - measuring it is the bug.
+mkdir -p "$CTX/t/s1/subagents"
+cat > "$CTX/t/s1.jsonl" <<'JSONL'
+{"type":"user","message":{"role":"user","content":"a session prompt, much longer than the agent's"}}
+{"type":"assistant","message":{"usage":{"input_tokens":99999},"content":[{"type":"tool_use"},{"type":"tool_use"}]}}
+JSONL
+cat > "$CTX/t/s1/subagents/agent-a1.jsonl" <<'JSONL'
 {"type":"user","agentId":"a1","message":{"role":"user","content":[{"type":"text","text":"twelve chars"}]}}
 {"type":"assistant","agentId":"a1","message":{"usage":{"input_tokens":3,"cache_creation_input_tokens":1000,"cache_read_input_tokens":200},"content":[{"type":"tool_use"}]}}
 {"type":"assistant","agentId":"other","message":{"usage":{"input_tokens":99999},"content":[{"type":"tool_use"}]}}
@@ -111,7 +118,9 @@ JSONL
 S=0
 echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober"}' \
   | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-start.js >/dev/null
-echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober","transcript_path":"'"$CTX/transcript.jsonl"'"}' \
+echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober","transcript_path":"'"$CTX/t/s1.jsonl"'"}' \
+  | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
+echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a2","agent_type":"forge:prober","transcript_path":"'"$CTX/t/s1.jsonl"'"}' \
   | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
 
 CTX="$CTX" node -e '
@@ -129,7 +138,11 @@ CTX="$CTX" node -e '
   const dump=path.join(root,run.dump)
   if (!fs.existsSync(path.join(dump,"index.json"))) bad("no index.json beside the copies")
   for (const s of run.sources.filter(s=>s.loaded)) if(!fs.existsSync(path.join(dump,s.dump))) bad("no copy of "+s.path)
-  const m=last("metrics.jsonl")
+  const lines=fs.readFileSync(path.join(root,".forge","metrics.jsonl"),"utf8").trim().split("\n").map(JSON.parse)
+  const m=lines.find(l=>l.agentId==="a1")
+  const unmatched=lines.find(l=>l.agentId==="a2")
+  for (const k of ["startTokens","peakTokens","toolCalls","promptTokens"])
+    if (unmatched[k]!==null) bad("an agent whose turns are not in the transcript was given the session value for "+k)
   if (m.startTokens!==1203) bad("start tokens: "+m.startTokens)
   if (m.peakTokens!==2005) bad("peak tokens: "+m.peakTokens)
   if (m.toolCalls!==3) bad("tool calls counted another agents turns: "+m.toolCalls)

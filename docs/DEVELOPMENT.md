@@ -62,6 +62,22 @@ decision, the startup measurement against a fixture agent and a synthetic transc
 workflow's control flow against stubbed agents - wave order, stall detection,
 skipped dependents, merge conflicts, a missing issue id.
 
+## Where an agent's transcript lives
+
+Verified on 2.1.234, by running an agent: `SubagentStart` and `SubagentStop` both fire for
+`Task`-spawned agents with hooks registered in project settings, and the path a `SubagentStop` hook
+is handed is the *session's* transcript, not the agent's. The agent's own file is
+
+```
+<project>/<session-id>/subagents/agent-<agent-id>.jsonl
+```
+
+and every entry in it carries `agentId`. `subagent-metrics.js` derives that path and refuses to
+measure anything it cannot attribute by `agentId` - measuring the file it was handed would report
+the session's tokens and tool calls under the agent's name. A missing number is the expected
+failure; a wrong one is not. The estimate from `SubagentStart` reads files, not the transcript, so
+it holds either way.
+
 ## Still unverified
 
 Neither has been observed in a real session:
@@ -70,7 +86,4 @@ Neither has been observed in a real session:
   the unprefixed names are used instead, so this stays open until someone runs an installed copy.
 - Whether plugin hooks fire inside workflow-spawned agents. Here the hooks come from project
   settings rather than the plugin, so this stays open too.
-- Whether the transcript a `SubagentStop` hook is handed names the agent's own turns, in a file of
-  its own or by `agentId`. `subagent-metrics.js` narrows by `agentId`, then by `isSidechain`, then
-  gives up and records `startTokens: null`. A run where the number is missing rather than wrong is
-  the expected failure. The estimate from `SubagentStart` does not depend on the transcript.
+
