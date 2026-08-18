@@ -13,6 +13,8 @@ paths:
 - `skills:` lists both `forge:<name>` and `<name>`. A missing one is skipped with a warning, so
   the preload works installed and here.
 - `user-invocable: false` keeps a skill out of the slash list. The agent protocol uses it.
-- Both directories are watched: an edit to `SKILL.md` or an agent page is live within seconds.
-  A brand new directory is not watched until the next session.
+- Both directories are watched, so an edit to `SKILL.md` or an agent page is live within seconds
+  ([skills](https://code.claude.com/docs/en/skills#live-change-detection),
+  [agents](https://code.claude.com/docs/en/sub-agents)). A brand new directory is not watched until
+  the next session.
 - Never edit through `.claude/agents/` or `.claude/skills/`. They are symlinks into this source.

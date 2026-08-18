@@ -14,4 +14,4 @@ paths:
   a stall, `conflicted` for a merge conflict, `error` for a missing issue id.
 - The control-flow suite in `test.sh` drives the loop against stubbed agents. Any new outcome needs
   a case there; the stubs, not a real run, are what proves it.
-- The script is read when the workflow runs, so an edit is live.
+- The script is read when the workflow runs, so an edit is expected to be live. Undocumented.
