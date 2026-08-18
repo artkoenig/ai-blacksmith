@@ -8,6 +8,11 @@ description: How this project stores issues. Use whenever an issue must be creat
 Backend: GitHub Issues on `artkoenig/test`, through the github MCP server. Where that server is not
 connected, say so and stop - there is no fallback.
 
+The `mcp__github__*` tools are deferred: they are not on a tool surface until `ToolSearch` loads
+their schema. Before the first call, run `ToolSearch` with
+`select:mcp__github__issue_read,mcp__github__issue_write,mcp__github__list_issues` - naming a tool
+in an agent's `tools:` list does not surface it on its own.
+
 ## Create
 
 `mcp__github__issue_write` with `method: "create"`, `owner: "artkoenig"`, `repo: "test"`, the title,

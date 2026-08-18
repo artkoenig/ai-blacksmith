@@ -49,6 +49,19 @@ S=0
   || { fail wrappers "--detail did not show the failure"; S=1; }
 (cd "$FIX" && "$BIN/forge-lint" 2>&1) | grep -q "^unconfigured" \
   || { fail wrappers "an unconfigured command did not say so"; S=1; }
+# An unknown subcommand must fail loudly: a typo that exits 0 reads as success.
+(cd "$FIX" && "$BIN/forge-cfg" gett >/dev/null 2>&1); [ $? -ne 0 ] \
+  || { fail wrappers "forge-cfg exited 0 on an unknown subcommand"; S=1; }
+CFG_ERR="$(cd "$FIX" && "$BIN/forge-cfg" gett 2>&1 >/dev/null)"
+case "$CFG_ERR" in usage:\ forge-cfg*) ;; *) fail wrappers "forge-cfg did not print its usage line to stderr"; S=1 ;; esac
+(cd "$FIX" && "$BIN/forge-cfg" >/dev/null 2>&1); [ $? -ne 0 ] \
+  || { fail wrappers "forge-cfg exited 0 with no subcommand"; S=1; }
+[ "$(cd "$FIX" && "$BIN/forge-cfg" exists)" = "yes" ] \
+  || { fail wrappers "forge-cfg exists did not answer yes"; S=1; }
+[ "$(cd "$FIX" && "$BIN/forge-cfg" get commands.test.parser)" = "jest" ] \
+  || { fail wrappers "forge-cfg get did not read a known key"; S=1; }
+[ "$(cd "$FIX" && "$BIN/forge-cfg" get no.such.key fallback)" = "fallback" ] \
+  || { fail wrappers "forge-cfg get did not fall back on a missing key"; S=1; }
 [ "$S" = 0 ] && ok "wrapper contract"
 
 # --- hook decisions ---------------------------------------------------------

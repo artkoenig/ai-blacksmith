@@ -18,3 +18,7 @@ paths:
   [agents](https://code.claude.com/docs/en/sub-agents)). A brand new directory is not watched until
   the next session.
 - Never edit through `.claude/agents/` or `.claude/skills/`. They are symlinks into this source.
+- `mcp__*` tools are deferred. Naming one in `tools:` does not surface it - the agent needs
+  `ToolSearch` too, and must load the schema with `select:<name>` before the first call.
+- A `tools:` edit is not live the way the body is: agents spawned in the same session after the
+  edit still showed the old surface. Only a new session was not tried - assume one is needed.
