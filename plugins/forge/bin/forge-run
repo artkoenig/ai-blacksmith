@@ -43,6 +43,10 @@ execute() {
 
 failing_ids() {
   [ -f "$LOG" ] || execute "$COMMAND" >/dev/null
+  # A run that exited 0 has no failing ids, whatever its log happens to say.
+  # Without this, a passing log mentioning "error" or matching failingPattern
+  # yields phantom ids.
+  [ "$(cat "$STATUS_FILE" 2>/dev/null)" = "0" ] && return 0
   case "$PARSER" in
     jest)
       grep -E '^[[:space:]]*(✕|×)' "$LOG" | sed -E 's/^[[:space:]]*(✕|×)[[:space:]]*//; s/ \([0-9]+ ms\)$//' ;;

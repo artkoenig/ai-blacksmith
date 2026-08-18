@@ -20,3 +20,5 @@ paths:
   prints the usage line to stderr and exits `2`. `get` on a missing key still exits `0`.
 - `test.sh` runs under `pipefail`, so `cmd | grep -q` inherits a non-zero exit from `cmd`. Assert on
   a captured variable when the command under test is meant to fail.
+- `--failing` answers from `.forge/last/<kind>.status`: a run that exited 0 has no ids, whatever
+  the log says. Parsers only run for a failing status.

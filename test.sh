@@ -62,6 +62,36 @@ case "$CFG_ERR" in usage:\ forge-cfg*) ;; *) fail wrappers "forge-cfg did not pr
   || { fail wrappers "forge-cfg get did not read a known key"; S=1; }
 [ "$(cd "$FIX" && "$BIN/forge-cfg" get no.such.key fallback)" = "fallback" ] \
   || { fail wrappers "forge-cfg get did not fall back on a missing key"; S=1; }
+
+# --failing answers for the last run, not for whatever the log says. A passing
+# run whose output carries "error" or matches failingPattern has no ids.
+PASSFIX="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX"' EXIT
+mkdir -p "$PASSFIX/.forge"
+cat > "$PASSFIX/.forge/config.json" <<'JSON'
+{ "commands": { "test": { "command": "bash ./fake.sh", "parser": "generic",
+                          "failingPattern": "E[0-9]+" } } }
+JSON
+cat > "$PASSFIX/fake.sh" <<'SH'
+echo "warn: E42 error recovered, 0 failures"
+exit 0
+SH
+[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test")" = "0" ] \
+  || { fail wrappers "the passing fixture did not print 0"; S=1; }
+# AC1 - passing run, log matches failingPattern -> none.
+[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test" --failing)" = "none" ] \
+  || { fail wrappers "--failing invented ids after a passing run"; S=1; }
+# AC3 - no log yet, and the run it triggers passes -> none.
+rm -rf "$PASSFIX/.forge/last"
+[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test" --failing)" = "none" ] \
+  || { fail wrappers "--failing did not run the passing command itself"; S=1; }
+# AC3 - no log yet, and the run it triggers fails -> that run's ids.
+rm -rf "$FIX/.forge/last"
+[ "$(cd "$FIX" && "$BIN/forge-test" --failing)" = "rejects an expired token" ] \
+  || { fail wrappers "--failing did not run the failing command itself"; S=1; }
+# AC2 - a failing run keeps naming its ids on a second call.
+[ "$(cd "$FIX" && "$BIN/forge-test" --failing)" = "rejects an expired token" ] \
+  || { fail wrappers "--failing lost the ids of a failing run"; S=1; }
 [ "$S" = 0 ] && ok "wrapper contract"
 
 # --- hook decisions ---------------------------------------------------------
@@ -96,7 +126,7 @@ node -e '
 
 # --- context measurement ----------------------------------------------------
 CTX="$(mktemp -d)"
-trap 'rm -rf "$FIX" "$CTX"' EXIT
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX"' EXIT
 mkdir -p "$CTX/.forge" "$CTX/.claude/agents" "$CTX/.claude/skills/probe" "$CTX/.claude/rules"
 printf '{ "version": 1 }\n' > "$CTX/.forge/config.json"
 cat > "$CTX/.claude/agents/prober.md" <<'MD'
