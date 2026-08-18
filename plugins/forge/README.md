@@ -9,9 +9,22 @@ change touches while you are there to correct it, and stores an issue with numbe
 criteria and a `Context` block. How issues are stored is up to the project: `/forge:bootstrap`
 writes an adapter skill for GitHub Issues, markdown files, or anything else you describe.
 
-**A workflow executes them.** `/forge:work <id>` runs `implementer → reviewer → repair → commit` as
-a script. No user interaction is possible during a run, by design. The result is a branch and a
-commit; push and pull requests stay your call.
+**A workflow executes them.** `/forge:work <id>` loops implementer and reviewer until the verdict
+converges, then commits. No user interaction is possible during a run, by design. The result is a
+branch and a commit; push and pull requests stay your call.
+
+The loop ends on one of three things:
+
+- **pass** - every criterion holds. The work is committed.
+- **stalled** - a round produced exactly the same failed criteria as the round before it. The
+  implementer has stopped moving, so further rounds would burn tokens on the same wall. The staged
+  work stays on the branch for you.
+- **cap** - a runaway backstop at eight rounds, for a loop that oscillates between different failure
+  sets. Stall detection normally ends things first. Override with `maxRounds`.
+
+Every round gets a fresh reviewer with no memory, judging the whole accumulated diff against the
+commit the branch was cut from - not just the latest edit. That is what catches a repair which fixed
+one criterion and broke another.
 
 ## Why it is cheap
 
@@ -30,7 +43,7 @@ commit; push and pull requests stay your call.
 | --- | --- |
 | `/forge:bootstrap` | One-time project setup. Run this first. |
 | `/forge:issue` | Interview, then write one issue. |
-| `/forge:work <id>` | Execute one issue autonomously. |
+| `/forge:work <id>` | Execute one issue autonomously, looping until the review converges. |
 | `/forge:new-agent` | Add a project agent with its own memory. |
 | `/forge:stats` | Tool calls per agent run, over time. |
 

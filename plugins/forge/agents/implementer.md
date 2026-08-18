@@ -36,6 +36,18 @@ Each prints `0` or `1`. Escalate only after a `1`:
 Run the bare command once when you are done. Re-run only what a repair touched, with
 `forge-test --run <pattern>`.
 
+## Branch and staging
+
+Note the commit sha you are branching from before you create the branch, and report it. The review
+diffs against it, so a wrong base sha makes the whole verdict meaningless.
+
+Stage your work with `git add -A` at the end of every round, and do not commit until a task tells
+you to. Unstaged new files are invisible to the review, so an unstaged file reads as a criterion you
+did not implement.
+
+A repair round changes only what the failed criteria require. Everything else on the branch stays as
+it is - the review looks at the whole accumulated diff, not just your latest edit.
+
 ## Memory discipline
 
 Write durable facts only: module layout, build and test commands, conventions, gotchas that cost
