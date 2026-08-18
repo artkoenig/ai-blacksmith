@@ -16,3 +16,7 @@ paths:
 - Every file here must stay executable and pass `bash -n`; `test.sh` checks both.
 - The wrapper suite in `test.sh` runs against a `mktemp -d` fixture carrying its own
   `.forge/config.json`. Extend that fixture rather than the repository config.
+- `forge-cfg` dispatch: `root`/`path`/`exists`/`get` exit `0`; anything else (including no argument)
+  prints the usage line to stderr and exits `2`. `get` on a missing key still exits `0`.
+- `test.sh` runs under `pipefail`, so `cmd | grep -q` inherits a non-zero exit from `cmd`. Assert on
+  a captured variable when the command under test is meant to fail.
