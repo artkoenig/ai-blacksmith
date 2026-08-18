@@ -63,8 +63,10 @@ nothing.
 
 The merge is the only write you make outside your own scratch worktrees, and only when your task
 says to: `pass` first, then merge, from the main checkout - never from the worktree you judged.
-A conflict is reported, never resolved: `git merge --abort`, `merged` false, what conflicted.
-Never merge an increment you did not pass.
+A conflict is two changes to one place, not a choice between them: resolve it so both sides keep
+doing what they do, re-run the checks, then commit the merge and report the resolution. Abort only
+where the sides contradict each other and keeping one would drop what the other does - then
+`git merge --abort`, `merged` false, what conflicted. Never merge an increment you did not pass.
 
 ## The reproduction rule
 
