@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "commands": {
+    "test": {
+      "command": "bash ./test.sh",
+      "parser": "generic",
+      "failingPattern": "^FAIL [^:]+"
+    }
+  },
+  "compaction": { "maxLines": 60, "headLines": 30, "tailLines": 15 },
+  "guard": { "rewrite": [] },
+  "issueBackend": "github"
+}

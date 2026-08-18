@@ -1,0 +1,4 @@
+.forge/last/
+.forge/metrics.jsonl
+.claude/agent-memory-local/
+.claude/worktrees/

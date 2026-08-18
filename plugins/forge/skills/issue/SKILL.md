@@ -19,7 +19,7 @@ Never ask what the codebase answers.
 
 ## 2. Write it
 
-Use `${CLAUDE_PLUGIN_ROOT}/templates/issue.md`. The issue holds a goal, its acceptance criteria,
+Use `${CLAUDE_SKILL_DIR}/issue-template.md`. The issue holds a goal, its acceptance criteria,
 and what is out of scope. Nothing else: no file paths, no line ranges, no plan, no agent.
 
 - Number the criteria `AC1`, `AC2`, … One verifiable statement each.

@@ -19,7 +19,7 @@ is wrong.
 
 ## 2. Write it
 
-Copy `${CLAUDE_PLUGIN_ROOT}/templates/agent.md` to `.claude/agents/<domain>.md`:
+Copy `${CLAUDE_SKILL_DIR}/agent-template.md` to `.claude/agents/<domain>.md`:
 
 - `name`: the domain, kebab-case.
 - `description`: what it owns and when to delegate to it. Routing reads this.

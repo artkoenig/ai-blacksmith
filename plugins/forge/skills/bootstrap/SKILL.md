@@ -53,11 +53,11 @@ Report each in one line, and what breaks without it.
 `failingPattern` is read by the `generic` parser only: a grep extended regex whose match is one
 failure's identifier. Leave it empty where a built-in parser fits.
 
-From `${CLAUDE_PLUGIN_ROOT}/templates/`:
+From `${CLAUDE_SKILL_DIR}`:
 
-- `.claude/skills/issue-backend/SKILL.md` from `issue-backend-skill.md`. Replace every placeholder
-  with a real command. Run each one before you write it down.
-- `.claude/rules/forge.md` from `forge-rules.md`. It loads every session.
+- `.claude/skills/issue-backend/SKILL.md` from `issue-backend-template.md`. Replace every
+  placeholder with a real command. Run each one before you write it down.
+- `.claude/rules/forge.md` from `rules-template.md`. It loads every session.
 
 Merge into `.claude/settings.json`, keeping existing keys:
 

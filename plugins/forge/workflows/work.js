@@ -94,8 +94,11 @@ const input = typeof args === 'string' ? { issue: args.trim() } : args || {}
 const issue = input.issue ? String(input.issue).trim() : ''
 const maxRounds = Number(input.maxRounds) > 0 ? Number(input.maxRounds) : MAX_ROUNDS
 
-const IMPLEMENTER = 'forge:implementer'
-const REVIEWER = 'forge:reviewer'
+// Installed, the agents are namespaced `forge:`. Used directly from a checkout's
+// .claude/agents/ they are not. Pass agentPrefix: '' for that.
+const agentPrefix = typeof input.agentPrefix === 'string' ? input.agentPrefix : 'forge:'
+const IMPLEMENTER = `${agentPrefix}implementer`
+const REVIEWER = `${agentPrefix}reviewer`
 
 if (!issue) {
   return { status: 'error', reason: 'No issue id. Run /forge:work <issue-id>.' }

@@ -7,6 +7,7 @@ maxTurns: 18
 tools: Read, Grep, Bash, Write, Edit, Skill
 skills:
   - forge:agent-protocol
+  - agent-protocol
 color: yellow
 ---
 
