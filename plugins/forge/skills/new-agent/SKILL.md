@@ -40,3 +40,7 @@ was already on screen.
 ## 4. Report
 
 Name the file, the domain, and the one-line description. Nothing else.
+
+The agent is selected per increment when `/forge:issue` cuts the work - `agent: "project:<domain>"`
+in the cut. Nothing in the issue names an agent, so an issue that would suit this one still runs on
+`forge:implementer` unless the cut says otherwise.

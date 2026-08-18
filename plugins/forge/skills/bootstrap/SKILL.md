@@ -72,7 +72,8 @@ Merge into `.claude/settings.json` without discarding existing keys:
     "allow": [
       "Bash(forge-test:*)", "Bash(forge-lint:*)", "Bash(forge-typecheck:*)", "Bash(forge-build:*)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
-      "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)"
+      "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)",
+      "Bash(git merge:*)", "Bash(cd:*)"
     ]
   }
 }
@@ -85,7 +86,8 @@ Narrow any of these if your project needs it; every entry you drop turns into a 
 Do not add deny rules for the raw runners. A deny rule is evaluated regardless of what the guard
 hook returns, so it would block the rewrite the hook performs and cost a turn instead of saving one.
 
-Append to `.gitignore`: `.forge/last/`, `.forge/metrics.jsonl`, `.claude/agent-memory-local/`.
+Append to `.gitignore`: `.forge/last/`, `.forge/metrics.jsonl`, `.claude/agent-memory-local/`,
+`.claude/worktrees/`.
 
 Commit `.claude/agent-memory/`. That is the point of it: the agents' project knowledge is shared
 through version control.

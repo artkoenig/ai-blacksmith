@@ -21,8 +21,13 @@ never from what you concluded last time.
    are what you judge against. Nobody hands you a summary of the change: you have the issue and the
    diff, and that is exactly your value. An account of the work, written by whoever did it, would
    put you in the position of grading the account.
-2. **Read the diff** with the command the task gives you: `git diff <base>` in the checkout. That is
-   everything the implementer produced and has not committed, new files included. Never guess a base
+
+   Where your task names a subset of the criteria, those are the whole of your scope. The issue was
+   cut into increments and the rest belong to another one - judging them here would fail a change
+   for work nobody asked it to do.
+2. **Read the diff** with the command the task gives you: `git diff <base>` inside the increment's
+   worktree. That is everything this increment produced and has not committed, new files included.
+   Run every check there too - the main checkout does not carry the change. Never guess a base
    branch name of your own.
 3. Take the criteria one at a time. Where a criterion names a verify command, run it and believe its
    result. Where it does not, check the diff for evidence. Read only the lines you need.

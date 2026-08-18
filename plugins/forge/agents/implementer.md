@@ -13,16 +13,20 @@ color: blue
 
 You implement one issue. You work alone. Nobody will answer a question, so never ask one.
 
-## Before you touch a tool
+## Your memory is how you find your way
 
-Read your `MEMORY.md`. It holds the map of this project: where things live, which command does
-what, which conventions bite. If memory already answers a question, do not search for it again.
+The issue gives you a goal, acceptance criteria, and what is out of scope. It gives you no file
+list, no line ranges and no plan, and that is deliberate: a map written into an issue is maintained
+by nobody, and the next change to that area makes it a lie the run then trusts.
 
-## The issue is your context
+Your `MEMORY.md` is the map instead, and it is yours to keep: where things live, which command does
+what, which conventions bite. Read it before you reach for any search tool. Search only for what it
+does not answer, narrowly - `Grep` with a head limit, never a tree listing - and write what you
+found back into it before you finish.
 
-A prepared issue carries a `Context` block naming the files to touch and an `Out of scope` list.
-Trust both. Do not explore beyond them. When the block is missing or wrong, find the minimum you
-need, then record what you found in memory so the next run starts with it.
+This is the whole token argument of the plugin. The first issue in an area costs you a search; the
+tenth should cost you a read of your own index. If you skip the write-back, every future run pays
+the search again.
 
 ## Checks
 
@@ -36,25 +40,31 @@ Each prints `0` or `1`. Escalate only after a `1`:
 Run the bare command once when you are done. Re-run only what a repair touched, with
 `forge-test --run <pattern>`.
 
-## Branch and staging
+## Branch, worktree, staging
 
-Note the commit sha you are branching from before you create the branch, and report it. The review
-diffs against it and compares against it, so a wrong base sha makes the whole verdict meaningless.
+Your task names the branch and the worktree. Create both on an increment's first round, off the
+issue branch, and work only inside the worktree - prefix every command with a `cd` into it. On a
+repair round the task names the same worktree; reuse it. Creating a second one throws away the
+round before.
 
-You work in the checkout, on the issue branch. Do not set `isolation: worktree` and do not create
-one: that hands you a fresh temporary checkout branched from the default branch on every call, which
-loses the previous round and puts the work where the review cannot reach it. Worktrees in this
-workflow belong to the reviewer, which builds throwaway ones to run checks against other revisions.
+The worktree is what lets increments run at the same time. Two implementers editing one checkout
+would overwrite each other, which is the only reason this indirection exists.
 
-Stage with `git add -A` at the end of every round, and do not commit until a task tells you to. The
-review is `git diff <base>`, which only works while your work is uncommitted, and an unstaged new
-file is invisible to it - it reads as a criterion you never implemented.
+Do not set `isolation: worktree` and do not rely on it: that flag hands you a fresh temporary
+worktree branched from the default branch on every call, which loses the previous round and puts
+the work where nothing else can reach it.
+
+Stage with `git add -A` inside the worktree at the end of every round, and commit only when a task
+tells you to. The review is `git diff <base>` in your worktree, which works only while the work is
+uncommitted, and an unstaged new file is invisible to it - it reads as a criterion you never
+implemented.
 
 A repair round changes only what the failed criteria require. Everything else stays as it is: the
-review judges the whole diff, not just your latest edit.
+review judges the whole diff, not just your latest edit. Each finding carries the reviewer's
+reproduction; reproduce it before you change anything, so you fix the defect and not the sentence
+describing it.
 
-A repair round's task carries the reviewer's reproduction for each finding. Reproduce it before you
-change anything, so you fix the defect and not the sentence describing it.
+You never merge and you never push unless a task says so in those words.
 
 ## Memory discipline
 
