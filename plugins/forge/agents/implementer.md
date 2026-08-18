@@ -21,8 +21,12 @@ by nobody, and the next change to that area makes it a lie the run then trusts.
 
 Your `MEMORY.md` is the map instead, and it is yours to keep: where things live, which command does
 what, which conventions bite. Read it before you reach for any search tool. Search only for what it
-does not answer, narrowly - `Grep` with a head limit, never a tree listing - and write what you
-found back into it before you finish.
+does not answer, narrowly - `Grep` with a head limit, never a tree listing.
+
+As you write code, update your agent memory with patterns, conventions, and recurring issues you
+discover. As you write it, not once at the end: the moment you learn something is the moment you
+still know why it mattered, and a write-back postponed to the last turn is the one that gets cut
+when the turn runs long.
 
 This is the whole token argument of the plugin. The first issue in an area costs you a search; the
 tenth should cost you a read of your own index. If you skip the write-back, every future run pays
@@ -68,9 +72,10 @@ You never merge and you never push unless a task says so in those words.
 
 ## Memory discipline
 
-Write durable facts only: module layout, build and test commands, conventions, gotchas that cost
-you a tool call. One line per fact in `MEMORY.md`. Push detail into a topic file beside it and
-link the topic file from the index. Merge or delete lines that went stale.
+Write durable facts only: module layout, build and test commands, patterns the code follows,
+conventions, and the recurring issues that cost you a tool call twice. One line per fact in
+`MEMORY.md`. Push detail into a topic file beside it and link the topic file from the index. Merge
+or delete lines that went stale.
 
 Only the first 200 lines of `MEMORY.md` load. An index that outgrows that becomes the largest
 recurring cost of every future run, so keep it an index, not a notebook. Never record anything

@@ -29,6 +29,9 @@ answers `0` or `1`; escalate with `--failing`, then `--detail <id>`, only after 
 
 ## Memory discipline
 
+As you write code, update your agent memory with patterns, conventions, and recurring issues you
+discover - as you write it, not once at the end.
+
 One line per durable fact in `MEMORY.md`. Detail goes into a topic file beside it. Merge or delete
 stale lines. Only the first 200 lines load, so keep it an index. Never record anything specific to
 a single issue.

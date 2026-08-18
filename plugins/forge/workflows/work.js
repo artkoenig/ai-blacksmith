@@ -186,7 +186,8 @@ async function runIncrement(inc) {
       '   acceptance criteria and nothing else - no file list, no plan. Finding your way is your job.',
       `2. ${criteriaLine(inc)}`,
       '3. Consult your memory before any search tool. It holds the project map you built on earlier',
-      '   runs. Search only for what memory does not answer, and write what you find back into it.',
+      '   runs. Search only for what memory does not answer. As you write code, update your agent',
+      '   memory with patterns, conventions, and recurring issues you discover.',
       ...(solo
         ? [`4. The checkout is already on ${branch}. Work there.`]
         : [
