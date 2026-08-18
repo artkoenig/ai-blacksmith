@@ -7,8 +7,9 @@ This repository is the forge plugin, and it is developed with forge.
   symlink path.
 - Checks run through `forge-test`. It answers `0` or `1`; escalate with `--failing`, then
   `--detail <id>`. It runs `test.sh`, which needs no Claude Code session.
-- Used this way the components lose the `forge:` prefix: `/issue`, `/work`, `implementer`.
-  Run the workflow with `agentPrefix: ""`.
-- Issues live on GitHub. See `.claude/skills/issue-backend/SKILL.md`.
+- Used this way the components lose the `forge:` prefix: `/issue`, `/work`, `implementer`. So the
+  workflow runs as `/work {"issue": "3", "agentPrefix": ""}`.
+- Issues live on GitHub. See `.claude/skills/issue-backend/SKILL.md`. That adapter is this
+  repository's own file, not a symlink; `.forge/` is local state and mostly gitignored.
 - What is true of one directory only: `.claude/rules/areas/<area>.md`, under a `paths:` glob. It
   loads when a file it matches is read, so put area knowledge there rather than in this file.

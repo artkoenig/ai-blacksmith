@@ -15,3 +15,8 @@ paths:
 - The control-flow suite in `test.sh` drives the loop against stubbed agents. Any new outcome needs
   a case there; the stubs, not a real run, are what proves it.
 - The script is read when the workflow runs, so an edit is expected to be live. Undocumented.
+
+Two things about a workflow-spawned agent are unverified, never observed in a real session:
+whether `agentType: 'forge:implementer'` resolves a plugin-scoped agent inside a workflow, and
+whether plugin hooks fire inside one. Here the unprefixed names and the project settings are used
+instead, so both stay open until someone runs an installed copy.
