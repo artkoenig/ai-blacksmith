@@ -2,13 +2,29 @@
 # Reads .forge/config.json. Usage: forge-cfg get <dotted.path> [default]
 set -uo pipefail
 
+# Resolve the root from where the caller stands, not from the session.
+#
+# A run happens inside a git worktree, so `cd <worktree> && forge-test` has to
+# find that worktree's config and run the suite there. Walking up from $PWD does
+# that: .forge/config.json is a tracked file, so a worktree checkout carries its
+# own copy. CLAUDE_PROJECT_DIR is the last resort precisely because it points at
+# the main checkout even when the caller is somewhere else.
 forge_root() {
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
-    printf '%s\n' "$CLAUDE_PROJECT_DIR"
-  elif git rev-parse --show-toplevel >/dev/null 2>&1; then
+  local dir
+  dir="$(pwd -P)"
+  while [ "$dir" != "/" ]; do
+    if [ -f "$dir/.forge/config.json" ]; then
+      printf '%s\n' "$dir"
+      return
+    fi
+    dir="$(dirname "$dir")"
+  done
+  if git rev-parse --show-toplevel >/dev/null 2>&1; then
     git rev-parse --show-toplevel
+  elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
+    printf '%s\n' "$CLAUDE_PROJECT_DIR"
   else
-    pwd
+    pwd -P
   fi
 }
 

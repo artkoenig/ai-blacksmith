@@ -69,10 +69,18 @@ Merge into `.claude/settings.json` without discarding existing keys:
 {
   "env": { "BASH_MAX_OUTPUT_LENGTH": "8000" },
   "permissions": {
-    "allow": ["Bash(forge-test:*)", "Bash(forge-lint:*)", "Bash(forge-typecheck:*)", "Bash(forge-build:*)"]
+    "allow": [
+      "Bash(forge-test:*)", "Bash(forge-lint:*)", "Bash(forge-typecheck:*)", "Bash(forge-build:*)",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
+      "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)"
+    ]
   }
 }
 ```
+
+`git worktree` is on the list because the reviewer builds throwaway worktrees to run a check against
+the base commit - that is how it tells a failure this change caused from one that was already red.
+Narrow any of these if your project needs it; every entry you drop turns into a prompt mid-run.
 
 Do not add deny rules for the raw runners. A deny rule is evaluated regardless of what the guard
 hook returns, so it would block the rewrite the hook performs and cost a turn instead of saving one.

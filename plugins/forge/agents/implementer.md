@@ -39,14 +39,22 @@ Run the bare command once when you are done. Re-run only what a repair touched, 
 ## Branch and staging
 
 Note the commit sha you are branching from before you create the branch, and report it. The review
-diffs against it, so a wrong base sha makes the whole verdict meaningless.
+diffs against it and compares against it, so a wrong base sha makes the whole verdict meaningless.
 
-Stage your work with `git add -A` at the end of every round, and do not commit until a task tells
-you to. Unstaged new files are invisible to the review, so an unstaged file reads as a criterion you
-did not implement.
+You work in the checkout, on the issue branch. Do not set `isolation: worktree` and do not create
+one: that hands you a fresh temporary checkout branched from the default branch on every call, which
+loses the previous round and puts the work where the review cannot reach it. Worktrees in this
+workflow belong to the reviewer, which builds throwaway ones to run checks against other revisions.
 
-A repair round changes only what the failed criteria require. Everything else on the branch stays as
-it is - the review looks at the whole accumulated diff, not just your latest edit.
+Stage with `git add -A` at the end of every round, and do not commit until a task tells you to. The
+review is `git diff <base>`, which only works while your work is uncommitted, and an unstaged new
+file is invisible to it - it reads as a criterion you never implemented.
+
+A repair round changes only what the failed criteria require. Everything else stays as it is: the
+review judges the whole diff, not just your latest edit.
+
+A repair round's task carries the reviewer's reproduction for each finding. Reproduce it before you
+change anything, so you fix the defect and not the sentence describing it.
 
 ## Memory discipline
 

@@ -7,9 +7,25 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/guard-bash.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/guard-bash.js"
+            ],
             "timeout": 10,
             "statusMessage": "forge: checking command"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/guard-checkout.js"
+            ],
+            "timeout": 10,
+            "statusMessage": "forge: checking write target"
           }
         ]
       }
@@ -21,7 +37,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/compact-output.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/compact-output.js"
+            ],
             "timeout": 10,
             "statusMessage": "forge: compacting output"
           }
@@ -34,7 +52,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/subagent-metrics.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/subagent-metrics.js"
+            ],
             "timeout": 10
           }
         ]
@@ -46,7 +66,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"
+            ],
             "timeout": 5
           }
         ]

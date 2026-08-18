@@ -5,8 +5,8 @@ export const meta = {
     'Run /forge:work <issue-id> to execute an issue written by /forge:issue. No user interaction is possible during the run.',
   phases: [
     { title: 'Implement', detail: 'read the issue, branch, write the code' },
-    { title: 'Review', detail: 'check the acceptance criteria against the branch diff' },
-    { title: 'Commit', detail: 'commit on the branch' },
+    { title: 'Review', detail: 'judge the diff against the issue' },
+    { title: 'Commit', detail: 'commit on the issue branch' },
   ],
 }
 
@@ -21,31 +21,22 @@ export const meta = {
 // different failed sets forever. Stall detection normally ends the loop first.
 const MAX_ROUNDS = 8
 
+// The reviewer reads the issue itself and judges the diff. It is handed nothing
+// the implementer wrote about its own work - no summary of what was built, no
+// restatement of the criteria - because a reviewer reading the implementer's
+// account of the change is grading the account, not the change.
 const RESULT = {
   type: 'object',
-  required: ['status', 'branch', 'base', 'summary', 'acceptance'],
+  required: ['status', 'branch', 'base', 'summary'],
   properties: {
     status: { type: 'string', enum: ['implemented', 'blocked'] },
-    branch: { type: 'string', description: 'branch the work sits on, empty when blocked' },
+    branch: { type: 'string', description: 'issue branch the work sits on, empty when blocked' },
     base: {
       type: 'string',
-      description: 'commit sha the branch was cut from, so the review can diff against it',
+      description: 'commit sha the branch was cut from - the review diffs and compares against it',
     },
-    summary: { type: 'string', description: 'one line, what changed' },
+    summary: { type: 'string', description: 'one line, what changed - for the commit message only' },
     files: { type: 'array', items: { type: 'string' } },
-    acceptance: {
-      type: 'array',
-      description: 'the acceptance criteria copied verbatim from the issue',
-      items: {
-        type: 'object',
-        required: ['id', 'text'],
-        properties: {
-          id: { type: 'string' },
-          text: { type: 'string' },
-          verify: { type: 'string', description: 'command that checks it, empty if none' },
-        },
-      },
-    },
     blocker: { type: 'string', description: 'why it could not be done, empty otherwise' },
   },
 }
@@ -56,7 +47,16 @@ const VERDICT = {
   properties: {
     pass: { type: 'boolean' },
     failed: { type: 'array', items: { type: 'string' }, description: 'ids of failed criteria' },
-    notes: { type: 'array', items: { type: 'string' }, description: 'one line per failed criterion' },
+    notes: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'one line per failed criterion: what is wrong and how you reproduced it',
+    },
+    preexisting: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'failures this change did not cause, proven at the base. Reported, never a finding',
+    },
   },
 }
 
@@ -84,11 +84,6 @@ const RULES = [
   'Return the requested object. No prose, no summary of your steps.',
 ].join('\n')
 
-const STAGE = [
-  'When you are done, stage everything with `git add -A`. Do not commit.',
-  'Staging is what makes your work visible to the review, new files included.',
-].join('\n')
-
 phase('Implement')
 
 let run = await agent(
@@ -103,10 +98,10 @@ let run = await agent(
     '5. Run forge-test once when done.',
     '6. Record durable project knowledge in your memory. Nothing issue-specific.',
     '',
-    STAGE,
+    'Stage everything with `git add -A`. Do not commit.',
+    'Staging is what makes your work visible to the review, new files included.',
     '',
     'Return status "blocked" with a blocker instead of guessing when the issue is unworkable.',
-    'Copy the acceptance criteria into the acceptance field verbatim, including the verify command of each.',
     'Return the base sha you noted in step 3.',
     '',
     RULES,
@@ -125,6 +120,26 @@ if (!run) {
 }
 if (run.status === 'blocked') return { status: 'blocked', issue, blocker: run.blocker || 'unspecified' }
 
+const reviewBrief = [
+  `The work sits on branch ${run.branch} in the checkout, staged and uncommitted.`,
+  `The diff to judge is \`git diff ${run.base}\`: everything the implementer produced, new files`,
+  'included. Use exactly that base sha; do not guess a base branch name.',
+  '',
+  `Read issue ${issue} yourself, through the project's issue-backend skill. The acceptance criteria`,
+  'in it are what you judge against. Nobody hands you a summary of the change - you have the issue',
+  'and the diff, and that is the point.',
+  '',
+  'A red check is a fact you report. It is a finding only if this change caused it. When the diff',
+  `touched the failing code, prove it: \`git worktree add <tmp-dir> ${run.base}\`, run the same check`,
+  'there, remove the worktree. Red at the base too means it was already broken - list it under',
+  'preexisting and move on.',
+  '',
+  'You may write and run code to settle a doubt - a probe, a repro, a throwaway harness - but only',
+  'inside a worktree you built outside the checkout. Writes into the checkout are refused. A probe',
+  'that reaches the checkout becomes a change no criterion asked for, and the next round files it',
+  'against the issue.',
+].join('\n')
+
 let verdict = null
 let previousFailed = null
 let round = 0
@@ -138,23 +153,18 @@ while (true) {
   // would miss a repair that broke one of them.
   verdict = await agent(
     [
-      `Review the work for issue ${issue} on branch ${run.branch}.`,
+      `Review issue ${issue}.`,
       '',
-      `The diff to judge is \`git diff ${run.base}\`. That is everything the implementer has produced`,
-      'on this branch so far, staged changes and new files included. Use exactly this command; do not',
-      'guess a base branch name.',
-      '',
-      'Acceptance criteria:',
-      ...run.acceptance.map((c) => `${c.id}: ${c.text}${c.verify ? ` | verify: ${c.verify}` : ''}`),
+      reviewBrief,
       '',
       'Check every criterion, not only the ones that failed before - a repair can break a criterion',
-      'that used to hold. Run each verify command where one is given.',
-      'Judge only these criteria. Style opinions are out of scope.',
+      'that used to hold. Run each verify command the issue names.',
+      'Judge only the criteria. Style opinions are out of scope.',
       'Set pass true only when every criterion holds.',
       '',
       RULES,
     ].join('\n'),
-    { agentType: 'forge:reviewer', schema: VERDICT, effort: 'low', label: `review:round-${round}`, phase: 'Review' },
+    { agentType: 'forge:reviewer', schema: VERDICT, label: `review:round-${round}`, phase: 'Review' },
   )
 
   if (!verdict) return { status: 'error', issue, branch: run.branch, reason: 'Reviewer did not return a verdict.' }
@@ -171,7 +181,8 @@ while (true) {
       rounds: round,
       failed: verdict.failed,
       notes: verdict.notes || [],
-      hint: 'The implementer stopped making progress. Staged work is on the branch. Fix it by hand or sharpen the acceptance criteria.',
+      preexisting: verdict.preexisting || [],
+      hint: `The implementer stopped making progress. The staged work is on ${run.branch}. Fix it by hand or sharpen the acceptance criteria.`,
     }
   }
 
@@ -184,7 +195,8 @@ while (true) {
       rounds: round,
       failed: verdict.failed,
       notes: verdict.notes || [],
-      hint: 'The verdict kept changing without converging. Staged work is on the branch.',
+      preexisting: verdict.preexisting || [],
+      hint: `The verdict kept changing without converging. The staged work is on ${run.branch}.`,
     }
   }
 
@@ -199,11 +211,10 @@ while (true) {
       `Fix only these criteria: ${verdict.failed.join(', ')}.`,
       ...(verdict.notes || []).map((n) => `- ${n}`),
       '',
+      'Each line above carries the reviewer\'s reproduction. Reproduce it before you change anything,',
+      'so you fix the defect rather than the sentence describing it.',
       'Change nothing else. Re-run only the checks that cover these criteria.',
-      'Copy the acceptance criteria into the acceptance field verbatim again.',
-      `Return the same base sha as before: ${run.base}.`,
-      '',
-      STAGE,
+      `Stay on ${run.branch} and keep the same base: ${run.base}. Stage with \`git add -A\`, do not commit.`,
       '',
       RULES,
     ].join('\n'),
@@ -215,12 +226,7 @@ while (true) {
     return { status: 'blocked', issue, branch: run.branch, rounds: round, blocker: repair.blocker || 'unspecified' }
   }
 
-  run = {
-    ...repair,
-    base: run.base,
-    branch: run.branch,
-    acceptance: repair.acceptance && repair.acceptance.length ? repair.acceptance : run.acceptance,
-  }
+  run = { ...repair, base: run.base, branch: run.branch }
 }
 
 phase('Commit')
@@ -248,4 +254,5 @@ return {
   sha: commit.sha || '',
   summary: run.summary,
   rounds: round,
+  preexisting: verdict.preexisting || [],
 }

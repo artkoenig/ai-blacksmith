@@ -22,9 +22,10 @@ The loop ends on one of three things:
 - **cap** - a runaway backstop at eight rounds, for a loop that oscillates between different failure
   sets. Stall detection normally ends things first. Override with `maxRounds`.
 
-Every round gets a fresh reviewer with no memory, judging the whole accumulated diff against the
-commit the branch was cut from - not just the latest edit. That is what catches a repair which fixed
-one criterion and broke another.
+Every round gets a fresh reviewer with no memory. It reads the issue itself and judges the whole
+accumulated diff against the commit the branch was cut from - not just the latest edit, and never a
+summary written by whoever did the work. That is what catches a repair which fixed one criterion and
+broke another.
 
 ## Why it is cheap
 
@@ -36,6 +37,7 @@ one criterion and broke another.
 | The guard hook | A raw `npm test` is rewritten to the wrapper before it runs, or refused with the wrapper named. |
 | The compaction hook | Bash output past a line budget reaches the agent as head + tail plus a path to the full log. stderr is never touched. |
 | Agent memory | The implementer's project map is committed to `.claude/agent-memory/` and grows. The second issue in an area costs almost no exploration. |
+| Pre-existing red | The reviewer proves whether a failing check was already failing before it hands back a repair round. A round spent fixing something the change never broke is the most expensive kind of waste. |
 
 ## Commands
 
@@ -55,6 +57,11 @@ Two, on purpose.
   project map as it goes, so it stops rediscovering it.
 - **`forge:reviewer`** - no memory, on purpose. A reviewer that remembers its own verdicts drifts
   toward confirming them. Every round gets a fresh one.
+
+  It reads the issue itself rather than being handed a summary, writes nothing into the checkout it
+  judges, and builds throwaway worktrees outside the checkout when it needs to run something against
+  another revision. That is how it separates a failure this change caused from one that was already
+  red - and how it settles a doubt with a probe without that probe landing in the diff.
 
 `/forge:new-agent` adds project agents from the same template when an area deserves its own memory.
 
