@@ -81,6 +81,71 @@ node -e '
   || { fail hooks "compact-output touched a short result"; S=1; }
 [ "$S" = 0 ] && ok "hook decisions"
 
+# --- context measurement ----------------------------------------------------
+CTX="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$CTX"' EXIT
+mkdir -p "$CTX/.forge" "$CTX/.claude/agents" "$CTX/.claude/skills/probe" \
+  "$CTX/.claude/agent-memory/prober" "$CTX/.claude/rules"
+printf '{ "version": 1 }\n' > "$CTX/.forge/config.json"
+cat > "$CTX/.claude/agents/prober.md" <<'MD'
+---
+name: prober
+memory: project
+skills:
+  - forge:probe
+  - probe
+---
+The agent body.
+MD
+printf '# probe\nA skill body.\n' > "$CTX/.claude/skills/probe/SKILL.md"
+printf 'memory line\n%.0s' $(seq 250) > "$CTX/.claude/agent-memory/prober/MEMORY.md"
+printf 'detail\n' > "$CTX/.claude/agent-memory/prober/topic.md"
+printf 'a project rule\n' > "$CTX/.claude/rules/forge.md"
+cat > "$CTX/transcript.jsonl" <<'JSONL'
+{"type":"user","agentId":"a1","message":{"role":"user","content":[{"type":"text","text":"twelve chars"}]}}
+{"type":"assistant","agentId":"a1","message":{"usage":{"input_tokens":3,"cache_creation_input_tokens":1000,"cache_read_input_tokens":200},"content":[{"type":"tool_use"}]}}
+{"type":"assistant","agentId":"other","message":{"usage":{"input_tokens":99999},"content":[{"type":"tool_use"}]}}
+{"type":"assistant","agentId":"a1","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":2000},"content":[{"type":"tool_use"},{"type":"tool_use"}]}}
+JSONL
+
+S=0
+echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober"}' \
+  | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-start.js >/dev/null
+echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober","transcript_path":"'"$CTX/transcript.jsonl"'"}' \
+  | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
+
+CTX="$CTX" node -e '
+  const fs=require("fs"), path=require("path"), root=process.env.CTX
+  const last=(f)=>{const l=fs.readFileSync(path.join(root,".forge",f),"utf8").trim().split("\n");return JSON.parse(l[l.length-1])}
+  const bad=(m)=>{console.log(m);process.exit(1)}
+  const run=last("context.jsonl")
+  const kinds=run.sources.map(s=>s.kind)
+  for (const k of ["agent","memory","skill","rules"]) if(!kinds.includes(k)) bad("no "+k+" source recorded")
+  if (kinds.filter(k=>k==="skill").length!==1) bad("a skill named twice was counted twice")
+  const mem=run.sources.find(s=>s.kind==="memory")
+  if (mem.lines!==200||!(mem.bytesFull>mem.bytes)) bad("MEMORY.md was not capped at its index")
+  if (!run.sources.some(s=>s.kind==="memory-topic"&&s.loaded===false)) bad("a topic file was counted as loaded")
+  if (run.estTokens!==run.sources.filter(s=>s.loaded).reduce((n,s)=>n+s.estTokens,0)) bad("the estimate does not add up")
+  const dump=path.join(root,run.dump)
+  if (!fs.existsSync(path.join(dump,"index.json"))) bad("no index.json beside the copies")
+  for (const s of run.sources.filter(s=>s.loaded)) if(!fs.existsSync(path.join(dump,s.dump))) bad("no copy of "+s.path)
+  const m=last("metrics.jsonl")
+  if (m.startTokens!==1203) bad("start tokens: "+m.startTokens)
+  if (m.peakTokens!==2005) bad("peak tokens: "+m.peakTokens)
+  if (m.toolCalls!==3) bad("tool calls counted another agents turns: "+m.toolCalls)
+  if (m.promptTokens!==3) bad("prompt tokens: "+m.promptTokens)
+' || { fail context "the start hook or the metrics hook measured wrong"; S=1; }
+
+echo '{"cwd":"/nonexistent","agent_type":"forge:prober"}' | node plugins/forge/scripts/subagent-start.js >/dev/null 2>&1 \
+  || { fail context "the start hook failed on a project it cannot write to"; S=1; }
+(cd "$CTX" && "$BIN/forge-context") | grep -q "forge:prober" \
+  || { fail context "forge-context did not list the run"; S=1; }
+(cd "$CTX" && "$BIN/forge-context" --sources latest) | grep -q "unattributed" \
+  || { fail context "--sources did not name the unattributed remainder"; S=1; }
+(cd "$CTX" && "$BIN/forge-context" --dump latest) | grep -q "MEMORY.md" \
+  || { fail context "--dump did not list the saved copies"; S=1; }
+[ "$S" = 0 ] && ok "context measurement"
+
 # --- workflow control flow --------------------------------------------------
 node - <<'JS' || fail workflow "the control flow did not behave as expected"
 const fs=require('fs')

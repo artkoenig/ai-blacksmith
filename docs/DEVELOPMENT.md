@@ -11,6 +11,7 @@ skills and agents, from the working tree.
 .claude/settings.json         registers the hooks by path
 .claude/skills/issue-backend  this repository's own adapter - GitHub Issues, not a symlink
 .forge/config.json            forge-test runs test.sh
+.forge/context.jsonl          one line per agent start, plus copies under .forge/context/ (both ignored)
 ```
 
 Edit the file under `plugins/forge/`. Never edit through the symlink path.
@@ -52,12 +53,13 @@ to a new one, restart.
 ## Checks
 
 ```bash
-./test.sh          # four suites, no Claude Code session needed
+./test.sh          # five suites, no Claude Code session needed
 forge-test         # the same, through the wrapper: 0 or 1
 ```
 
 `test.sh` covers the manifest and syntax, the wrapper contract against a fixture project, every hook
-decision, and the workflow's control flow against stubbed agents - wave order, stall detection,
+decision, the startup measurement against a fixture agent and a synthetic transcript, and the
+workflow's control flow against stubbed agents - wave order, stall detection,
 skipped dependents, merge conflicts, a missing issue id.
 
 ## Still unverified
@@ -68,3 +70,7 @@ Neither has been observed in a real session:
   the unprefixed names are used instead, so this stays open until someone runs an installed copy.
 - Whether plugin hooks fire inside workflow-spawned agents. Here the hooks come from project
   settings rather than the plugin, so this stays open too.
+- Whether the transcript a `SubagentStop` hook is handed names the agent's own turns, in a file of
+  its own or by `agentId`. `subagent-metrics.js` narrows by `agentId`, then by `isSidechain`, then
+  gives up and records `startTokens: null`. A run where the number is missing rather than wrong is
+  the expected failure. The estimate from `SubagentStart` does not depend on the transcript.

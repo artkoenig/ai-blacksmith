@@ -2,3 +2,5 @@
 .forge/metrics.jsonl
 .claude/agent-memory-local/
 .claude/worktrees/
+.forge/context/
+.forge/context.jsonl

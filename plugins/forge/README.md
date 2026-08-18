@@ -30,6 +30,7 @@ pull requests stay yours.
 | The compaction hook | Bash output past a line budget arrives as head + tail plus a path to the full log. stderr is never touched. |
 | The cut | Cutting adds a dispatch set, so `/forge:issue` cuts only for parallelism, for a diff too large to review in one pass, or for a real dependency. |
 | Pre-existing red | The reviewer proves a failing check was already failing before it spends a repair round on it. |
+| Measured startup | Every agent start records what it loaded and what that cost, so a growing `MEMORY.md` or skill shows up as a number instead of a feeling. |
 
 ## Each increment's loop ends on
 
@@ -49,6 +50,7 @@ still merge. A merge conflict is reported, never resolved.
 | `/forge:work <id>` | Execute an issue. Usually started for you by `/forge:issue`. |
 | `/forge:new-agent` | Add a project agent with its own memory. |
 | `/forge:stats` | Tool calls per agent run, over time. |
+| `/forge:context` | What each agent loaded at startup: measured tokens, breakdown by source, saved copies. |
 
 ## Agents
 
@@ -76,7 +78,9 @@ the target repository: `/forge:bootstrap`.
 
 ## Requirements
 
-- Claude Code v2.1.154 or later, workflows available on your plan. On Pro, enable **Dynamic
+- Claude Code v2.1.154 or later, workflows available on your plan. The `SubagentStart` hook behind
+  `/forge:context` needs v2.1.234 or later; without it the estimate is missing and only the measured
+  numbers from `SubagentStop` are recorded. On Pro, enable **Dynamic
   workflows** in `/config`. Without them there is no `/forge:work`.
 - Auto memory enabled. Off, the `memory:` field does nothing and agents relearn the project each run.
 - Node on `PATH`.
