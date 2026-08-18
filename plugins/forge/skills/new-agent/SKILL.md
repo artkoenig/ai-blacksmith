@@ -1,16 +1,16 @@
 ---
 name: new-agent
-description: Create a project-specific subagent that builds its own memory. Use when one area of the codebase keeps coming up and deserves an agent that remembers it.
+description: Create a project-specific subagent for one area of the codebase. Use when an area keeps coming up and deserves an agent with its own scope and rules.
 argument-hint: "[domain, e.g. api or db-schema]"
 allowed-tools: Read, Write, Grep, Glob, AskUserQuestion
 ---
 
 # Create a project agent
 
-Add one where an area is distinct enough that its knowledge should not sit in the implementer's
-index: a separate stack, a separate service, a domain with its own rules.
+Add one where an area is distinct enough to carry its own scope: a separate stack, a separate
+service, a domain with its own rules.
 
-Never add one just to have one. Every agent is another index to keep under 200 lines.
+Never add one just to have one. Every agent is another definition to keep current.
 
 ## 1. Scope
 
@@ -25,14 +25,12 @@ Copy `${CLAUDE_SKILL_DIR}/agent-template.md` to `.claude/agents/<domain>.md`:
 - `description`: what it owns and when to delegate to it. Routing reads this.
 - `tools`: the minimum. Drop `Write` where it only edits, `Bash` where it runs nothing.
 - `maxTurns`: a real ceiling.
-- `memory: project` stays.
 
-## 3. Seed the memory
+## 3. Write down what the domain needs
 
-Write `.claude/agent-memory/<domain>/MEMORY.md` with what this conversation already knows: where
-the domain's code lives, which command exercises it, which conventions apply. One line per fact.
-
-An empty index costs the agent its first run rediscovering what was on screen.
+Auto memory is off, so the agent carries nothing between runs. Put what it must know - where the
+domain's code lives, which command exercises it, which conventions apply - in a `paths`-scoped
+rule under `.claude/rules/`, or in the agent's own body where it is short.
 
 ## 4. Report
 
