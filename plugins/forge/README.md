@@ -84,8 +84,10 @@ the target repository: `/forge:bootstrap`.
   workflows** in `/config`. Without them there is no `/forge:work`.
 - Auto memory enabled. Off, the `memory:` field does nothing and agents relearn the project each
   run. A cloud session needs `CLAUDE_CODE_REMOTE_MEMORY_DIR` set for it; the project settings `env`
-  block carries it. It costs what it saves: turning it on adds the memory instructions and the
-  memory tool to every agent start, around 5k tokens, before the memory itself.
+  block carries it. It is not free: an agent that declares `memory:` pays around 4.5k tokens per
+  start for the memory instructions and tool, on top of its index. An agent without the field pays
+  nothing - measured, the reviewer starts on the same harness budget as an implementer with memory
+  off. `/forge:context` shows both.
 - Node on `PATH`.
 
 `/forge:bootstrap` checks both and says what breaks.

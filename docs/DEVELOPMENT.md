@@ -92,17 +92,27 @@ auto memory: without it the agent launches with neither the memory instructions 
 configuring a cloud session from the repository. The change applied to the running session - no
 restart.
 
-Measured across three implementer starts, same agent, same probe:
+Measured, same probe each time. The last column is `start` minus the sources - the system prompt,
+the tool schemas, and whatever else the harness adds:
 
-| | start | est | what changed |
-| --- | --- | --- | --- |
-| before the memory existed | 11475 | 971 | - |
-| memory on disk, auto memory off | 11504 | 1680 | `est` +709, `start` +29: the file reached nobody |
-| auto memory on | 16660 | 1680 | `start` +5156 for a 640-token file |
+| | `memory:` | start | est | harness |
+| --- | --- | --- | --- | --- |
+| implementer, before the memory existed | project | 11475 | 971 | 10504 |
+| implementer, memory on disk, auto memory off | project | 11504 | 1040\* | 10464 |
+| implementer, auto memory on | project | 16660 | 1680 | 14980 |
+| reviewer, auto memory on | none | 11509 | 1229 | 10280 |
 
-The gap is the memory instructions and the memory tool schema, and every agent start pays it. The
-memory has to save more than 5k tokens a run to be worth it - roughly two searches the map spares.
-`/forge:context` is what makes both the hole and the price visible.
+\* the 640-token index is out of `est` in that row: it was on disk and nothing read it.
+
+An agent that declares `memory:` pays about 4.5k tokens for the memory instructions and the tool
+schemas, on top of the index itself. An agent without the field pays none of it: the reviewer's
+harness budget sits within 200 tokens of the implementer's with memory off, and asked directly it
+answered that no `MEMORY.md` reached it. Omitting the field is the only switch - the docs give no
+`memory: false`.
+
+So the price is per agent, not per session. For the implementer the map has to save more than 5k
+tokens a run, roughly two searches. The reviewer stays cheap by design, and its `You have no memory`
+line is now a measured fact rather than an intention.
 
 ## Still unverified
 
