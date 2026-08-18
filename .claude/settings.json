@@ -1,7 +1,6 @@
 {
-  "autoMemoryEnabled": true,
+  "autoMemoryEnabled": false,
   "outputStyle": "Forge Terse",
-  "env": { "CLAUDE_CODE_REMOTE_MEMORY_DIR": "/home/user/test/.claude/agent-memory" },
   "hooks": {
     "PreToolUse": [
       {
