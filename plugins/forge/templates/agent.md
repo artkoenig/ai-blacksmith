@@ -8,6 +8,7 @@ tools: Read, Edit, Write, Bash, Grep, Glob, Skill
 memory: project
 skills:
   - forge:agent-protocol
+  - agent-protocol
 color: green
 ---
 

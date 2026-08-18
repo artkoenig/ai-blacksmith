@@ -94,6 +94,12 @@ const input = typeof args === 'string' ? { issue: args.trim() } : args || {}
 const issue = input.issue ? String(input.issue).trim() : ''
 const maxRounds = Number(input.maxRounds) > 0 ? Number(input.maxRounds) : MAX_ROUNDS
 
+// Installed, the agents are namespaced `forge:`. Loaded from a checkout's own
+// .claude/agents/ they are not. Pass agentPrefix: '' to run against those.
+const agentPrefix = typeof input.agentPrefix === 'string' ? input.agentPrefix : 'forge:'
+const IMPLEMENTER = `${agentPrefix}implementer`
+const REVIEWER = `${agentPrefix}reviewer`
+
 if (!issue) {
   return { status: 'error', reason: 'No issue id. Run /forge:work <issue-id>.' }
 }
@@ -105,9 +111,9 @@ const increments =
         title: inc.title || '',
         criteria: Array.isArray(inc.criteria) ? inc.criteria : [],
         dependsOn: Array.isArray(inc.dependsOn) ? inc.dependsOn.map(String) : [],
-        agent: inc.agent || 'forge:implementer',
+        agent: inc.agent || IMPLEMENTER,
       }))
-    : [{ id: '1', title: '', criteria: [], dependsOn: [], agent: 'forge:implementer' }]
+    : [{ id: '1', title: '', criteria: [], dependsOn: [], agent: IMPLEMENTER }]
 
 // Everything else an agent works by is in the agent-protocol skill, preloaded
 // into both. Repeating it here would only let the two drift apart.
@@ -130,7 +136,7 @@ const prep = await agent(
     '',
     RULES,
   ].join('\n'),
-  { agentType: 'forge:implementer', schema: PREPARE, label: `prepare:${issue}`, phase: 'Prepare' },
+  { agentType: IMPLEMENTER, schema: PREPARE, label: `prepare:${issue}`, phase: 'Prepare' },
 )
 
 if (!prep) {
@@ -138,8 +144,8 @@ if (!prep) {
     status: 'error',
     issue,
     reason:
-      'Preparation returned nothing. Check that the plugin-scoped agent type forge:implementer ' +
-      'resolves; if it does not, the run never started.',
+      `Preparation returned nothing. Check that the agent type ${IMPLEMENTER} resolves; if it ` +
+      'does not, the run never started.',
   }
 }
 
@@ -223,7 +229,7 @@ async function runIncrement(inc) {
         '',
         RULES,
       ].join('\n'),
-      { agentType: 'forge:reviewer', schema: VERDICT, label: `review:${label}:${round}`, phase: 'Review' },
+      { agentType: REVIEWER, schema: VERDICT, label: `review:${label}:${round}`, phase: 'Review' },
     )
 
     if (!verdict) return { inc, status: 'error', reason: 'Reviewer returned no verdict.', branch, worktree: wt }
@@ -352,7 +358,7 @@ while (pending.size) {
             '',
             RULES,
           ].join('\n'),
-          { agentType: 'forge:implementer', schema: MERGE, label: `merge:${issue}`, phase: 'Merge' },
+          { agentType: IMPLEMENTER, schema: MERGE, label: `merge:${issue}`, phase: 'Merge' },
         )
 
   const byIncrement = new Map((merge && merge.results ? merge.results : []).map((r) => [String(r.increment), r]))
