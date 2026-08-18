@@ -48,6 +48,11 @@ const VERDICT = {
       items: { type: 'string' },
       description: 'failures this change did not cause, proven at the base. Reported, never a finding',
     },
+    observations: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'true remarks that block nothing - every criterion still met, no behaviour changed',
+    },
   },
 }
 
@@ -207,6 +212,8 @@ async function runIncrement(inc) {
     `Read issue ${issue} yourself, through the project's issue-backend skill.`,
     criteriaLine(inc),
     `Prove a red check at the base before filing it: \`git worktree add <tmp-dir> ${base}\`.`,
+    'File nothing you cannot reproduce. A true remark that blocks nothing goes in `observations`.',
+    'Answer the blast radius too: what this change breaks that no criterion names.',
   ].join('\n')
 
   let verdict = null
@@ -299,6 +306,7 @@ async function runIncrement(inc) {
     rounds: round,
     summary: run.summary,
     preexisting: verdict.preexisting || [],
+    observations: verdict.observations || [],
   }
 }
 
@@ -375,6 +383,7 @@ while (pending.size) {
         rounds: r.rounds,
         summary: r.summary,
         preexisting: r.preexisting,
+        observations: r.observations,
       })
     } else {
       outcomes.push({
