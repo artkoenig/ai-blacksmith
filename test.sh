@@ -240,7 +240,6 @@ const run=(a,{verdicts={},conflicts=[]}={})=>{
   const calls=[]
   const agent=async(prompt,o)=>{
     calls.push(o.label)
-    if(o.label.startsWith('prepare')) return {branch:'forge/1',base:'b0'}
     if(o.label.startsWith('merge')){
       const ids=[...prompt.matchAll(/^ {2}(\S+): /gm)].map(m=>m[1])
       return {results:ids.map(id=>({increment:id,merged:!conflicts.includes(id),sha:'s',conflict:'x'}))}
@@ -258,10 +257,10 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
 ;(async()=>{
   let {r,calls}=await run('1')
   eq(r.status,'done','uncut issue')
-  eq(calls,['prepare:1','implement:1','review:1:0','commit:1'],'uncut dispatch order')
+  eq(calls,['implement:1','review:1:0','commit:1'],'uncut dispatch order')
 
   ;({r,calls}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:[]}]}))
-  eq(calls.slice(1,3),['implement:1/a','implement:1/b'],'independent increments did not run together')
+  eq(calls.slice(0,2),['implement:1/a','implement:1/b'],'independent increments did not run together')
   eq(st(r),{a:'merged',b:'merged'},'independent outcomes')
 
   ;({r,calls}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:['a']}]}))

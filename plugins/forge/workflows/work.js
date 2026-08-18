@@ -4,7 +4,6 @@ export const meta = {
   whenToUse:
     'Run /forge:work <issue-id> to execute an issue written by /forge:issue, or pass a cut to run its increments. No user interaction is possible during the run.',
   phases: [
-    { title: 'Prepare', detail: 'cut the issue branch' },
     { title: 'Implement', detail: 'a worktree per increment where the issue was cut' },
     { title: 'Review', detail: 'judge each increment against its criteria' },
     { title: 'Commit', detail: 'commit the increment' },
@@ -65,15 +64,6 @@ const COMMIT = {
   },
 }
 
-const PREPARE = {
-  type: 'object',
-  required: ['branch', 'base'],
-  properties: {
-    branch: { type: 'string', description: 'the issue branch' },
-    base: { type: 'string', description: 'commit sha the issue branch was cut from' },
-  },
-}
-
 const MERGE = {
   type: 'object',
   required: ['results'],
@@ -129,32 +119,6 @@ const criteriaLine = (inc) =>
     ? `Only these acceptance criteria are yours: ${inc.criteria.join(', ')}. The issue holds others; they belong to another increment and are not your scope.`
     : 'Every acceptance criterion in the issue is yours.'
 
-// ---------------------------------------------------------------------------
-phase('Prepare')
-
-const prep = await agent(
-  [
-    `Prepare the run for issue ${issue}.`,
-    '',
-    `Create branch forge/${issue} from the current HEAD and switch to it. Change nothing else.`,
-    'Return the branch name and the commit sha it was cut from.',
-    '',
-    RULES,
-  ].join('\n'),
-  { agentType: IMPLEMENTER, schema: PREPARE, label: `prepare:${issue}`, phase: 'Prepare' },
-)
-
-if (!prep) {
-  return {
-    status: 'error',
-    issue,
-    reason:
-      `Preparation returned nothing. Check that the agent type ${IMPLEMENTER} resolves; if it ` +
-      'does not, the run never started.',
-  }
-}
-
-const issueBranch = prep.branch
 
 // A worktree exists only to keep concurrent implementers off each other. An
 // uncut issue has none running beside it, so it works in the checkout: nothing
@@ -163,7 +127,7 @@ const solo = increments.length === 1
 
 async function runIncrement(inc) {
   const label = solo ? issue : `${issue}/${inc.id}`
-  const branch = solo ? issueBranch : `forge/${issue}/${inc.id}`
+  const branch = solo ? '' : `forge/${issue}/${inc.id}`
   const worktree = solo ? '' : `.claude/worktrees/forge-${issue}-${inc.id}`
 
   let run = await agent(
@@ -176,11 +140,10 @@ async function runIncrement(inc) {
       `2. ${criteriaLine(inc)}`,
       '3. Read the project rules before any search tool. Search only what they do not answer.',
       ...(solo
-        ? [`4. The checkout is already on ${branch}. Work there.`]
+        ? ['4. The checkout is already on the issue branch. Work there. Cut no branch.']
         : [
-            '4. Create your workspace off the issue branch and work only inside it:',
-            `     git branch ${branch} ${issueBranch}`,
-            `     git worktree add ${worktree} ${branch}`,
+            '4. Create your workspace off the checkout\'s current branch and work only inside it:',
+            `     git worktree add ${worktree} -b ${branch} HEAD`,
             '   Prefix every command with a `cd` into that worktree.',
           ]),
       '5. Implement the change. Run forge-test once when you are done.',
@@ -200,13 +163,13 @@ async function runIncrement(inc) {
   if (run.status === 'blocked') return { inc, status: 'blocked', blocker: run.blocker || 'unspecified', branch }
 
   const wt = solo ? '' : run.worktree || worktree
-  const base = run.base || prep.base
+  const base = run.base || 'HEAD'
   const where = wt ? `cd ${wt} && ` : ''
 
   const reviewBrief = [
     wt
       ? `The work sits in the worktree ${wt}, on branch ${branch}, staged and uncommitted.`
-      : `The work sits in the checkout, on branch ${branch}, staged and uncommitted.`,
+      : 'The work sits in the checkout, on its current branch, staged and uncommitted.',
     `The diff to judge is \`${where}git diff ${base}\`. Use exactly that base.`,
     ...(wt ? [`Run every check there too: \`${where}<command>\`. The main checkout lacks this change.`] : []),
     `Read issue ${issue} yourself, through the project's issue-backend skill.`,
@@ -356,10 +319,10 @@ while (pending.size) {
       ? { results: [{ increment: accepted[0].inc.id, merged: true, sha: accepted[0].sha }] }
       : await agent(
           [
-            `Merge accepted increments of issue ${issue} onto ${issueBranch}, in this order:`,
+            `Merge accepted increments of issue ${issue} onto the checkout's current branch, in this order:`,
             ...accepted.map((r) => `  ${r.inc.id}: ${r.branch}`),
             '',
-            `Switch the main checkout to ${issueBranch} and merge each in turn.`,
+            'Merge each in turn. Stay on the branch the checkout is already on; switch to nothing else.',
             'On a conflict: abort that merge, record it, carry on with the next. Never resolve one.',
             'Remove the worktree of each branch that merged cleanly. Leave the rest.',
             'Do not push.',
@@ -403,6 +366,5 @@ const merged = outcomes.filter((o) => o.status === 'merged')
 return {
   status: merged.length === increments.length ? 'done' : merged.length ? 'partial' : 'failed',
   issue,
-  branch: issueBranch,
   increments: outcomes,
 }
