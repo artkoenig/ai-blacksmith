@@ -1,0 +1,18 @@
+{
+  "name": "artkoenig-marketplace",
+  "owner": {
+    "name": "artkoenig"
+  },
+  "plugins": [
+    {
+      "name": "forge",
+      "displayName": "Forge",
+      "version": "0.1.0",
+      "description": "Interview-driven issues with acceptance criteria, executed autonomously by a token-frugal workflow.",
+      "author": "artkoenig",
+      "license": "MIT",
+      "keywords": ["issues", "workflow", "subagents", "tokens", "automation"],
+      "source": "./plugins/forge"
+    }
+  ]
+}

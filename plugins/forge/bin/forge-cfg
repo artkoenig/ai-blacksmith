@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Reads .forge/config.json. Usage: forge-cfg get <dotted.path> [default]
+set -uo pipefail
+
+forge_root() {
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
+    printf '%s\n' "$CLAUDE_PROJECT_DIR"
+  elif git rev-parse --show-toplevel >/dev/null 2>&1; then
+    git rev-parse --show-toplevel
+  else
+    pwd
+  fi
+}
+
+ROOT="$(forge_root)"
+CFG="$ROOT/.forge/config.json"
+
+case "${1:-}" in
+  root) printf '%s\n' "$ROOT" ;;
+  path) printf '%s\n' "$CFG" ;;
+  exists) [ -f "$CFG" ] && printf 'yes\n' || printf 'no\n' ;;
+  get)
+    key="${2:-}"
+    fallback="${3:-}"
+    [ -f "$CFG" ] || { printf '%s\n' "$fallback"; exit 0; }
+    node -e '
+      const fs = require("fs");
+      let cfg;
+      try { cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+      catch { process.stdout.write(process.argv[3] || ""); process.exit(0); }
+      const value = process.argv[2].split(".").reduce((o, k) => (o == null ? o : o[k]), cfg);
+      if (value == null || value === "") { process.stdout.write(process.argv[3] || ""); }
+      else if (typeof value === "object") { process.stdout.write(JSON.stringify(value)); }
+      else { process.stdout.write(String(value)); }
+    ' "$CFG" "$key" "$fallback"
+    printf '\n'
+    ;;
+  *) printf 'usage: forge-cfg root|path|exists|get <dotted.path> [default]\n' >&2; exit 0 ;;
+esac

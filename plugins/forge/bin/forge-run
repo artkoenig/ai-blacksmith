@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Shared implementation behind forge-test / forge-lint / forge-typecheck / forge-build.
+#
+# Contract, identical for every kind:
+#   forge-<kind>                  -> one line: 0 (pass) or 1 (fail)
+#   forge-<kind> --failing        -> up to MAX_IDS failing ids, one per line
+#   forge-<kind> --detail <id>    -> up to MAX_DETAIL lines explaining that one failure
+#   forge-<kind> --run <pattern>  -> 0 or 1 for a subset
+#
+# Always exits 0. The payload carries the status, so a failing check never adds
+# error noise to the agent's transcript.
+set -uo pipefail
+
+MAX_IDS=20
+MAX_DETAIL=40
+
+KIND="${1:-test}"; shift || true
+CFG_BIN="$(dirname "$0")/forge-cfg"
+ROOT="$("$CFG_BIN" root)"
+LOG_DIR="$ROOT/.forge/last"
+LOG="$LOG_DIR/$KIND.log"
+STATUS_FILE="$LOG_DIR/$KIND.status"
+
+COMMAND="$("$CFG_BIN" get "commands.$KIND.command" "")"
+PARSER="$("$CFG_BIN" get "commands.$KIND.parser" "generic")"
+RUN_ARG="$("$CFG_BIN" get "commands.$KIND.runArg" "")"
+PATTERN="$("$CFG_BIN" get "commands.$KIND.failingPattern" "")"
+
+if [ -z "$COMMAND" ]; then
+  printf 'unconfigured: run /forge:bootstrap to set commands.%s.command\n' "$KIND"
+  exit 0
+fi
+
+mkdir -p "$LOG_DIR"
+
+execute() {
+  local cmd="$1"
+  ( cd "$ROOT" && eval "$cmd" ) >"$LOG" 2>&1
+  local rc=$?
+  [ "$rc" -eq 0 ] && printf '0\n' >"$STATUS_FILE" || printf '1\n' >"$STATUS_FILE"
+  cat "$STATUS_FILE"
+}
+
+failing_ids() {
+  [ -f "$LOG" ] || execute "$COMMAND" >/dev/null
+  case "$PARSER" in
+    jest)
+      grep -E '^[[:space:]]*(✕|×)' "$LOG" | sed -E 's/^[[:space:]]*(✕|×)[[:space:]]*//; s/ \([0-9]+ ms\)$//' ;;
+    pytest)
+      grep -E '^FAILED ' "$LOG" | sed -E 's/^FAILED[[:space:]]+//; s/[[:space:]]+-.*$//' ;;
+    go)
+      grep -E '^[[:space:]]*--- FAIL: ' "$LOG" | sed -E 's/^[[:space:]]*--- FAIL:[[:space:]]+//; s/[[:space:]]+\(.*\)$//' ;;
+    cargo)
+      grep -E '^[[:space:]]*[A-Za-z0-9_:]+ \.\.\. FAILED' "$LOG" | sed -E 's/[[:space:]]+\.\.\. FAILED.*$//; s/^[[:space:]]+//' ;;
+    *)
+      if [ -n "$PATTERN" ]; then grep -oE "$PATTERN" "$LOG"; else grep -iE '(^|[[:space:]])(fail|error)' "$LOG"; fi ;;
+  esac | sed '/^[[:space:]]*$/d' | awk '!seen[$0]++' | head -n "$MAX_IDS"
+}
+
+case "${1:-}" in
+  "")
+    execute "$COMMAND"
+    ;;
+  --failing)
+    ids="$(failing_ids)"
+    if [ -z "$ids" ]; then printf 'none\n'; else printf '%s\n' "$ids"; fi
+    ;;
+  --detail)
+    id="${2:-}"
+    if [ -z "$id" ]; then printf 'usage: forge-%s --detail <id>\n' "$KIND"; exit 0; fi
+    [ -f "$LOG" ] || execute "$COMMAND" >/dev/null
+    start="$(grep -n -F -- "$id" "$LOG" | head -1 | cut -d: -f1)"
+    if [ -z "$start" ]; then printf 'not found in %s\n' "${LOG#"$ROOT"/}"; exit 0; fi
+    sed -n "${start},$((start + MAX_DETAIL - 1))p" "$LOG"
+    ;;
+  --run)
+    pattern="${2:-}"
+    if [ -z "$pattern" ]; then printf 'usage: forge-%s --run <pattern>\n' "$KIND"; exit 0; fi
+    if [ -z "$RUN_ARG" ]; then
+      printf 'no subset support configured for %s, running everything\n' "$KIND"
+      execute "$COMMAND"
+    else
+      execute "$COMMAND ${RUN_ARG//\{pattern\}/$pattern}"
+    fi
+    ;;
+  --log)
+    printf '%s\n' "${LOG#"$ROOT"/}"
+    ;;
+  *)
+    printf 'usage: forge-%s [--failing | --detail <id> | --run <pattern> | --log]\n' "$KIND"
+    ;;
+esac
+exit 0
