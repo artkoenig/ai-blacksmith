@@ -43,16 +43,18 @@ paths:
 Your task names the branch, and the worktree where the issue was cut. Create both on the first
 round. Reuse them on every repair round.
 
+- Read the branch the checkout is on before you cut yours, and report it. Your reviewer lands your
+  work on it and has no other way to learn its name.
 - Never create a second worktree. It throws away the round before.
 - Never set `isolation: worktree`. It gives you a fresh temporary worktree on every call.
 - Prefix every command with a `cd` into the worktree.
 
-## Staging
+## Committing
 
-Stage with `git add -A` at the end of every round. Commit only when a task says to. An unstaged
-file is invisible to the review.
+Commit at the end of every round: `git add -A`, then the message the task gives you. An unstaged
+file is invisible to the review, and so is an uncommitted one.
 
-Never merge. Never push. Unless a task says so in those words.
+Never merge. Never push. The reviewer merges what it accepts.
 
 ## Repair rounds
 

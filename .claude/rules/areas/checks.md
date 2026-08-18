@@ -20,3 +20,4 @@ paths:
 - Keep the failure message specific enough to act on. It is the only thing `--detail` can show.
 - Every case names the break it catches, per `.claude/rules/tests.md`. Prove it: remove the line
   the case exists for, watch the suite go red, put it back.
+- Each new `mktemp -d` fixture replaces the EXIT trap; the new trap must list every fixture dir so far, or the suite leaks one.
