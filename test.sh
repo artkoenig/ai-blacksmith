@@ -166,6 +166,29 @@ if git -C . rev-parse --git-dir >/dev/null 2>&1; then
   [ "$S" = 0 ] && ok "committed rules"
 fi
 
+# --- area notes -------------------------------------------------------------
+# A note only reaches an agent if its front matter parses and its glob still
+# matches something. A note that fails either is silent: the agent researches
+# the area again and nobody is told why.
+if [ -d .claude/rules/areas ]; then
+  S=0
+  shopt -s globstar nullglob
+  for f in .claude/rules/areas/*.md; do
+    head -1 "$f" | grep -q '^---$' || { fail areas "$f has no front matter"; S=1; continue; }
+    globs=$(awk 'NR>1 && /^---$/{exit} /^[[:space:]]*-[[:space:]]*"/{gsub(/^[^"]*"|"[^"]*$/,""); print}' "$f")
+    [ -n "$globs" ] || { fail areas "$f names no paths"; S=1; continue; }
+    while read -r g; do
+      [ -n "$g" ] || continue
+      m=($g)
+      [ ${#m[@]} -gt 0 ] || { fail areas "$f globs \"$g\", which matches nothing"; S=1; }
+    done <<< "$globs"
+    [ "$(wc -l < "$f")" -le 40 ] || { fail areas "$f is past the 40 line budget for a note"; S=1; }
+    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail areas "$f is not tracked"; S=1; }
+  done
+  shopt -u globstar nullglob
+  [ "$S" = 0 ] && ok "area notes"
+fi
+
 # --- workflow control flow --------------------------------------------------
 node - <<'JS' || fail workflow "the control flow did not behave as expected"
 const fs=require('fs')

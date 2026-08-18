@@ -22,6 +22,7 @@ pull requests stay yours.
 
 | Lever | What it does |
 | --- | --- |
+| Area notes | What is true of one directory only lives in `.claude/rules/areas/<area>.md` under a `paths:` glob, and reaches an agent by itself the first time it reads a file there. Knowledge of an area costs nothing until the agent enters it, and the implementer writes back what it learns, so the second issue in an area is cheaper than the first. |
 | The workflow | The loop and every intermediate result live in script variables. Your conversation pays for the invocation and the final line. |
 | Wrapper commands | `forge-test` answers `0` or `1`. Detail costs extra on purpose: `--failing`, then `--detail <id>`. |
 | The guard hook | A raw `npm test` is rewritten to the wrapper before it runs, or refused with the wrapper named. |
@@ -99,4 +100,5 @@ from the `agent-protocol` skill.
 .claude/worktrees/                       one per increment of a cut issue (gitignored)
 .claude/skills/issue-backend/SKILL.md    your issue storage, as commands
 .claude/rules/forge.md                   the short version, loaded every session
+.claude/rules/areas/<area>.md            what is true of one directory, loaded when it is read
 ```
