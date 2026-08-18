@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 'use strict'
 // SubagentStart. Records what an agent carries into its first turn: the agent
-// definition, its memory index, the skills it declares, the project rules -
-// each with a size, and a copy saved beside the record so the content can be
-// read back after the run. Never blocks, never fails a run.
+// definition, the skills it declares, the project rules - each with a size, and
+// a copy saved beside the record so the content can be read back after the run.
+// Never blocks, never fails a run.
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { readInput, projectRoot, emit } = require(require('path').join(__dirname, 'lib.js'))
 
-const MEMORY_INDEX_LINES = 200 // only the first lines of MEMORY.md load
 const DUMP_MAX_BYTES = 256 * 1024 // one source larger than this is measured, not copied
 const KEEP_RUNS = 20 // dumps of older runs are pruned
 
@@ -80,7 +79,7 @@ function main(input) {
     return { entry, real, text }
   }
 
-  // The agent definition, and the skills and memory it declares.
+  // The agent definition, and the skills it declares.
   const agentFile = firstFile([
     path.join(root, '.claude', 'agents', agent + '.md'),
     path.join(pluginRoot, 'agents', agent + '.md'),
@@ -88,21 +87,6 @@ function main(input) {
   ])
   const added = add('agent', agentFile)
   const meta = added ? frontMatter(added.text) : {}
-
-  const memoryDirs = [
-    path.join(root, '.claude', 'agent-memory', agent),
-    path.join(root, '.claude', 'agent-memory-local', agent),
-  ]
-  for (const dir of memoryDirs) {
-    add('memory', firstFile([path.join(dir, 'MEMORY.md')]), { maxLines: MEMORY_INDEX_LINES })
-    let topics = []
-    try {
-      topics = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md')
-    } catch {
-      topics = []
-    }
-    for (const topic of topics.sort()) add('memory-topic', path.join(dir, topic), { loaded: false })
-  }
 
   for (const declared of [].concat(meta.skills || [])) {
     const name = String(declared).replace(/^[\w-]+:/, '')

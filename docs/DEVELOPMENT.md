@@ -12,7 +12,6 @@ skills and agents, from the working tree.
 .claude/skills/issue-backend  this repository's own adapter - GitHub Issues, not a symlink
 .forge/config.json            forge-test runs test.sh
 .forge/context.jsonl          one line per agent start, plus copies under .forge/context/ (both ignored)
-.claude/agent-memory/         the implementer's map of this project - tracked, and it must stay tracked
 ```
 
 Edit the file under `plugins/forge/`. Never edit through the symlink path.
@@ -59,8 +58,8 @@ forge-test         # the same, through the wrapper: 0 or 1
 ```
 
 `test.sh` covers the manifest and syntax, the wrapper contract against a fixture project, every hook
-decision, the startup measurement against a fixture agent and a synthetic transcript, that the agent memory
-is tracked and inside its budget, and the workflow's control flow against stubbed agents - wave order, stall detection,
+decision, the startup measurement against a fixture agent and a synthetic transcript, that the project
+rules are tracked, and the workflow's control flow against stubbed agents - wave order, stall detection,
 skipped dependents, merge conflicts, a missing issue id.
 
 ## Where an agent's transcript lives
@@ -78,41 +77,6 @@ measure anything it cannot attribute by `agentId` - measuring the file it was ha
 the session's tokens and tool calls under the agent's name. A missing number is the expected
 failure; a wrong one is not. The estimate from `SubagentStart` reads files, not the transcript, so
 it holds either way.
-
-## Auto memory in this session
-
-`memory: project` resolves to `.claude/agent-memory/<agent>/`, the scope the docs call shareable via
-version control, so `.claude/agent-memory/implementer/MEMORY.md` is tracked and reaches every
-checkout.
-
-It reached no agent until `CLAUDE_CODE_REMOTE_MEMORY_DIR` was set. Auto memory is on by default, but
-a cloud session turns it off unless that variable names a directory, and subagent memory is part of
-auto memory: without it the agent launches with neither the memory instructions nor the memory tool.
-`.claude/settings.json` now sets it in its `env` block, which is the route the docs give for
-configuring a cloud session from the repository. The change applied to the running session - no
-restart.
-
-Measured, same probe each time. The last column is `start` minus the sources - the system prompt,
-the tool schemas, and whatever else the harness adds:
-
-| | `memory:` | start | est | harness |
-| --- | --- | --- | --- | --- |
-| implementer, before the memory existed | project | 11475 | 971 | 10504 |
-| implementer, memory on disk, auto memory off | project | 11504 | 1040\* | 10464 |
-| implementer, auto memory on | project | 16660 | 1680 | 14980 |
-| reviewer, auto memory on | none | 11509 | 1229 | 10280 |
-
-\* the 640-token index is out of `est` in that row: it was on disk and nothing read it.
-
-An agent that declares `memory:` pays about 4.5k tokens for the memory instructions and the tool
-schemas, on top of the index itself. An agent without the field pays none of it: the reviewer's
-harness budget sits within 200 tokens of the implementer's with memory off, and asked directly it
-answered that no `MEMORY.md` reached it. Omitting the field is the only switch - the docs give no
-`memory: false`.
-
-So the price is per agent, not per session. For the implementer the map has to save more than 5k
-tokens a run, roughly two searches. The reviewer stays cheap by design, and its `You have no memory`
-line is now a measured fact rather than an intention.
 
 ## Still unverified
 

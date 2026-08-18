@@ -169,7 +169,7 @@ async function runIncrement(inc) {
       `1. Read issue ${issue} through the project's issue-backend skill. Goal and criteria only -`,
       '   no file list, no plan. Find your own way.',
       `2. ${criteriaLine(inc)}`,
-      '3. Read your memory before any search tool. Search only what it does not answer.',
+      '3. Read the project rules before any search tool. Search only what they do not answer.',
       ...(solo
         ? [`4. The checkout is already on ${branch}. Work there.`]
         : [
@@ -180,8 +180,6 @@ async function runIncrement(inc) {
           ]),
       '5. Implement the change. Run forge-test once when you are done.',
       '6. Stage with `git add -A`. Do not commit. Unstaged files are invisible to the review.',
-      '   Your memory file is part of the work: write it inside your workspace, never in the',
-      '   main checkout, or it stays uncommitted.',
       '',
       'Return status "blocked" with a blocker rather than guessing where the increment is unworkable.',
       solo
@@ -356,8 +354,6 @@ while (pending.size) {
             `Switch the main checkout to ${issueBranch} and merge each in turn.`,
             'On a conflict: abort that merge, record it, carry on with the next. Never resolve one.',
             'Remove the worktree of each branch that merged cleanly. Leave the rest.',
-            `If \`.claude/agent-memory/\` is dirty in the checkout afterwards, an implementer wrote`,
-            `its memory outside its worktree. Commit it on ${issueBranch} as "${issue}: agent memory".`,
             'Do not push.',
             '',
             RULES,

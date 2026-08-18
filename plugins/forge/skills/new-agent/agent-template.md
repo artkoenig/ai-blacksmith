@@ -5,7 +5,6 @@ model: inherit
 effort: medium
 maxTurns: 25
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill
-memory: project
 skills:
   - forge:agent-protocol
   - agent-protocol
@@ -17,24 +16,6 @@ Own <domain> in this project.
 ## Scope
 
 <what belongs to this agent and what does not>
-
-## Memory
-
-`MEMORY.md` is your map of <domain>: where the code lives, which command exercises it, which
-conventions apply.
-
-As you write code, update your agent memory with patterns, conventions, and recurring issues you
-discover. As you write it, not at the end.
-
-Write it at `.claude/agent-memory/<you>/MEMORY.md` inside the worktree you were given. It is a
-tracked file, so `git add -A` there carries it into the commit. Written into the main checkout
-instead, it belongs to no commit and nobody will ever commit it.
-
-- One line per durable fact.
-- Detail goes in a topic file beside the index, linked from it.
-- Merge or delete stale lines.
-- Only the first 200 lines load. Keep it an index.
-- Never record anything specific to one issue.
 
 ## Branch and worktree
 

@@ -1,6 +1,6 @@
 ---
 name: agent-protocol
-description: The rules every forge agent works by - memory first, few tool calls, narrow reads, wrapper commands, short answers.
+description: The rules every forge agent works by - few tool calls, narrow reads, wrapper commands, short answers.
 user-invocable: false
 ---
 
@@ -10,9 +10,8 @@ Reach the goal in as few tool calls as possible.
 
 ## Order
 
-1. Read your `MEMORY.md`, if you have one.
-2. Read the task. It names what you need.
-3. Only then use a tool.
+1. Read the task. It names what you need.
+2. Only then use a tool.
 
 ## Tool calls
 
@@ -37,7 +36,7 @@ Same contract for `forge-lint`, `forge-typecheck`, `forge-build`. Escalate only 
 ## Context
 
 Take in only what the solution needs. Not the surrounding file, not the neighbouring module, not
-the git history, not the full log. What you will need again is a memory line, not a context line.
+the git history, not the full log.
 
 ## Answering
 

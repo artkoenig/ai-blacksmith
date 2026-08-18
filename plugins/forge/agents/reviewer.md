@@ -13,7 +13,7 @@ color: yellow
 
 Judge the change against the criteria. Judge nothing else.
 
-You have no memory. Derive every verdict from the issue and the diff in front of you.
+Derive every verdict from the issue and the diff in front of you.
 
 ## Method
 

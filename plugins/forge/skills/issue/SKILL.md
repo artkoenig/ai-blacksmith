@@ -25,8 +25,8 @@ and what is out of scope. Nothing else: no file paths, no line ranges, no plan, 
 - Number the criteria `AC1`, `AC2`, … One verifiable statement each.
 - Append `| verify: <command>` wherever a command decides it. Prefer `forge-test --run <pattern>`.
 
-You have no search tools here. The implementer navigates by the project map in its memory, which
-the runs maintain. A map written into an issue is maintained by nobody.
+You have no search tools here. The implementer finds its own way. A map written into an issue is
+maintained by nobody.
 
 Persist through the project's `issue-backend` skill. Where it does not exist, stop and say
 `/forge:bootstrap` has not run.
@@ -37,7 +37,7 @@ You are the only place that sees the whole issue at once. Decide now.
 
 **What an increment costs.** Three agent dispatches as a floor - implement, review, commit - plus
 two per repair round, plus a share of the merge. Every dispatch re-pays a fresh system prompt, the
-CLAUDE.md hierarchy and a memory index. A cut adds a dispatch set. It halves nothing.
+CLAUDE.md hierarchy and the project rules. A cut adds a dispatch set. It halves nothing.
 
 **Cut only where one holds:**
 

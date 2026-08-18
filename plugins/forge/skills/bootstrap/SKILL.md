@@ -21,15 +21,10 @@ Propose what you found. Ask the user to confirm or correct it in one round:
 - **Subset flag** - how the test runner takes a pattern: `-t {pattern}`, `-k {pattern}`,
   `-run {pattern}`.
 
-## 2. Check two preconditions
+## 2. Check the precondition
 
-Report each in one line, and what breaks without it.
+Report it in one line, and what breaks without it.
 
-- **Auto memory.** Read `autoMemoryEnabled` from user and project settings, check
-  `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. Off means the agents' `memory:` field does nothing and they
-  relearn the project every run - the subagent launches without the memory instructions and without
-  the memory tool. In a cloud session it is off until `CLAUDE_CODE_REMOTE_MEMORY_DIR` is set; set it
-  in the project settings `env` block, which a cloud session reads from the repository.
 - **Workflows.** `/forge:work` is a workflow. Needs Claude Code v2.1.154 or later and a paid plan;
   on Pro, enabled in `/config`. Off means there is no execution path.
 
@@ -85,17 +80,17 @@ Never add deny rules for the raw runners. A deny rule is evaluated whatever the 
 so it blocks the rewrite instead of saving a turn.
 
 Append to `.gitignore`: `.forge/last/`, `.forge/metrics.jsonl`, `.forge/context.jsonl`,
-`.forge/context/`, `.claude/agent-memory-local/`, `.claude/worktrees/`.
+`.forge/context/`, `.claude/worktrees/`.
 
-`.claude/agent-memory/` is committed. That is how agent knowledge is shared, and an agent that
-starts from a map it cannot read costs a search on every issue. Prove it is not ignored:
+`.claude/rules/` is committed. That is how project knowledge reaches an agent. Prove it is not
+ignored:
 
 ```bash
-git check-ignore -v .claude/agent-memory/probe/MEMORY.md
+git check-ignore -v .claude/rules/probe.md
 ```
 
 Anything printed names the rule that swallows it - usually a blanket `.claude/`. Append
-`!.claude/agent-memory/` and check again.
+`!.claude/rules/` and check again.
 
 ## 4. Verify, then report
 

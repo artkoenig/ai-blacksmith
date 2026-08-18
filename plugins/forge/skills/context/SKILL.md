@@ -12,17 +12,16 @@ Two numbers per run, and they answer different questions.
 
 - `start` is measured: the tokens the model actually saw on its first turn, read back from the
   transcript. It includes the system prompt and the tool schemas, which no project file explains.
-- `est` is the sum of the files the start hook found: the agent definition, its `MEMORY.md` index,
-  the skills it declares, the project rules. This is the part the project owns and can shrink.
+- `est` is the sum of the files the start hook found: the agent definition, the skills it declares,
+  the project rules. This is the part the project owns and can shrink.
 
 Report a table grouped by agent: runs, median `start`, median `est`, trend across the most recent
 runs. Then one line of interpretation.
 
-- `est` rising run over run means a source file is growing. Almost always `MEMORY.md` past its
-  200-line index, or a skill that turned into prose.
-- A source that appears in `--sources` but never moves `start` is on disk and reaches nobody. For
-  `MEMORY.md` that means auto memory is off for the account: the file is committed, the agent never
-  sees it, and every issue pays for a search it should not need.
+- `est` rising run over run means a source file is growing. Almost always a skill that turned into
+  prose, or a rule that outgrew its topic.
+- A source that appears in `--sources` but never moves `start` is on disk and reaches nobody. Say
+  which one, and why the agent never loads it.
 - `start` rising while `est` is flat is not the project's doing. Say so instead of hunting for it.
 - `start` minus `est` is roughly fixed per agent. A jump means the agent gained tools or skills.
 
