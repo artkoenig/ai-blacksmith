@@ -79,18 +79,30 @@ the session's tokens and tool calls under the agent's name. A missing number is 
 failure; a wrong one is not. The estimate from `SubagentStart` reads files, not the transcript, so
 it holds either way.
 
-## Auto memory, observed off
+## Auto memory in this session
 
-`.claude/agent-memory/implementer/MEMORY.md` is tracked, and `/forge:context` measures it at 640
-estimated tokens. It does not reach the agent here. Adding it moved `est` by 709 tokens and `start`
-by 29 - the longer task prompt, nothing else - and an implementer asked what it knew answered `no
-memory`. Its transcript carries the task, the preloaded skill and the skill listing, and no memory
-attachment.
+`memory: project` resolves to `.claude/agent-memory/<agent>/`, the scope the docs call shareable via
+version control, so `.claude/agent-memory/implementer/MEMORY.md` is tracked and reaches every
+checkout.
 
-Nothing in the repository causes this: `autoMemoryEnabled` defaults to on and no setting or
-environment variable here turns it off, so the gate is account-side. The file is committed and
-correct; it starts paying the moment auto memory is on. `/forge:context` is what makes the
-difference visible - a source that never moves `start` reaches nobody.
+It reached no agent until `CLAUDE_CODE_REMOTE_MEMORY_DIR` was set. Auto memory is on by default, but
+a cloud session turns it off unless that variable names a directory, and subagent memory is part of
+auto memory: without it the agent launches with neither the memory instructions nor the memory tool.
+`.claude/settings.json` now sets it in its `env` block, which is the route the docs give for
+configuring a cloud session from the repository. The change applied to the running session - no
+restart.
+
+Measured across three implementer starts, same agent, same probe:
+
+| | start | est | what changed |
+| --- | --- | --- | --- |
+| before the memory existed | 11475 | 971 | - |
+| memory on disk, auto memory off | 11504 | 1680 | `est` +709, `start` +29: the file reached nobody |
+| auto memory on | 16660 | 1680 | `start` +5156 for a 640-token file |
+
+The gap is the memory instructions and the memory tool schema, and every agent start pays it. The
+memory has to save more than 5k tokens a run to be worth it - roughly two searches the map spares.
+`/forge:context` is what makes both the hole and the price visible.
 
 ## Still unverified
 

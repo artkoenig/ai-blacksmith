@@ -27,7 +27,9 @@ Report each in one line, and what breaks without it.
 
 - **Auto memory.** Read `autoMemoryEnabled` from user and project settings, check
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. Off means the agents' `memory:` field does nothing and they
-  relearn the project every run.
+  relearn the project every run - the subagent launches without the memory instructions and without
+  the memory tool. In a cloud session it is off until `CLAUDE_CODE_REMOTE_MEMORY_DIR` is set; set it
+  in the project settings `env` block, which a cloud session reads from the repository.
 - **Workflows.** `/forge:work` is a workflow. Needs Claude Code v2.1.154 or later and a paid plan;
   on Pro, enabled in `/config`. Off means there is no execution path.
 

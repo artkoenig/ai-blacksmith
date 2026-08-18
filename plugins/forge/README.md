@@ -82,7 +82,10 @@ the target repository: `/forge:bootstrap`.
   `/forge:context` needs v2.1.234 or later; without it the estimate is missing and only the measured
   numbers from `SubagentStop` are recorded. On Pro, enable **Dynamic
   workflows** in `/config`. Without them there is no `/forge:work`.
-- Auto memory enabled. Off, the `memory:` field does nothing and agents relearn the project each run.
+- Auto memory enabled. Off, the `memory:` field does nothing and agents relearn the project each
+  run. A cloud session needs `CLAUDE_CODE_REMOTE_MEMORY_DIR` set for it; the project settings `env`
+  block carries it. It costs what it saves: turning it on adds the memory instructions and the
+  memory tool to every agent start, around 5k tokens, before the memory itself.
 - Node on `PATH`.
 
 `/forge:bootstrap` checks both and says what breaks.
