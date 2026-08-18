@@ -10,3 +10,5 @@ This repository is the forge plugin, and it is developed with forge.
 - Used this way the components lose the `forge:` prefix: `/issue`, `/work`, `implementer`.
   Run the workflow with `agentPrefix: ""`.
 - Issues live on GitHub. See `.claude/skills/issue-backend/SKILL.md`.
+- What is true of one directory only: `.claude/rules/areas/<area>.md`, under a `paths:` glob. It
+  loads when a file it matches is read, so put area knowledge there rather than in this file.

@@ -17,6 +17,16 @@ Own <domain> in this project.
 
 <what belongs to this agent and what does not>
 
+## Area notes
+
+`.claude/rules/areas/<area>.md` carries what is true of one directory only. Such a note arrives by
+itself the first time you `Read` a file its `paths:` glob matches; `Grep` and Bash do not trigger
+it, and `Edit` needs a `Read` first.
+
+What you learn about an area goes back into its note, as you learn it. One line per durable fact,
+under 40 lines, nothing issue-specific. Write it inside the worktree you were given, where
+`git add -A` carries it into the commit.
+
 ## Branch and worktree
 
 Your task names the branch, and the worktree where the issue was cut. Create both on the first

@@ -6,3 +6,5 @@
 - Raw runners are rewritten or refused.
 - Issue storage: `.claude/skills/issue-backend/SKILL.md`.
 - Project knowledge: `.claude/rules/*.md`, committed, one topic per file.
+- What is true of one directory only: `.claude/rules/areas/<area>.md`, under a `paths:` glob. It
+  loads when a file it matches is read, so it costs nothing until an agent works there.

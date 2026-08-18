@@ -12,6 +12,7 @@ skills and agents, from the working tree.
 .claude/skills/issue-backend  this repository's own adapter - GitHub Issues, not a symlink
 .forge/config.json            forge-test runs test.sh
 .forge/context.jsonl          one line per agent start, plus copies under .forge/context/ (both ignored)
+.claude/rules/areas/          one note per area, loaded when a file it globs is read - tracked
 ```
 
 Edit the file under `plugins/forge/`. Never edit through the symlink path.
@@ -46,20 +47,22 @@ skipped with a warning, so the preload works either way. Supporting files are ad
 | `workflows/work.js` | expected, undocumented - the script is read when the workflow runs |
 | Hook registration in `.claude/settings.json` | expected, undocumented - `ConfigChange` fires for settings files |
 | `output-styles/*` | no - part of the system prompt. `/clear` |
+| `.claude/rules/areas/*.md` | yes - verified on 2.1.234, including the first note in a directory created mid-session |
 
 A directory that did not exist when the session started is not watched. After adding the first file
-to a new one, restart.
+to a new one, restart. Rules are the exception: they are resolved when a file is read, not watched,
+so a new one under `.claude/rules/` counts on the next read.
 
 ## Checks
 
 ```bash
-./test.sh          # six suites, no Claude Code session needed
+./test.sh          # seven suites, no Claude Code session needed
 forge-test         # the same, through the wrapper: 0 or 1
 ```
 
 `test.sh` covers the manifest and syntax, the wrapper contract against a fixture project, every hook
 decision, the startup measurement against a fixture agent and a synthetic transcript, that the project
-rules are tracked, and the workflow's control flow against stubbed agents - wave order, stall detection,
+rules are tracked, that every area note parses and still globs something, and the workflow's control flow against stubbed agents - wave order, stall detection,
 skipped dependents, merge conflicts, a missing issue id.
 
 ## Where an agent's transcript lives
@@ -77,6 +80,34 @@ measure anything it cannot attribute by `agentId` - measuring the file it was ha
 the session's tokens and tool calls under the agent's name. A missing number is the expected
 failure; a wrong one is not. The estimate from `SubagentStart` reads files, not the transcript, so
 it holds either way.
+
+## Directory-scoped knowledge
+
+`.claude/rules/` is the only channel that carries project knowledge into an agent, and a rule
+without front matter loads at every start for everyone. So what is true of one directory only goes
+in `.claude/rules/areas/<area>.md` behind a `paths:` glob
+([docs](https://code.claude.com/docs/en/memory#path-specific-rules)): it costs nothing until an
+agent works in that directory, and arrives by itself when it does.
+
+Verified on 2.1.234, in a session, by writing a rule with a marker string and watching for it:
+
+| Reaching a file by | Loads the note |
+| --- | --- |
+| `Read` | yes, as a `system-reminder` right after the tool result |
+| `Grep` | no |
+| `Bash` (`cat`, `sed`, `grep`) | no |
+
+`Edit` needs a prior `Read`, so every file an agent changes hands it the note before the change.
+For an area it only inspects, one narrow `Read` with `offset` and `limit` buys the note for the
+rest of the run - hence the protocol now names `Read` first and `sed -n` second.
+
+Two more, same probe: a note added to `.claude/rules/` mid-session loads without a restart, and so
+does the first note in a `.claude/rules/areas/` directory created mid-session. A note loads once
+per session; the second read of the same area is silent.
+
+The implementer writes back what it learns about an area, in the worktree, so `git add -A` carries
+the note into the commit and the merge. The reviewer gets the notes too, and pays nothing for the
+areas it does not open.
 
 ## Still unverified
 
