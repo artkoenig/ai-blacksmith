@@ -1,5 +1,6 @@
 {
   "autoMemoryEnabled": true,
+  "outputStyle": "Forge Terse",
   "env": { "CLAUDE_CODE_REMOTE_MEMORY_DIR": "~/.claude/remote-memory" },
   "hooks": {
     "PreToolUse": [

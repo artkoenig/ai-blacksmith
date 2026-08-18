@@ -1,0 +1,1 @@
+../../plugins/forge/output-styles/terse.md
