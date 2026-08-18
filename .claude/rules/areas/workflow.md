@@ -8,8 +8,14 @@ paths:
 - `work.js` is the only workflow. It runs one wave per dependency level: implement, review, repair.
   The implementer commits every round; the reviewer merges the increment it passes. No step of the
   run does either on its own.
-- Reviews of a cut issue are serialized through one gate: two reviewers merging into the issue
-  branch at once would race in the one checkout. Implementations still run in parallel.
+- Every increment lands from its own worktree: rebase onto the issue branch tip, then
+  `git update-ref refs/heads/<issue-branch> <new> <tip>`. The compare-and-swap fails when another
+  reviewer landed in between, and that reviewer rebases again. Nothing is serialized.
+- Two writes into the main checkout at once collide on its one index and one HEAD - `cannot lock
+  ref 'HEAD'`, and the loser's half-merge stays in the index. That is why no agent merges there.
+- `update-ref` moves a branch that the main checkout has checked out, unlike `git branch -f` or
+  `git push .`, both of which refuse. The cost is that the main checkout's files then lag its
+  HEAD: the run returns `checkout: 'stale'`, and its caller refreshes with one `git reset --hard`.
 - Every intermediate result stays in a script variable. Nothing an agent returns is echoed into the
   orchestrator context.
 - `agentPrefix` resolves the agent names. Installed it is `forge:`; in this repository it is `""`.

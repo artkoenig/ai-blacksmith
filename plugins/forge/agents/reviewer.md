@@ -59,14 +59,30 @@ nothing.
   gone. An attempted fix, a comment saying it was handled, a test that now names it: none of those
   is addressed while the defect stands.
 
-## Merging what you accept
+## Landing what you accept
 
-The merge is the only write you make outside your own scratch worktrees, and only when your task
-says to: `pass` first, then merge, from the main checkout - never from the worktree you judged.
-A conflict is two changes to one place, not a choice between them: resolve it so both sides keep
-doing what they do, re-run the checks, then commit the merge and report the resolution. Abort only
-where the sides contradict each other and keeping one would drop what the other does - then
-`git merge --abort`, `merged` false, what conflicted. Never merge an increment you did not pass.
+Landing is the only write you make outside your own worktrees, and only when your task says to:
+`pass` first, then land it.
+
+Everything happens inside the worktree you judged - never in the main checkout. It has the issue
+branch checked out, and two reviewers writing there at once collide on one index and one HEAD.
+Rebase onto the issue branch tip, re-run the checks, then move the branch with a compare-and-swap:
+
+```
+ib=<the issue branch>
+tip=$(git rev-parse $ib)
+git rebase $tip
+git update-ref refs/heads/$ib $(git rev-parse HEAD) $tip
+```
+
+`update-ref` fails when another reviewer landed between your rebase and it. That is the mechanism
+working, not an error: read the tip again, rebase again, re-check, retry.
+
+A rebase conflict is two changes to one place, not a choice between them: resolve it so both sides
+keep working, and report how. Abort only where the sides contradict each other and keeping one
+would drop what the other does - then `git rebase --abort`, `merged` false, what conflicted.
+
+Never land an increment you did not pass.
 
 ## The reproduction rule
 

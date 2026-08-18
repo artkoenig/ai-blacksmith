@@ -24,6 +24,7 @@ const RESULT = {
     worktree: { type: 'string', description: 'absolute path of this increment worktree, empty when blocked' },
     base: { type: 'string', description: 'commit the increment branch was cut from' },
     sha: { type: 'string', description: 'the commit this round produced, empty when blocked' },
+    issueBranch: { type: 'string', description: 'branch the checkout was on before you cut yours' },
     summary: { type: 'string', description: 'one line, what changed - the commit subject' },
     files: { type: 'array', items: { type: 'string' } },
     blocker: { type: 'string', description: 'why it could not be done, empty otherwise' },
@@ -51,7 +52,8 @@ const VERDICT = {
       items: { type: 'string' },
       description: 'true remarks that block nothing - every criterion still met, no behaviour changed',
     },
-    merged: { type: 'boolean', description: 'true when you merged the increment, false when you could not' },
+    merged: { type: 'boolean', description: 'true when you landed the increment, false when you could not' },
+    sha: { type: 'string', description: 'what the issue branch points at after you landed it' },
     resolution: { type: 'string', description: 'how you resolved a conflict, empty when there was none' },
     conflict: { type: 'string', description: 'what you could not resolve, empty when it merged' },
   },
@@ -98,19 +100,6 @@ const criteriaLine = (inc) =>
 // to create, nothing to clean up.
 const solo = increments.length === 1
 
-// The reviewer that accepts an increment merges it, and one checkout cannot
-// take two merges at once. The gate hands the review on, one at a time, so a
-// cut issue implements in parallel and reviews in turn.
-let gate = Promise.resolve()
-const serialized = (fn) => {
-  const next = gate.then(fn, fn)
-  gate = next.then(
-    () => {},
-    () => {},
-  )
-  return next
-}
-
 async function runIncrement(inc) {
   const label = solo ? issue : `${issue}/${inc.id}`
   const branch = solo ? '' : `forge/${issue}/${inc.id}`
@@ -139,7 +128,8 @@ async function runIncrement(inc) {
       'Return status "blocked" with a blocker rather than guessing where the increment is unworkable.',
       solo
         ? 'Return an empty worktree path, the sha the branch was cut from, and the sha you committed.'
-        : 'Return the worktree path, the sha the branch was cut from, and the sha you committed.',
+        : 'Return the worktree path, the branch the checkout was on before you cut yours, the sha the'
+          + ' branch was cut from, and the sha you committed.',
       '',
       RULES,
     ].join('\n'),
@@ -152,6 +142,11 @@ async function runIncrement(inc) {
 
   const wt = solo ? '' : run.worktree || worktree
   const base = run.base || 'HEAD'
+  // The main worktree is listed first, so its branch is the issue branch. Only
+  // needed when the implementer did not report the branch it cut from.
+  const issueBranch =
+    run.issueBranch ||
+    "$(git worktree list --porcelain | sed -n 's|^branch refs/heads/||p' | head -1)"
   const where = wt ? `cd ${wt} && ` : ''
 
   const reviewBrief = [
@@ -174,8 +169,7 @@ async function runIncrement(inc) {
   while (true) {
     // A fresh reviewer each round, judging the whole accumulated diff. Judging
     // only the latest edit would miss a repair that broke an earlier criterion.
-    const review = () =>
-      agent(
+    verdict = await agent(
       [
         `Review increment ${inc.id} of issue ${issue}.`,
         '',
@@ -188,23 +182,29 @@ async function runIncrement(inc) {
         ...(wt
           ? [
               '',
-              'When - and only when - you pass it, merge it, from the main checkout, never the worktree:',
-              `  git merge --no-ff ${branch}`,
-              'On a conflict: resolve it. Keep what both sides do - a conflict is two changes to one',
-              'place, not a choice between them. Re-run the checks after resolving, then commit the',
-              'merge and report how you resolved it. Only where the sides contradict each other, so',
-              'that keeping one drops what the other does, `git merge --abort` and report merged false',
-              `with what conflicted. When the merge is in, remove the worktree: \`git worktree remove ${wt}\`.`,
-              'Report merged true. This is the only write you make outside your own scratch worktrees.',
+              'When - and only when - you pass it, land it. Everything below happens inside your',
+              'worktree. The main checkout has the issue branch checked out; writing there while',
+              'another reviewer does the same collides on one index and one HEAD.',
+              `  cd ${wt}`,
+              `  ib=${issueBranch}`,
+              '  tip=$(git rev-parse $ib)   # another reviewer may have landed since you started',
+              '  git rebase $tip',
+              '  <re-run the checks>',
+              '  git update-ref refs/heads/$ib $(git rev-parse HEAD) $tip',
+              'The update fails when someone landed between your rebase and it. That is not an error:',
+              'read the tip again, rebase again, re-check, retry.',
+              'A rebase conflict is two changes to one place, not a choice between them: resolve it so',
+              'both sides keep working, and report how. Only where the sides contradict each other, so',
+              'that keeping one drops what the other does, `git rebase --abort` and report merged false',
+              `with what conflicted. When it landed, remove your worktree: \`git worktree remove ${wt}\`.`,
+              'Report merged true and the sha the issue branch now points at.',
             ]
-          : ['', 'The work is already on the issue branch. Merge nothing. Report merged true when you pass it.']),
+          : ['', 'The work is already on the issue branch. Land nothing. Report merged true when you pass it.']),
         '',
         RULES,
       ].join('\n'),
       { agentType: REVIEWER, schema: VERDICT, label: `review:${label}:${round}`, phase: 'Review' },
-      )
-
-    verdict = solo ? await review() : await serialized(review)
+    )
 
     if (!verdict) return { inc, status: 'error', reason: 'Reviewer returned no verdict.', branch, worktree: wt }
     if (verdict.pass) break
@@ -256,6 +256,7 @@ async function runIncrement(inc) {
     sha: run.sha,
     conflict: verdict.merged === false ? verdict.conflict || 'unspecified' : undefined,
     resolution: verdict.resolution || undefined,
+    landed: verdict.sha || undefined,
     rounds: round,
     summary: run.summary,
     preexisting: verdict.preexisting || [],
@@ -299,6 +300,7 @@ while (pending.size) {
       blocker: r.blocker,
       conflict: r.conflict,
       resolution: r.resolution,
+      landed: r.landed,
       reason: r.reason,
       preexisting: r.preexisting,
       observations: r.observations,
@@ -312,4 +314,8 @@ return {
   status: merged.length === increments.length ? 'done' : merged.length ? 'partial' : 'failed',
   issue,
   increments: outcomes,
+  // An increment lands from its own worktree, so the issue branch moves while
+  // the main checkout's files stay where they were. Whoever called the run
+  // refreshes it: `git reset --hard`, once, after the last wave.
+  checkout: solo || !merged.length ? 'current' : 'stale',
 }

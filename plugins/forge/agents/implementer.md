@@ -43,6 +43,8 @@ paths:
 Your task names the branch, and the worktree where the issue was cut. Create both on the first
 round. Reuse them on every repair round.
 
+- Read the branch the checkout is on before you cut yours, and report it. Your reviewer lands your
+  work on it and has no other way to learn its name.
 - Never create a second worktree. It throws away the round before.
 - Never set `isolation: worktree`. It gives you a fresh temporary worktree on every call.
 - Prefix every command with a `cd` into the worktree.

@@ -259,13 +259,15 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
 ;(async()=>{
   let {r,calls}=await run('1')
   eq(r.status,'done','uncut issue')
+  eq(r.checkout,'current','an uncut run reported the checkout stale')
   eq(calls,['implement:1','review:1:0'],'uncut dispatch order')
 
   let peak
   ;({r,calls,peak}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:[]}]}))
   eq(calls.slice(0,2),['implement:1/a','implement:1/b'],'independent increments did not run together')
   eq(st(r),{a:'merged',b:'merged'},'independent outcomes')
-  eq(peak,1,'two reviewers merged into the issue branch at once')
+  eq(peak,2,'independent increments did not review at the same time')
+  eq(r.checkout,'stale','a cut run did not report the main checkout stale')
 
   ;({r,calls}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:['a']}]}))
   eq(calls.indexOf('implement:1/b')>calls.indexOf('review:1/a:0'),true,'a dependent started before its dependency merged')

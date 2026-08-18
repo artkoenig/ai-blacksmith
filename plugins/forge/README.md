@@ -14,9 +14,9 @@ issue at once.
 
 **`/forge:work` executes.** One loop per increment: implement, review, repair until the verdict
 converges. The implementer commits each round; the reviewer merges the increment it passes.
-Independent increments implement at the same time, each in its own worktree and branch, and are
-reviewed one after another, since each review may end in a merge onto the issue branch. An uncut
-issue skips all of that and works in the checkout.
+Independent increments run at the same time, each in its own worktree and branch, and each lands
+from that worktree by rebasing onto the issue branch and moving it - so two that finish together
+do not wait for each other. An uncut issue skips all of that and works in the checkout.
 No user interaction is possible during a run, by design. You get a branch and a commit; push and
 pull requests stay yours.
 
