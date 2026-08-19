@@ -13,4 +13,4 @@ the code says - what the code does not say.>
 - <the file that must change alongside, and why>
 - <the thing that looks safe here and is not>
 
-Under 40 lines. One line per durable fact. Nothing specific to one issue or one change.
+Under 100 lines. One line per durable fact. Nothing specific to one issue or one change.

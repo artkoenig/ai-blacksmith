@@ -8,6 +8,12 @@ user-invocable: false
 
 Reach the goal in as few tool calls as possible.
 
+## Project rules
+
+The rules forge works by are one file, and it is attached here rather than repeated:
+
+@${CLAUDE_PLUGIN_ROOT}/rules/forge.md
+
 ## Order
 
 1. Read the task. It names what you need.
@@ -23,7 +29,8 @@ matches. It is the answer to the research you would otherwise do.
 - `Edit` needs a `Read` first, so a file you change hands you its note before you change it.
 - Entering an area you only inspect: one narrow `Read` there, with `offset` and `limit`, buys the
   note for the rest of the run.
-- A note that is wrong or thin is yours to fix, if you have `Write`. Same round, one line.
+- A note that is wrong or thin is yours to fix, if you have `Skill` and `Write`: run the
+  `forge:insights` skill with that directory, the same round you learned it.
 
 ## Tool calls
 

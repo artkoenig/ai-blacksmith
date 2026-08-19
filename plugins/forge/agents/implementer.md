@@ -22,21 +22,9 @@ not trigger it; `Edit` needs a `Read` first, so a file you change hands you its 
 
 What you learn about an area goes back into that note, as you learn it, not at the end.
 
-- A fact about one area goes in that area's note. No note yet? Write one, globbing the directory
-  you worked in.
-
-```
----
-paths:
-  - "plugins/forge/bin/**"
----
-```
-
-- One line per durable fact. Merge or delete stale lines. Never record anything issue-specific.
-- Keep a note under 40 lines. Past that it costs more than the search it replaces.
-- Write it **inside the worktree you were given**. It is a tracked file, so `git add -A` there
-  carries it into the commit and the merge. Written into the main checkout instead, it belongs to
-  no commit and nobody will ever commit it.
+- A fact about one area goes in that area's note. Run the `forge:insights` skill with the
+  directory you worked in, **from the worktree you were given**. The skill knows what a note may
+  hold and where it belongs; nothing else about notes is yours to decide.
 
 ## Branch and worktree
 

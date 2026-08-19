@@ -224,18 +224,25 @@ start 0000000 mkt | grep -q "outdated forge plugin" \
 # it names the update command with the marketplace it came from - break: a hard-coded name
 start 0000000 mkt | grep -q "forge@mkt" \
   || { fail staleness "the warning did not name the marketplace to update from"; S=1; }
-# the current checkout says nothing - break: warning without comparing
-[ -z "$(start "${TIP:0:7}" mkt)" ] \
-  || { fail staleness "a session on the tip was warned"; S=1; }
+# the current checkout is not warned - break: warning without comparing
+start "${TIP:0:7}" mkt | grep -q "outdated forge plugin" \
+  && { fail staleness "a session on the tip was warned"; S=1; }
 # a local session makes no network call and no noise - break: dropping the remote gate
-[ -z "$(start 0000000 mkt '')" ] \
-  || { fail staleness "a local session was warned"; S=1; }
+start 0000000 mkt '' | grep -q "outdated forge plugin" \
+  && { fail staleness "a local session was warned"; S=1; }
 # no answer, no warning - break: treating an empty tip as a mismatch
-[ -z "$(start 0000000 nogit)" ] \
-  || { fail staleness "a missing marketplace clone produced a warning"; S=1; }
+start 0000000 nogit | grep -q "outdated forge plugin" \
+  && { fail staleness "a missing marketplace clone produced a warning"; S=1; }
 # the setup notice survives - break: losing it when the staleness check is added
 CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q '/forge:bootstrap' \
   || { fail staleness "the bootstrap notice was lost"; S=1; }
+# a set-up project is handed the plugin's own rules, so an update carries them and
+# no second bootstrap is needed - break: writing them into the project instead
+CLAUDE_PROJECT_DIR="$FIX" start "${TIP:0:7}" mkt | grep -q 'forge-test' \
+  || { fail staleness "the plugin rules were not injected into a set-up project"; S=1; }
+# an unconfigured project pays for nothing it cannot act on - break: injecting always
+CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q 'forge-test' \
+  && { fail staleness "an unconfigured project was charged for the rules"; S=1; }
 rm -rf "$SS"
 [ "$S" = 0 ] && ok "staleness warning"
 
@@ -310,6 +317,15 @@ echo '{"cwd":"/nonexistent","agent_type":"forge:prober"}' | node plugins/forge/s
   || { fail context "--dump did not list the saved copies"; S=1; }
 [ "$S" = 0 ] && ok "context measurement"
 
+# The one rules file has two readers: the SessionStart hook injects it, the
+# agent protocol attaches it with @. A rename that misses either is silent.
+# break: moving plugins/forge/rules/forge.md without following it
+[ -f plugins/forge/rules/forge.md ] || fail rules "plugins/forge/rules/forge.md is gone"
+grep -q "rules', 'forge.md'" plugins/forge/scripts/session-start.js \
+  || fail rules "the session start hook no longer reads the rules file"
+grep -q '^@${CLAUDE_PLUGIN_ROOT}/rules/forge.md$' plugins/forge/skills/agent-protocol/SKILL.md \
+  || fail rules "the agent protocol no longer references the rules file"
+
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.
@@ -330,6 +346,10 @@ fi
 # the area again and nobody is told why.
 if [ -d .claude/rules/areas ]; then
   S=0
+  # The budget is the insights skill's own number. Read it there, so raising it
+  # in one place raises it everywhere - break: hardcoding a second copy here.
+  BUDGET=$(grep -oE 'Under [0-9]+ lines' plugins/forge/skills/insights/SKILL.md | grep -oE '[0-9]+' | head -1)
+  [ -n "$BUDGET" ] || { fail areas "the insights skill names no line budget"; S=1; BUDGET=999999; }
   shopt -s globstar nullglob
   for f in .claude/rules/areas/*.md; do
     head -1 "$f" | grep -q '^---$' || { fail areas "$f has no front matter"; S=1; continue; }
@@ -340,7 +360,7 @@ if [ -d .claude/rules/areas ]; then
       m=($g)
       [ ${#m[@]} -gt 0 ] || { fail areas "$f globs \"$g\", which matches nothing"; S=1; }
     done <<< "$globs"
-    [ "$(wc -l < "$f")" -le 40 ] || { fail areas "$f is past the 40 line budget for a note"; S=1; }
+    [ "$(wc -l < "$f")" -le "$BUDGET" ] || { fail areas "$f is past the $BUDGET line budget for a note"; S=1; }
     git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail areas "$f is not tracked"; S=1; }
   done
   shopt -u globstar nullglob
