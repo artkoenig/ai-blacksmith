@@ -1,6 +1,6 @@
 ---
-name: area-note
-description: Write or update the area note for one directory - what is true there and nowhere else, under a paths glob that loads it when an agent reads a file in it. Use after working in a directory, and to seed an area during bootstrap.
+name: insights
+description: Record what an agent learned about one directory, as that directory's area note. Use after working in a directory, and to seed an area during bootstrap. Takes the directory as its argument.
 argument-hint: "[directory, e.g. src/api]"
 allowed-tools: Read, Write, Edit, Glob, Grep
 ---

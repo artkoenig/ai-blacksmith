@@ -23,9 +23,8 @@ Own <domain> in this project.
 itself the first time you `Read` a file its `paths:` glob matches; `Grep` and Bash do not trigger
 it, and `Edit` needs a `Read` first.
 
-What you learn about an area goes back into its note, as you learn it. One line per durable fact,
-under 100 lines, nothing issue-specific. Write it inside the worktree you were given, where
-`git add -A` carries it into the commit.
+What you learn about an area goes back into its note, as you learn it: run the `forge:insights`
+skill with the directory you worked in. It knows what a note may hold and where to write it.
 
 ## Branch and worktree
 

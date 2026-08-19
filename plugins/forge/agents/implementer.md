@@ -22,12 +22,9 @@ not trigger it; `Edit` needs a `Read` first, so a file you change hands you its 
 
 What you learn about an area goes back into that note, as you learn it, not at the end.
 
-- A fact about one area goes in that area's note. Run the `forge:area-note` skill with the
-  directory you worked in - it names the note, globs the directory and holds it to one line per
-  durable fact. Never record anything issue-specific.
-- Write it **inside the worktree you were given**, so run the skill from there. The note is a
-  tracked file: `git add -A` in the worktree carries it into the commit and the merge. Written
-  into the main checkout instead, it belongs to no commit and nobody will ever commit it.
+- A fact about one area goes in that area's note. Run the `forge:insights` skill with the
+  directory you worked in, **from the worktree you were given**. The skill knows what a note may
+  hold and where it belongs; nothing else about notes is yours to decide.
 
 ## Branch and worktree
 

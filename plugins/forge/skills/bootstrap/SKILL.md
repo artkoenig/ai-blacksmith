@@ -61,10 +61,9 @@ From `${CLAUDE_SKILL_DIR}`:
 - `.claude/skills/issue-backend/SKILL.md` from `issue-backend-template.md`. Replace every
   placeholder with a real command. Run each one before you write it down.
 - `.claude/rules/forge.md` from `rules-template.md`. It loads every session.
-- `.claude/rules/areas/` - one note per area of the codebase. Each carries a `paths:` glob and
-  loads only when an agent reads a file it matches, so an area costs nothing until it is worked
-  in. Seed the two or three areas the interview already named: run the `forge:area-note` skill
-  once per directory, passing it that directory. The agents write the rest as they learn them.
+- `.claude/rules/areas/` - one note per area of the codebase, written by the `forge:insights`
+  skill. Seed the two or three areas the interview already named: run the skill once per
+  directory, passing it that directory. The agents write the rest as they learn them.
 
 Merge into `.claude/settings.json`, keeping existing keys:
 

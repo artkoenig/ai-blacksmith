@@ -50,7 +50,7 @@ still merge. A merge conflict is reported, never resolved.
 | `/forge:issue` | Interview, write the issue, decide the cut, start the run. |
 | `/forge:work <id>` | Execute an issue. Usually started for you by `/forge:issue`. |
 | `/forge:new-agent` | Add a project agent for one area of the codebase. |
-| `/forge:area-note <dir>` | Write or update the area note for one directory. |
+| `/forge:insights <dir>` | Record what you learned about one directory as its area note. |
 | `/forge:stats` | Tool calls per agent run, over time. |
 | `/forge:context` | What each agent loaded at startup: measured tokens, breakdown by source, saved copies. |
 
@@ -104,4 +104,5 @@ from the `agent-protocol` skill.
 .claude/skills/issue-backend/SKILL.md    your issue storage, as commands
 .claude/rules/forge.md                   the short version, loaded every session
 .claude/rules/areas/<area>.md            what is true of one directory, loaded when it is read
+                                         written by /forge:insights
 ```

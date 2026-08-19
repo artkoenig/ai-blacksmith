@@ -330,6 +330,10 @@ fi
 # the area again and nobody is told why.
 if [ -d .claude/rules/areas ]; then
   S=0
+  # The budget is the insights skill's own number. Read it there, so raising it
+  # in one place raises it everywhere - break: hardcoding a second copy here.
+  BUDGET=$(grep -oE 'Under [0-9]+ lines' plugins/forge/skills/insights/SKILL.md | grep -oE '[0-9]+' | head -1)
+  [ -n "$BUDGET" ] || { fail areas "the insights skill names no line budget"; S=1; BUDGET=999999; }
   shopt -s globstar nullglob
   for f in .claude/rules/areas/*.md; do
     head -1 "$f" | grep -q '^---$' || { fail areas "$f has no front matter"; S=1; continue; }
@@ -340,7 +344,7 @@ if [ -d .claude/rules/areas ]; then
       m=($g)
       [ ${#m[@]} -gt 0 ] || { fail areas "$f globs \"$g\", which matches nothing"; S=1; }
     done <<< "$globs"
-    [ "$(wc -l < "$f")" -le 100 ] || { fail areas "$f is past the 100 line budget for a note"; S=1; }
+    [ "$(wc -l < "$f")" -le "$BUDGET" ] || { fail areas "$f is past the $BUDGET line budget for a note"; S=1; }
     git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail areas "$f is not tracked"; S=1; }
   done
   shopt -u globstar nullglob

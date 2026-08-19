@@ -23,7 +23,8 @@ matches. It is the answer to the research you would otherwise do.
 - `Edit` needs a `Read` first, so a file you change hands you its note before you change it.
 - Entering an area you only inspect: one narrow `Read` there, with `offset` and `limit`, buys the
   note for the rest of the run.
-- A note that is wrong or thin is yours to fix, if you have `Write`. Same round, one line.
+- A note that is wrong or thin is yours to fix, if you have `Skill` and `Write`: run the
+  `forge:insights` skill with that directory, the same round you learned it.
 
 ## Tool calls
 

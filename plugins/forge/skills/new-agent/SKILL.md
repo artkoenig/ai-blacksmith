@@ -29,7 +29,7 @@ Copy `${CLAUDE_SKILL_DIR}/agent-template.md` to `.claude/agents/<domain>.md`:
 ## 3. Write down what the domain needs
 
 The agent carries nothing between runs. Put what it must know - where the domain's code lives,
-which command exercises it, which conventions apply - in an area note: run the `forge:area-note`
+which command exercises it, which conventions apply - in an area note: run the `forge:insights`
 skill once per directory the domain owns, passing it that directory. The note reaches the agent by
 itself the first time it reads a file there. What is too short for its own note goes in the agent's body.
 

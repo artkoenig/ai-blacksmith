@@ -23,7 +23,7 @@ Verified on 2.1.234, by writing a rule with a marker string and watching for it:
 - A note loads once per session. The second read of the same area is silent.
 - Rules are resolved when a file is read, not watched: a new note counts on the next read, no
   restart, even as the first file in a directory created mid-session.
-- Under 100 lines, one line per durable fact, nothing issue-specific. `test.sh` fails a note whose
-  front matter does not parse, whose glob matches nothing, that is untracked or over budget.
-- Whoever learns something about an area writes it back here, in the worktree, so `git add -A`
-  carries it into the commit.
+- What a note may hold, and its line budget, live in `plugins/forge/skills/insights/SKILL.md`
+  alone. Nothing else states them; `test.sh` reads the budget from there.
+- Whoever learns something about an area runs the `forge:insights` skill with that directory. It
+  writes the note into the checkout the caller works in.
