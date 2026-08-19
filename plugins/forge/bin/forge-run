@@ -2,51 +2,45 @@
 # Shared implementation behind forge-test / forge-lint / forge-typecheck / forge-build.
 #
 # Contract, identical for every kind:
-#   forge-<kind>                  -> one line: 0 (pass) or 1 (fail)
-#   forge-<kind> --failing        -> up to MAX_IDS failing ids, one per line
-#   forge-<kind> --detail <id>    -> up to MAX_DETAIL lines explaining that one failure
-#   forge-<kind> --run <pattern>  -> 0 or 1 for a subset
+#   forge-<kind>                  -> exit 0 and one line: "<n>/<n> tests succeeded"
+#                                    exit 1 and every failing test with its detail
+#   forge-<kind> --run <pattern>  -> the same two answers for a subset
 #
-# Always exits 0. The payload carries the status, so a failing check never adds
-# error noise to the agent's transcript.
+# Two answers, no escalation: the exit code carries the status, the payload
+# carries everything needed to act on it. A step that could not run at all is
+# neither, and exits 2.
 set -uo pipefail
 
-MAX_IDS=20
-MAX_DETAIL=40
+MAX_IDS=20     # failures reported
+MAX_DETAIL=20  # lines of detail per failure
+MAX_TAIL=40    # lines of log shown when a failing run names no test
 
 KIND="${1:-test}"; shift || true
 CFG_BIN="$(dirname "$0")/forge-cfg"
 ROOT="$("$CFG_BIN" root)"
 LOG_DIR="$ROOT/.forge/last"
 LOG="$LOG_DIR/$KIND.log"
-STATUS_FILE="$LOG_DIR/$KIND.status"
 
 COMMAND="$("$CFG_BIN" get "commands.$KIND.command" "")"
 PARSER="$("$CFG_BIN" get "commands.$KIND.parser" "generic")"
 RUN_ARG="$("$CFG_BIN" get "commands.$KIND.runArg" "")"
 PATTERN="$("$CFG_BIN" get "commands.$KIND.failingPattern" "")"
+PASSING="$("$CFG_BIN" get "commands.$KIND.passingPattern" "")"
+
+case "$KIND" in test) NOUN=tests ;; *) NOUN=checks ;; esac
 
 if [ -z "$COMMAND" ]; then
-  printf 'unconfigured: run /forge:bootstrap to set commands.%s.command\n' "$KIND"
-  exit 0
+  printf 'unconfigured: run /forge:bootstrap to set commands.%s.command\n' "$KIND" >&2
+  exit 2
 fi
 
 mkdir -p "$LOG_DIR"
 
 execute() {
-  local cmd="$1"
-  ( cd "$ROOT" && eval "$cmd" ) >"$LOG" 2>&1
-  local rc=$?
-  [ "$rc" -eq 0 ] && printf '0\n' >"$STATUS_FILE" || printf '1\n' >"$STATUS_FILE"
-  cat "$STATUS_FILE"
+  ( cd "$ROOT" && eval "$1" ) >"$LOG" 2>&1
 }
 
 failing_ids() {
-  [ -f "$LOG" ] || execute "$COMMAND" >/dev/null
-  # A run that exited 0 has no failing ids, whatever its log happens to say.
-  # Without this, a passing log mentioning "error" or matching failingPattern
-  # yields phantom ids.
-  [ "$(cat "$STATUS_FILE" 2>/dev/null)" = "0" ] && return 0
   case "$PARSER" in
     jest)
       grep -E '^[[:space:]]*(✕|×)' "$LOG" | sed -E 's/^[[:space:]]*(✕|×)[[:space:]]*//; s/ \([0-9]+ ms\)$//' ;;
@@ -61,37 +55,108 @@ failing_ids() {
   esac | sed '/^[[:space:]]*$/d' | awk '!seen[$0]++' | head -n "$MAX_IDS"
 }
 
+# "<passed> <failed>", or nothing where the log carries no count. Takes the exit
+# code of the run: a run that exited 0 has no failures, whatever its log says.
+# The suffix of the answer line is the only thing that depends on the count -
+# without one the run still says whether it passed, just not out of how many.
+counts() {
+  case "$PARSER" in
+    jest|pytest)
+      # jest "Tests: 1 failed, 2 passed, 3 total"; pytest "= 1 failed, 2 passed in 0.10s ="
+      awk '{ gsub(/[,;=.]/, " "); p = 0; f = 0; seen = 0
+             for (i = 2; i <= NF; i++) {
+               if ($(i-1) ~ /^[0-9]+$/ && $i == "passed") { p = $(i-1) + 0; seen = 1 }
+               if ($(i-1) ~ /^[0-9]+$/ && $i ~ /^(failed|error|errors)$/) { f = $(i-1) + 0; seen = 1 }
+             }
+             if (seen) { P = p; F = f; found = 1 } }
+           END { if (found) print P, F }' "$LOG" ;;
+    cargo)
+      awk '/^test result:/ { gsub(/[,;.]/, " ")
+             for (i = 2; i <= NF; i++) {
+               if ($(i-1) ~ /^[0-9]+$/ && $i == "passed") p += $(i-1)
+               if ($(i-1) ~ /^[0-9]+$/ && $i == "failed") f += $(i-1)
+             }
+             found = 1 }
+           END { if (found) print p + 0, f + 0 }' "$LOG" ;;
+    go)
+      awk '/^[[:space:]]*--- PASS: /{ p++ } /^[[:space:]]*--- FAIL: /{ f++ }
+           END { if (p + f) print p + 0, f + 0 }' "$LOG" ;;
+    *)
+      [ -n "$PASSING" ] || return 0
+      failed=0
+      [ "$1" -ne 0 ] && failed="$(failing_ids | grep -c '')"
+      printf '%s %s\n' "$(grep -cE "$PASSING" "$LOG")" "$failed" ;;
+  esac
+}
+
+# Every failing test, each followed by its own log lines: from the line that
+# named it up to the next failure, capped at MAX_DETAIL.
+details() {
+  local ids id n i start end next total rows=()
+  ids="$(failing_ids)"
+  if [ -z "$ids" ]; then
+    printf 'the run failed without naming a %s. Last %s lines of %s:\n\n' \
+      "${NOUN%s}" "$MAX_TAIL" "${LOG#"$ROOT"/}"
+    tail -n "$MAX_TAIL" "$LOG"
+    return 0
+  fi
+  while IFS= read -r id; do
+    n="$(grep -n -F -- "$id" "$LOG" | head -1 | cut -d: -f1)"
+    [ -n "$n" ] && rows+=("$n:$id")
+  done <<EOD
+$ids
+EOD
+  if [ "${#rows[@]}" -eq 0 ]; then printf '%s\n' "$ids"; return 0; fi
+  total="$(wc -l < "$LOG" | tr -d ' ')"
+  for i in "${!rows[@]}"; do
+    start="${rows[$i]%%:*}"
+    next="${rows[$((i + 1))]:-}"
+    if [ -n "$next" ]; then end=$(( ${next%%:*} - 1 )); else end="$total"; fi
+    [ $(( start + MAX_DETAIL - 1 )) -lt "$end" ] && end=$(( start + MAX_DETAIL - 1 ))
+    [ "$end" -lt "$start" ] && end="$start"
+    sed -n "${start},${end}p" "$LOG"
+    printf '\n'
+  done
+  # A cap nobody is told about reads as "that was all of it".
+  [ "${#rows[@]}" -lt "$MAX_IDS" ] || printf 'the first %s failures, the rest are in %s\n' \
+    "$MAX_IDS" "${LOG#"$ROOT"/}"
+}
+
+report() {
+  local rc="$1" c passed failed
+  c="$(counts "$rc")"
+  if [ -n "$c" ]; then passed="${c%% *}"; failed="${c##* }"; fi
+  if [ "$rc" -eq 0 ]; then
+    if [ -n "$c" ]; then
+      printf '%s/%s %s succeeded\n' "$passed" "$(( passed + failed ))" "$NOUN"
+    else
+      printf 'all %s succeeded\n' "$NOUN"
+    fi
+    return 0
+  fi
+  [ -n "$c" ] && printf '%s of %s %s failed\n\n' "$failed" "$(( passed + failed ))" "$NOUN"
+  details
+  return 1
+}
+
 case "${1:-}" in
   "")
     execute "$COMMAND"
-    ;;
-  --failing)
-    ids="$(failing_ids)"
-    if [ -z "$ids" ]; then printf 'none\n'; else printf '%s\n' "$ids"; fi
-    ;;
-  --detail)
-    id="${2:-}"
-    if [ -z "$id" ]; then printf 'usage: forge-%s --detail <id>\n' "$KIND"; exit 0; fi
-    [ -f "$LOG" ] || execute "$COMMAND" >/dev/null
-    start="$(grep -n -F -- "$id" "$LOG" | head -1 | cut -d: -f1)"
-    if [ -z "$start" ]; then printf 'not found in %s\n' "${LOG#"$ROOT"/}"; exit 0; fi
-    sed -n "${start},$((start + MAX_DETAIL - 1))p" "$LOG"
+    report $?
     ;;
   --run)
     pattern="${2:-}"
-    if [ -z "$pattern" ]; then printf 'usage: forge-%s --run <pattern>\n' "$KIND"; exit 0; fi
+    if [ -z "$pattern" ]; then printf 'usage: forge-%s [--run <pattern>]\n' "$KIND" >&2; exit 2; fi
     if [ -z "$RUN_ARG" ]; then
-      printf 'no subset support configured for %s, running everything\n' "$KIND"
+      printf 'no subset support configured for %s, running everything\n' "$KIND" >&2
       execute "$COMMAND"
     else
       execute "$COMMAND ${RUN_ARG//\{pattern\}/$pattern}"
     fi
-    ;;
-  --log)
-    printf '%s\n' "${LOG#"$ROOT"/}"
+    report $?
     ;;
   *)
-    printf 'usage: forge-%s [--failing | --detail <id> | --run <pattern> | --log]\n' "$KIND"
+    printf 'usage: forge-%s [--run <pattern>]\n' "$KIND" >&2
+    exit 2
     ;;
 esac
-exit 0

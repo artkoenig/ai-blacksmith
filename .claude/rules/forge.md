@@ -5,8 +5,8 @@ This repository is the forge plugin, and it is developed with forge.
 - `plugins/forge/` is the source. `.claude/skills`, `.claude/agents`, `.claude/workflows` and
   `.claude/output-styles` symlink into it, so edits are live in the session. Never edit through the
   symlink path.
-- Checks run through `forge-test`. It answers `0` or `1`; escalate with `--failing`, then
-  `--detail <id>`. It runs `test.sh`, which needs no Claude Code session.
+- Checks run through `forge-test`. It exits `0` with one line, `<n>/<n> tests succeeded`, or `1`
+  with every failing suite and its detail. It runs `test.sh`, which needs no Claude Code session.
 - Used this way the components lose the `forge:` prefix: `/issue`, `/work`, `implementer`. So the
   workflow runs as `/work {"issue": "3", "agentPrefix": ""}`.
 - Issues live on GitHub. See `.claude/skills/issue-backend/SKILL.md`. That adapter is this

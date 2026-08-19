@@ -37,14 +37,15 @@ matches. It is the answer to the research you would otherwise do.
 
 Use the wrappers. Never the raw runners - they are blocked.
 
-| Step | Command | Answer |
+| Command | Exit | Answer |
 | --- | --- | --- |
-| default | `forge-test` | `0` or `1` |
-| after a `1` | `forge-test --failing` | the failing ids |
-| then | `forge-test --detail <id>` | that one failure |
-| subset | `forge-test --run <pattern>` | `0` or `1` |
+| `forge-test` | `0` | one line: `<n>/<n> tests succeeded` |
+| `forge-test` | `1` | every failing test, each with its detail |
+| `forge-test --run <pattern>` | `0` or `1` | the same two answers for a subset |
 
-Same contract for `forge-lint`, `forge-typecheck`, `forge-build`. Escalate only after a `1`.
+Same contract for `forge-lint`, `forge-typecheck`, `forge-build`. There is nothing to escalate to:
+a `1` already carries what a fix needs. Exit `2` means the step could not run - unconfigured, or a
+flag that does not exist. Never re-run a check to see more; you already saw everything.
 
 ## Context
 

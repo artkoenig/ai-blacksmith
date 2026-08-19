@@ -36,10 +36,10 @@ Report it in one line, and what breaks without it.
 {
   "version": 1,
   "commands": {
-    "test": { "command": "<raw test command>", "parser": "jest|pytest|go|cargo|generic", "runArg": "-t {pattern}", "failingPattern": "" },
-    "lint": { "command": "<raw lint command>", "parser": "generic", "failingPattern": "" },
-    "typecheck": { "command": "<raw typecheck command>", "parser": "generic", "failingPattern": "" },
-    "build": { "command": "<raw build command>", "parser": "generic", "failingPattern": "" }
+    "test": { "command": "<raw test command>", "parser": "jest|pytest|go|cargo|generic", "runArg": "-t {pattern}", "failingPattern": "", "passingPattern": "" },
+    "lint": { "command": "<raw lint command>", "parser": "generic", "failingPattern": "", "passingPattern": "" },
+    "typecheck": { "command": "<raw typecheck command>", "parser": "generic", "failingPattern": "", "passingPattern": "" },
+    "build": { "command": "<raw build command>", "parser": "generic", "failingPattern": "", "passingPattern": "" }
   },
   "compaction": { "maxLines": 60, "headLines": 30, "tailLines": 15 },
   "guard": { "rewrite": [] },
@@ -47,8 +47,10 @@ Report it in one line, and what breaks without it.
 }
 ```
 
-`failingPattern` is read by the `generic` parser only: a grep extended regex whose match is one
-failure's identifier. Leave it empty where a built-in parser fits.
+`failingPattern` and `passingPattern` are read by the `generic` parser only, both grep extended
+regexes: the first matches one failure's identifier, the second one passing test. Without
+`passingPattern` a green run answers `all tests succeeded` instead of `<n>/<n> tests succeeded`.
+Leave both empty where a built-in parser fits - it counts on its own.
 
 From `${CLAUDE_SKILL_DIR}`:
 
@@ -98,8 +100,8 @@ Anything printed names the rule that swallows it - usually a blanket `.claude/`.
 
 ## 4. Verify, then report
 
-Run `forge-test`. It prints exactly `0` or `1`. Anything else means the config is wrong - fix it
-before reporting success.
+Run `forge-test`. A green project answers one line and exits `0`; a red one lists its failures and
+exits `1`. Exit `2` means the config is wrong - fix it before reporting success.
 
 Report in five lines at most: backend, commands wired, the two preconditions, next step
 (`/forge:issue`).
