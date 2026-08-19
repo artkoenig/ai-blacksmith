@@ -29,3 +29,11 @@ is handed is the *session's* transcript, not the agent's. The agent's own file i
 `agentId`: measuring the file it was handed would report the session's tokens and tool calls under
 the agent's name. A missing number is the expected failure; a wrong one is not. The estimate from
 `SubagentStart` reads files, not the transcript, so it holds either way.
+
+## The staleness warning
+
+`session-start.js` warns a cloud session whose plugin checkout is behind the marketplace tip. It
+runs only when `CLAUDE_CODE_REMOTE=true`, reads the installed SHA and the marketplace name out of
+the `CLAUDE_PLUGIN_ROOT` path (`.../plugins/repos/<marketplace>/<sha>/plugins/forge`) and asks the
+tip from the marketplace clone's own `origin`, so a fork checks against the fork. No answer means no
+warning. The `git ls-remote` is capped at 10s, which is why the hook's timeout is 20.

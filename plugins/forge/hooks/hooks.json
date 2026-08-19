@@ -83,7 +83,7 @@
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"
             ],
-            "timeout": 5
+            "timeout": 20
           }
         ]
       }
