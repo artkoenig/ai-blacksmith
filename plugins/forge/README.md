@@ -26,7 +26,7 @@ pull requests stay yours.
 | --- | --- |
 | Area notes | What is true of one directory only lives in `.claude/rules/areas/<area>.md` under a `paths:` glob, and reaches an agent by itself the first time it reads a file there. Knowledge of an area costs nothing until the agent enters it, and the implementer writes back what it learns, so the second issue in an area is cheaper than the first. |
 | The workflow | The loop and every intermediate result live in script variables. Your conversation pays for the invocation and the final line. |
-| Wrapper commands | `forge-test` answers `0` or `1`. Detail costs extra on purpose: `--failing`, then `--detail <id>`. |
+| Wrapper commands | `forge-test` answers twice over: exit `0` with one line, `<n>/<n> tests succeeded`, or exit `1` with every failing test and its detail. Nothing to escalate to, nothing to parse for the verdict. |
 | The guard hook | A raw `npm test` is rewritten to the wrapper before it runs, or refused with the wrapper named. |
 | The compaction hook | Bash output past a line budget arrives as head + tail plus a path to the full log. stderr is never touched. |
 | The cut | Cutting adds a dispatch set, so `/forge:issue` cuts only for parallelism, for a diff too large to review in one pass, or for a real dependency. |

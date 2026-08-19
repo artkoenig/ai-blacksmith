@@ -4,7 +4,8 @@
     "test": {
       "command": "bash ./test.sh",
       "parser": "generic",
-      "failingPattern": "^FAIL [^:]+"
+      "failingPattern": "^FAIL [^:]+",
+      "passingPattern": "^ok "
     }
   },
   "compaction": { "maxLines": 60, "headLines": 30, "tailLines": 15 },

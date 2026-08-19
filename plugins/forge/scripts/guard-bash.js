@@ -60,8 +60,8 @@ for (const rule of rules) {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
         permissionDecisionReason:
-          `Use ${rule.wrapper} instead. It answers 0 or 1; add --failing for the ids, ` +
-          `--detail <id> for one failure, --run <pattern> for a subset.`,
+          `Use ${rule.wrapper} instead. It exits 0 with one line, or 1 with every ` +
+          `failure and its detail. Add --run <pattern> for a subset.`,
       },
     })
   }

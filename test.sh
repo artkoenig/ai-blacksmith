@@ -33,22 +33,47 @@ cat > "$FIX/.forge/config.json" <<'JSON'
   "compaction": { "maxLines": 10, "headLines": 4, "tailLines": 2 } }
 JSON
 cat > "$FIX/fake.sh" <<'JSON'
+echo "  ✓ accepts a valid token"
 echo "  ✕ rejects an expired token"
 echo "     expected 401, received 200"
+echo "  ✕ refreshes silently"
+echo "     expected a new token"
+echo "Tests:       2 failed, 1 passed, 3 total"
 exit 1
 JSON
 export CLAUDE_PROJECT_DIR="$FIX"
 BIN="$PWD/plugins/forge/bin"
 
 # --- wrapper contract -------------------------------------------------------
+# Two answers only: exit 0 with one line, or exit 1 with every failure and its
+# detail. Anything a caller would have to escalate for is a break.
 S=0
-[ "$(cd "$FIX" && "$BIN/forge-test")" = "1" ] || { fail wrappers "bare forge-test did not print 1"; S=1; }
-[ "$(cd "$FIX" && "$BIN/forge-test" --failing)" = "rejects an expired token" ] \
-  || { fail wrappers "--failing did not name the failing test"; S=1; }
-(cd "$FIX" && "$BIN/forge-test" --detail "rejects an expired token") | grep -q "expected 401" \
-  || { fail wrappers "--detail did not show the failure"; S=1; }
-(cd "$FIX" && "$BIN/forge-lint" 2>&1) | grep -q "^unconfigured" \
-  || { fail wrappers "an unconfigured command did not say so"; S=1; }
+OUT="$(cd "$FIX" && "$BIN/forge-test")"; RC=$?
+# a failing run answers through its exit code - break: report returning 0 on a failure
+[ "$RC" = 1 ] || { fail wrappers "a failing forge-test did not exit 1"; S=1; }
+# it names every failing test - break: reporting only the first id
+printf '%s\n' "$OUT" | grep -q "rejects an expired token" \
+  || { fail wrappers "the failure report did not name the first failing test"; S=1; }
+printf '%s\n' "$OUT" | grep -q "refreshes silently" \
+  || { fail wrappers "the failure report did not name every failing test"; S=1; }
+# each in its own block - break: reporting one id whose detail happens to swallow the rest
+[ -z "$(printf '%s\n' "$OUT" | grep -A1 -F "expected 401, received 200" | tail -n1)" ] \
+  || { fail wrappers "a failure's detail ran into the next failure"; S=1; }
+# with the detail of each - break: listing ids without their log lines
+printf '%s\n' "$OUT" | grep -q "expected 401" \
+  || { fail wrappers "the failure report did not carry the detail of a failure"; S=1; }
+printf '%s\n' "$OUT" | grep -q "expected a new token" \
+  || { fail wrappers "the failure report did not carry the detail of every failure"; S=1; }
+# and counts them first - break: dropping the count line
+[ "$(printf '%s\n' "$OUT" | head -1)" = "2 of 3 tests failed" ] \
+  || { fail wrappers "the failure report did not open with the count"; S=1; }
+# an unknown flag is neither pass nor fail - break: a typo reading as a result
+(cd "$FIX" && "$BIN/forge-test" --failing >/dev/null 2>&1); [ $? = 2 ] \
+  || { fail wrappers "an unknown flag did not exit 2"; S=1; }
+(cd "$FIX" && "$BIN/forge-lint" >/dev/null 2>&1); [ $? = 2 ] \
+  || { fail wrappers "an unconfigured command did not exit 2"; S=1; }
+UNCONF="$(cd "$FIX" && "$BIN/forge-lint" 2>&1)"
+case "$UNCONF" in unconfigured*) ;; *) fail wrappers "an unconfigured command did not say so"; S=1 ;; esac
 # An unknown subcommand must fail loudly: a typo that exits 0 reads as success.
 (cd "$FIX" && "$BIN/forge-cfg" gett >/dev/null 2>&1); [ $? -ne 0 ] \
   || { fail wrappers "forge-cfg exited 0 on an unknown subcommand"; S=1; }
@@ -63,35 +88,65 @@ case "$CFG_ERR" in usage:\ forge-cfg*) ;; *) fail wrappers "forge-cfg did not pr
 [ "$(cd "$FIX" && "$BIN/forge-cfg" get no.such.key fallback)" = "fallback" ] \
   || { fail wrappers "forge-cfg get did not fall back on a missing key"; S=1; }
 
-# --failing answers for the last run, not for whatever the log says. A passing
-# run whose output carries "error" or matches failingPattern has no ids.
+# The passing answer is one line and a 0. It reports the run, not the log: a
+# passing run whose output carries "error" or matches failingPattern still
+# succeeded. typecheck carries no passingPattern, build fails without naming a
+# test.
 PASSFIX="$(mktemp -d)"
 trap 'rm -rf "$FIX" "$PASSFIX"' EXIT
 mkdir -p "$PASSFIX/.forge"
 cat > "$PASSFIX/.forge/config.json" <<'JSON'
-{ "commands": { "test": { "command": "bash ./fake.sh", "parser": "generic",
-                          "failingPattern": "E[0-9]+" } } }
+{ "commands": { "test":      { "command": "bash ./fake.sh", "parser": "generic",
+                               "failingPattern": "E[0-9]+", "passingPattern": "^ok ",
+                               "runArg": "{pattern}" },
+                "typecheck": { "command": "bash ./fake.sh", "parser": "generic" },
+                "build":     { "command": "bash ./crash.sh", "parser": "generic" },
+                "lint":      { "command": "bash ./many.sh", "parser": "generic",
+                               "failingPattern": "^FAIL [^:]+" } } }
 JSON
 cat > "$PASSFIX/fake.sh" <<'SH'
 echo "warn: E42 error recovered, 0 failures"
+echo "ok   one"
+echo "ok   two"
+[ "${1:-}" = "only-one" ] && echo "ok   subset"
 exit 0
 SH
-[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test")" = "0" ] \
-  || { fail wrappers "the passing fixture did not print 0"; S=1; }
-# AC1 - passing run, log matches failingPattern -> none.
-[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test" --failing)" = "none" ] \
-  || { fail wrappers "--failing invented ids after a passing run"; S=1; }
-# AC3 - no log yet, and the run it triggers passes -> none.
-rm -rf "$PASSFIX/.forge/last"
-[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test" --failing)" = "none" ] \
-  || { fail wrappers "--failing did not run the passing command itself"; S=1; }
-# AC3 - no log yet, and the run it triggers fails -> that run's ids.
-rm -rf "$FIX/.forge/last"
-[ "$(cd "$FIX" && "$BIN/forge-test" --failing)" = "rejects an expired token" ] \
-  || { fail wrappers "--failing did not run the failing command itself"; S=1; }
-# AC2 - a failing run keeps naming its ids on a second call.
-[ "$(cd "$FIX" && "$BIN/forge-test" --failing)" = "rejects an expired token" ] \
-  || { fail wrappers "--failing lost the ids of a failing run"; S=1; }
+cat > "$PASSFIX/crash.sh" <<'SH'
+echo "the compiler exploded"
+exit 3
+SH
+cat > "$PASSFIX/many.sh" <<'SH'
+i=1; while [ "$i" -le 25 ]; do echo "FAIL case$i: boom"; i=$((i + 1)); done
+exit 1
+SH
+cd "$PASSFIX" || exit 1
+OUT="$(CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test")"; RC=$?
+cd "$OLDPWD" || exit 1
+# a passing run answers 0 - break: report returning the command's code unmapped
+[ "$RC" = 0 ] || { fail wrappers "a passing forge-test did not exit 0"; S=1; }
+# in one line, counted - break: widening the passing output, or losing the count
+[ "$OUT" = "2/2 tests succeeded" ] \
+  || { fail wrappers "a passing forge-test did not answer '2/2 tests succeeded'"; S=1; }
+# the count comes from the run, not the log's wording - break: parsing a passing log
+printf '%s\n' "$OUT" | grep -qi "fail" \
+  && { fail wrappers "a passing run reported failures its log merely mentioned"; S=1; }
+# a subset runs the pattern - break: dropping the runArg substitution
+[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-test" --run only-one)" = "3/3 tests succeeded" ] \
+  || { fail wrappers "--run did not pass the pattern to the command"; S=1; }
+# no count available - break: printing a half-empty "x/" line
+[ "$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-typecheck")" = "all checks succeeded" ] \
+  || { fail wrappers "a passing run without a count did not say so"; S=1; }
+# a failure that names no test still shows the log - break: an empty exit 1
+cd "$PASSFIX" || exit 1
+OUT="$(CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-build")"; RC=$?
+cd "$OLDPWD" || exit 1
+[ "$RC" = 1 ] || { fail wrappers "a failing forge-build did not exit 1"; S=1; }
+printf '%s\n' "$OUT" | grep -q "the compiler exploded" \
+  || { fail wrappers "a failure naming no test did not show the log"; S=1; }
+# more failures than the cap says so - break: a silent cap reading as the whole list
+CAPPED="$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-lint")"
+printf '%s\n' "$CAPPED" | grep -q "^the first 20 failures" \
+  || { fail wrappers "a capped failure list did not say it was capped"; S=1; }
 [ "$S" = 0 ] && ok "wrapper contract"
 
 # --- hook decisions ---------------------------------------------------------
