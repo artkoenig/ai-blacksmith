@@ -9,8 +9,13 @@ fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILED=1; }
 ok()   { printf 'ok   %s\n' "$1"; }
 
 # --- manifest and syntax ----------------------------------------------------
-if command -v claude >/dev/null && ! claude plugin validate ./plugins/forge --strict >/dev/null 2>&1; then
-  fail manifest "claude plugin validate rejected plugins/forge"
+# The plugin pins no version on purpose - it is released from the tip of main, so
+# the commit is the version. --strict warns about exactly that one thing, and
+# every other line it prints is a break.
+if command -v claude >/dev/null; then
+  V="$(claude plugin validate ./plugins/forge --strict 2>&1 \
+        | grep '^  > ' | grep -v '^  > version: No version specified')"
+  [ -z "$V" ] || fail manifest "claude plugin validate rejected plugins/forge:${V}"
 fi
 for f in plugins/forge/workflows/*.js plugins/forge/scripts/*.js; do
   node --check "$f" 2>/dev/null || fail syntax "$f"
@@ -193,6 +198,46 @@ sized 50 6 | assert_hint || { fail hooks "compact-output did not withhold an out
 # few but enormous lines through
 sized 30 300 | assert_hint || { fail hooks "compact-output did not withhold an output past maxChars"; S=1; }
 [ "$S" = 0 ] && ok "hook decisions"
+
+# --- staleness warning ------------------------------------------------------
+# A cloud session whose plugin checkout is behind the marketplace tip is told so.
+# The version is the SHA path segment of CLAUDE_PLUGIN_ROOT, the tip comes from
+# the marketplace clone's own origin.
+S=0
+SS="$(mktemp -d)"
+git init -q "$SS/remote"
+: > "$SS/remote/f"
+git -C "$SS/remote" add f
+git -C "$SS/remote" -c user.email=t@t -c user.name=t commit -qm init
+TIP="$(git -C "$SS/remote" rev-parse HEAD)"
+mkdir -p "$SS/cfg/plugins/marketplaces"
+git clone -q "$SS/remote" "$SS/cfg/plugins/marketplaces/mkt"
+mkdir -p "$SS/cfg/plugins/marketplaces/nogit"
+start() { # <sha> <marketplace dir> [remote flag]
+  echo '{}' | env CLAUDE_CONFIG_DIR="$SS/cfg" \
+    CLAUDE_PLUGIN_ROOT="$SS/cfg/plugins/repos/$2/$1/plugins/forge" \
+    CLAUDE_CODE_REMOTE="${3-true}" node plugins/forge/scripts/session-start.js
+}
+# an outdated checkout is named - break: dropping the mismatch branch
+start 0000000 mkt | grep -q "outdated forge plugin" \
+  || { fail staleness "no warning for a checkout behind the tip"; S=1; }
+# it names the update command with the marketplace it came from - break: a hard-coded name
+start 0000000 mkt | grep -q "forge@mkt" \
+  || { fail staleness "the warning did not name the marketplace to update from"; S=1; }
+# the current checkout says nothing - break: warning without comparing
+[ -z "$(start "${TIP:0:7}" mkt)" ] \
+  || { fail staleness "a session on the tip was warned"; S=1; }
+# a local session makes no network call and no noise - break: dropping the remote gate
+[ -z "$(start 0000000 mkt '')" ] \
+  || { fail staleness "a local session was warned"; S=1; }
+# no answer, no warning - break: treating an empty tip as a mismatch
+[ -z "$(start 0000000 nogit)" ] \
+  || { fail staleness "a missing marketplace clone produced a warning"; S=1; }
+# the setup notice survives - break: losing it when the staleness check is added
+CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q '/forge:bootstrap' \
+  || { fail staleness "the bootstrap notice was lost"; S=1; }
+rm -rf "$SS"
+[ "$S" = 0 ] && ok "staleness warning"
 
 # --- context measurement ----------------------------------------------------
 CTX="$(mktemp -d)"

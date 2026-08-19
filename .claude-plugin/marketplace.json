@@ -7,7 +7,6 @@
     {
       "name": "forge",
       "displayName": "Forge",
-      "version": "0.1.0",
       "description": "Interview-driven issues with acceptance criteria, executed autonomously by a token-frugal workflow.",
       "author": { "name": "artkoenig" },
       "license": "MIT",
