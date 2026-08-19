@@ -340,7 +340,7 @@ if [ -d .claude/rules/areas ]; then
       m=($g)
       [ ${#m[@]} -gt 0 ] || { fail areas "$f globs \"$g\", which matches nothing"; S=1; }
     done <<< "$globs"
-    [ "$(wc -l < "$f")" -le 40 ] || { fail areas "$f is past the 40 line budget for a note"; S=1; }
+    [ "$(wc -l < "$f")" -le 100 ] || { fail areas "$f is past the 100 line budget for a note"; S=1; }
     git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { fail areas "$f is not tracked"; S=1; }
   done
   shopt -u globstar nullglob

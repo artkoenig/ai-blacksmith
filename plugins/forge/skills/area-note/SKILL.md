@@ -33,7 +33,7 @@ here and is not. What the code already says earns nothing.
 
 - One line per durable fact.
 - Nothing specific to one issue, one change or one run.
-- Under 40 lines. Past that it costs more than the search it replaces.
+- Under 100 lines. Past that it costs more than the search it replaces.
 
 ## 3. Report
 
