@@ -3,7 +3,7 @@ name: implementer
 description: Implements one increment of an issue - branch, code, checks, commit. Reads the issue itself, navigates by the project rules, and writes back what it learns about an area. Use for autonomous execution of an issue that carries acceptance criteria.
 model: inherit
 effort: medium
-maxTurns: 30
+maxTurns: 50
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill, ToolSearch, mcp__github__issue_read
 skills:
   - forge:agent-protocol
