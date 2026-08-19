@@ -24,7 +24,6 @@ Copy `${CLAUDE_SKILL_DIR}/agent-template.md` to `.claude/agents/<domain>.md`:
 - `name`: the domain, kebab-case.
 - `description`: what it owns and when to delegate to it. Routing reads this.
 - `tools`: the minimum. Drop `Write` where it only edits, `Bash` where it runs nothing.
-- `maxTurns`: a real ceiling.
 
 ## 3. Write down what the domain needs
 

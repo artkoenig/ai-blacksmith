@@ -8,7 +8,7 @@ paths:
 
 - One directory per skill, `SKILL.md` inside it. Supporting files are addressed with
   `${CLAUDE_SKILL_DIR}`, which resolves both installed and project-scope.
-- Agent front matter carries `tools:`, `maxTurns:` and `skills:`. There is no `memory:` field any
+- Agent front matter carries `tools:` and `skills:`. There is no `memory:` field any
   more - auto memory is off, and `.claude/rules/` is the only channel into an agent.
 - `skills:` lists both `forge:<name>` and `<name>`. A missing one is skipped with a warning, so
   the preload works installed and here.
