@@ -317,6 +317,15 @@ echo '{"cwd":"/nonexistent","agent_type":"forge:prober"}' | node plugins/forge/s
   || { fail context "--dump did not list the saved copies"; S=1; }
 [ "$S" = 0 ] && ok "context measurement"
 
+# The one rules file has two readers: the SessionStart hook injects it, the
+# agent protocol attaches it with @. A rename that misses either is silent.
+# break: moving plugins/forge/rules/forge.md without following it
+[ -f plugins/forge/rules/forge.md ] || fail rules "plugins/forge/rules/forge.md is gone"
+grep -q "rules', 'forge.md'" plugins/forge/scripts/session-start.js \
+  || fail rules "the session start hook no longer reads the rules file"
+grep -q '^@${CLAUDE_PLUGIN_ROOT}/rules/forge.md$' plugins/forge/skills/agent-protocol/SKILL.md \
+  || fail rules "the agent protocol no longer references the rules file"
+
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.

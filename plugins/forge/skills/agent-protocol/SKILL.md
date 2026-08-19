@@ -8,6 +8,12 @@ user-invocable: false
 
 Reach the goal in as few tool calls as possible.
 
+## Project rules
+
+The rules forge works by are one file, and it is attached here rather than repeated:
+
+@${CLAUDE_PLUGIN_ROOT}/rules/forge.md
+
 ## Order
 
 1. Read the task. It names what you need.
