@@ -9,8 +9,13 @@ fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILED=1; }
 ok()   { printf 'ok   %s\n' "$1"; }
 
 # --- manifest and syntax ----------------------------------------------------
-if command -v claude >/dev/null && ! claude plugin validate ./plugins/forge --strict >/dev/null 2>&1; then
-  fail manifest "claude plugin validate rejected plugins/forge"
+# The plugin pins no version on purpose - it is released from the tip of main, so
+# the commit is the version. --strict warns about exactly that one thing, and
+# every other line it prints is a break.
+if command -v claude >/dev/null; then
+  V="$(claude plugin validate ./plugins/forge --strict 2>&1 \
+        | grep '^  > ' | grep -v '^  > version: No version specified')"
+  [ -z "$V" ] || fail manifest "claude plugin validate rejected plugins/forge:${V}"
 fi
 for f in plugins/forge/workflows/*.js plugins/forge/scripts/*.js; do
   node --check "$f" 2>/dev/null || fail syntax "$f"

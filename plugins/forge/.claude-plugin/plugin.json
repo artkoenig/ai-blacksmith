@@ -1,7 +1,6 @@
 {
   "name": "forge",
   "displayName": "Forge",
-  "version": "0.1.0",
   "description": "Interview issues into shape, then execute them autonomously on the smallest possible token budget.",
   "author": {
     "name": "artkoenig"
