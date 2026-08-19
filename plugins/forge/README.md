@@ -50,6 +50,7 @@ still merge. A merge conflict is reported, never resolved.
 | `/forge:issue` | Interview, write the issue, decide the cut, start the run. |
 | `/forge:work <id>` | Execute an issue. Usually started for you by `/forge:issue`. |
 | `/forge:new-agent` | Add a project agent for one area of the codebase. |
+| `/forge:area-note <dir>` | Write or update the area note for one directory. |
 | `/forge:stats` | Tool calls per agent run, over time. |
 | `/forge:context` | What each agent loaded at startup: measured tokens, breakdown by source, saved copies. |
 
