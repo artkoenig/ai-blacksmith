@@ -3,6 +3,7 @@
 // SessionStart. Says one thing, once, and only when there is something to say.
 // Anything printed here is paid for in every single session.
 const path = require('path')
+const fs = require('fs')
 const { execFileSync } = require('child_process')
 const { readInput, config, emit } = require(path.join(__dirname, 'lib.js'))
 
@@ -52,9 +53,27 @@ function stale() {
   return `WARNING: this session runs an outdated forge plugin (version ${running}, but the repository tip is ${tip}). Its agents, skills and workflows are the old ones, and a running session cannot swap them - tell the human, and recommend a fresh session after claude plugin update forge@${name}.`
 }
 
+// The rules the plugin owns travel with the plugin, injected here rather than
+// copied into the project at bootstrap. A copy ages the moment the plugin is
+// updated, and only a second bootstrap would notice. This costs the same as the
+// file rule it replaces - both load once per session - and it is skipped for an
+// unconfigured project, which cannot act on them anyway.
+function rules() {
+  try {
+    return fs.readFileSync(path.join(__dirname, '..', 'rules', 'forge.md'), 'utf8').trim()
+  } catch {
+    return ''
+  }
+}
+
 const input = readInput()
 const say = []
-if (!config(input)) say.push('forge is installed but this project is not set up. Run /forge:bootstrap.')
+if (config(input)) {
+  const own = rules()
+  if (own) say.push(own)
+} else {
+  say.push('forge is installed but this project is not set up. Run /forge:bootstrap.')
+}
 const outdated = stale()
 if (outdated) say.push(outdated)
 if (!say.length) emit(null)

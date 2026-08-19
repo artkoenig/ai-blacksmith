@@ -5,7 +5,9 @@ paths:
 
 # Rules and area notes
 
-`.claude/rules/` is the only channel that carries project knowledge into an agent. A rule without
+`.claude/rules/` carries this project's own knowledge into an agent. The rules forge itself works
+by are not written here: `scripts/session-start.js` injects `plugins/forge/rules/forge.md` as
+`additionalContext`, so a plugin update carries them and no second bootstrap is needed. A rule without
 front matter loads at every start, for every agent. A rule with a `paths:` glob loads only when a
 file it matches is read, so per-directory knowledge costs nothing until someone works there.
 

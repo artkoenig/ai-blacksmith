@@ -102,7 +102,6 @@ from the `agent-protocol` skill.
 .forge/metrics.jsonl                     one line per agent run (gitignored)
 .claude/worktrees/                       one per increment of a cut issue (gitignored)
 .claude/skills/issue-backend/SKILL.md    your issue storage, as commands
-.claude/rules/forge.md                   the short version, loaded every session
 .claude/rules/areas/<area>.md            what is true of one directory, loaded when it is read
                                          written by /forge:insights
 ```
