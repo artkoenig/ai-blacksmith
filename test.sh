@@ -30,7 +30,7 @@ trap 'rm -rf "$FIX"' EXIT
 mkdir -p "$FIX/.forge"
 cat > "$FIX/.forge/config.json" <<'JSON'
 { "commands": { "test": { "command": "bash ./fake.sh", "parser": "jest" } },
-  "compaction": { "maxLines": 10, "headLines": 4, "tailLines": 2 } }
+  "compaction": { "maxLines": 10, "headLines": 4, "tailLines": 2, "hintLines": 40, "hintChars": 5000 } }
 JSON
 cat > "$FIX/fake.sh" <<'JSON'
 echo "  ✓ accepts a valid token"
@@ -177,6 +177,27 @@ node -e '
   })' || { fail hooks "compact-output did not compact correctly"; S=1; }
 [ -z "$(hook compact-output.js '{"tool_response":{"stdout":"one\ntwo","stderr":"","interrupted":false,"isImage":false}}')" ] \
   || { fail hooks "compact-output touched a short result"; S=1; }
+# past hintLines the output is withheld, not compacted - break: dropping the line ceiling,
+# which leaves a huge result arriving as head + tail
+oversized() { node -e '
+  const [n,w]=process.argv.slice(1).map(Number)
+  const l=[...Array(n)].map((_,i)=>("line "+i).padEnd(w,"x")).join("\n")
+  process.stdout.write(JSON.stringify({tool_use_id:"t",tool_response:{stdout:l,stderr:"boom",interrupted:false,isImage:false}}))
+' "$1" "$2" | node plugins/forge/scripts/compact-output.js; }
+assert_hint() { node -e '
+  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+    const o=(JSON.parse(s||"{}").hookSpecificOutput||{}).updatedToolOutput||{}
+    const bad=[]
+    if(!/^… output withheld: \d+ lines, \d+ characters → /.test(o.stdout||"")) bad.push("no withheld hint")
+    if(!/\.forge\/last\/bash-/.test(o.stdout||"")) bad.push("no log path")
+    if(!/grep -n/.test(o.stdout||"")) bad.push("no cheaper way to read it")
+    if(o.stderr!=="boom") bad.push("stderr was touched")
+    if(bad.length){console.log(bad.join(", "));process.exit(1)}
+  })'; }
+oversized 50 6 | assert_hint || { fail hooks "compact-output did not withhold an output past hintLines"; S=1; }
+# and past hintChars, whatever the line count - break: dropping the character ceiling,
+# which lets few but enormous lines through as head + tail
+oversized 30 300 | assert_hint || { fail hooks "compact-output did not withhold an output past hintChars"; S=1; }
 [ "$S" = 0 ] && ok "hook decisions"
 
 # --- context measurement ----------------------------------------------------
