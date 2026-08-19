@@ -3,7 +3,7 @@ name: reviewer
 description: Judges a committed increment against the acceptance criteria of an issue it reads itself, returns a verdict with a reproduction per finding, and merges the increment when it accepts it. Separates a failure this change caused from one that was already red by running the same check at the base in a throwaway worktree. Changes no file it judges. Use to verify an implementation and land it.
 model: inherit
 effort: medium
-maxTurns: 18
+maxTurns: 50
 tools: Read, Grep, Bash, Write, Edit, Skill, ToolSearch, mcp__github__issue_read
 skills:
   - forge:agent-protocol

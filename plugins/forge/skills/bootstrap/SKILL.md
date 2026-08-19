@@ -41,7 +41,7 @@ Report it in one line, and what breaks without it.
     "typecheck": { "command": "<raw typecheck command>", "parser": "generic", "failingPattern": "", "passingPattern": "" },
     "build": { "command": "<raw build command>", "parser": "generic", "failingPattern": "", "passingPattern": "" }
   },
-  "compaction": { "maxLines": 60, "headLines": 30, "tailLines": 15 },
+  "compaction": { "maxLines": 200, "maxChars": 10000 },
   "guard": { "rewrite": [] },
   "issueBackend": "<github|markdown|other>"
 }
@@ -51,6 +51,10 @@ Report it in one line, and what breaks without it.
 regexes: the first matches one failure's identifier, the second one passing test. Without
 `passingPattern` a green run answers `all tests succeeded` instead of `<n>/<n> tests succeeded`.
 Leave both empty where a built-in parser fits - it counts on its own.
+
+`compaction` bounds what a Bash command may spend. Past `maxLines` or `maxChars` its stdout is
+withheld: the full text goes to `.forge/last/`, and only the size, that path and how to query it
+come back. Under both, the output arrives untouched.
 
 From `${CLAUDE_SKILL_DIR}`:
 

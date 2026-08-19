@@ -3,7 +3,7 @@ name: <domain>
 description: <what this agent owns, and when to delegate to it>
 model: inherit
 effort: medium
-maxTurns: 25
+maxTurns: 50
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill
 skills:
   - forge:agent-protocol
