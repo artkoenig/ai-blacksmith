@@ -28,7 +28,7 @@ pull requests stay yours.
 | The workflow | The loop and every intermediate result live in script variables. Your conversation pays for the invocation and the final line. |
 | Wrapper commands | `forge-test` answers twice over: exit `0` with one line, `<n>/<n> tests succeeded`, or exit `1` with every failing test and its detail. Nothing to escalate to, nothing to parse for the verdict. |
 | The guard hook | A raw `npm test` is rewritten to the wrapper before it runs, or refused with the wrapper named. |
-| The compaction hook | Bash output past a line budget arrives as head + tail plus a path to the full log. Past 200 lines or 10000 characters nothing but the log path and a cheaper way to read it comes back. stderr is never touched. |
+| The compaction hook | Bash output past 200 lines or 10000 characters is withheld: the full text goes to a log, and back comes its size, that path and the cheaper ways to read it. stderr is never touched. |
 | The cut | Cutting adds a dispatch set, so `/forge:issue` cuts only for parallelism, for a diff too large to review in one pass, or for a real dependency. |
 | Pre-existing red | The reviewer proves a failing check was already failing before it spends a repair round on it. |
 | Measured startup | Every agent start records what it loaded and what that cost, so a growing skill or rule shows up as a number instead of a feeling. |

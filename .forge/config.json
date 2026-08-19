@@ -8,7 +8,7 @@
       "passingPattern": "^ok "
     }
   },
-  "compaction": { "maxLines": 60, "headLines": 30, "tailLines": 15, "hintLines": 200, "hintChars": 10000 },
+  "compaction": { "maxLines": 200, "maxChars": 10000 },
   "guard": { "rewrite": [] },
   "issueBackend": "github"
 }

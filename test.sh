@@ -30,7 +30,7 @@ trap 'rm -rf "$FIX"' EXIT
 mkdir -p "$FIX/.forge"
 cat > "$FIX/.forge/config.json" <<'JSON'
 { "commands": { "test": { "command": "bash ./fake.sh", "parser": "jest" } },
-  "compaction": { "maxLines": 10, "headLines": 4, "tailLines": 2, "hintLines": 40, "hintChars": 5000 } }
+  "compaction": { "maxLines": 40, "maxChars": 5000 } }
 JSON
 cat > "$FIX/fake.sh" <<'JSON'
 echo "  ✓ accepts a valid token"
@@ -166,20 +166,9 @@ hook guard-checkout.js '{"agent_type":"forge:reviewer","tool_input":{"file_path"
   || { fail hooks "guard-checkout refused a probe outside the checkout"; S=1; }
 [ -z "$(hook guard-checkout.js '{"agent_type":"forge:implementer","tool_input":{"file_path":"src/a.ts"}}')" ] \
   || { fail hooks "guard-checkout acted on an agent other than the reviewer"; S=1; }
-node -e '
-  const l=[...Array(30)].map((_,i)=>"line "+i).join("\n")
-  process.stdout.write(JSON.stringify({tool_use_id:"t",tool_response:{stdout:l,stderr:"boom",interrupted:false,isImage:false}}))
-' | node plugins/forge/scripts/compact-output.js | node -e '
-  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-    const o=JSON.parse(s).hookSpecificOutput.updatedToolOutput
-    if(o.stdout.split("\n").length!==7) {console.log("wrong line count");process.exit(1)}
-    if(o.stderr!=="boom") {console.log("stderr was touched");process.exit(1)}
-  })' || { fail hooks "compact-output did not compact correctly"; S=1; }
 [ -z "$(hook compact-output.js '{"tool_response":{"stdout":"one\ntwo","stderr":"","interrupted":false,"isImage":false}}')" ] \
   || { fail hooks "compact-output touched a short result"; S=1; }
-# past hintLines the output is withheld, not compacted - break: dropping the line ceiling,
-# which leaves a huge result arriving as head + tail
-oversized() { node -e '
+sized() { node -e '
   const [n,w]=process.argv.slice(1).map(Number)
   const l=[...Array(n)].map((_,i)=>("line "+i).padEnd(w,"x")).join("\n")
   process.stdout.write(JSON.stringify({tool_use_id:"t",tool_response:{stdout:l,stderr:"boom",interrupted:false,isImage:false}}))
@@ -194,10 +183,15 @@ assert_hint() { node -e '
     if(o.stderr!=="boom") bad.push("stderr was touched")
     if(bad.length){console.log(bad.join(", "));process.exit(1)}
   })'; }
-oversized 50 6 | assert_hint || { fail hooks "compact-output did not withhold an output past hintLines"; S=1; }
-# and past hintChars, whatever the line count - break: dropping the character ceiling,
-# which lets few but enormous lines through as head + tail
-oversized 30 300 | assert_hint || { fail hooks "compact-output did not withhold an output past hintChars"; S=1; }
+# under both ceilings nothing is touched - break: withholding an output an agent can afford,
+# which sends it to grep a log it did not need
+[ -z "$(sized 30 6)" ] || { fail hooks "compact-output withheld an output inside the budget"; S=1; }
+# past maxLines the whole stdout is withheld - break: dropping the line ceiling, which lets a
+# thousand-line result into the context
+sized 50 6 | assert_hint || { fail hooks "compact-output did not withhold an output past maxLines"; S=1; }
+# and past maxChars, whatever the line count - break: dropping the character ceiling, which lets
+# few but enormous lines through
+sized 30 300 | assert_hint || { fail hooks "compact-output did not withhold an output past maxChars"; S=1; }
 [ "$S" = 0 ] && ok "hook decisions"
 
 # --- context measurement ----------------------------------------------------
