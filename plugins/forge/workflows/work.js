@@ -37,10 +37,22 @@ const VERDICT = {
   properties: {
     pass: { type: 'boolean' },
     failed: { type: 'array', items: { type: 'string' }, description: 'ids of failed criteria' },
-    notes: {
+    findings: {
       type: 'array',
-      items: { type: 'string' },
-      description: 'one line per failed criterion: what is wrong and how you reproduced it',
+      description: 'one entry per failed criterion, carrying the places you already looked',
+      items: {
+        type: 'object',
+        required: ['id', 'evidence', 'sites'],
+        properties: {
+          id: { type: 'string', description: 'the criterion id, as it appears in `failed`' },
+          evidence: { type: 'string', description: 'one line: what is wrong and how you reproduced it' },
+          sites: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'the paths you inspected to reach this finding, `path` or `path:line`',
+          },
+        },
+      },
     },
     preexisting: {
       type: 'array',
@@ -223,9 +235,11 @@ async function runIncrement(inc) {
       )
       break
     }
+    const findings = (verdict.findings || []).filter((f) => f && f.id)
+
     log(
       `${label}: rejected - ${(verdict.failed || []).join(', ') || 'no criterion named'}`
-        + ((verdict.notes || []).length ? ` - ${verdict.notes.join('; ')}` : ''),
+        + (findings.length ? ` - ${findings.map((f) => `${f.id}: ${f.evidence || ''}`.trim()).join('; ')}` : ''),
     )
 
     const failed = [...(verdict.failed || [])].sort().join(',')
@@ -248,7 +262,16 @@ async function runIncrement(inc) {
         '',
         wt ? `Work in ${wt}, on ${branch}. Do not create another worktree.` : `Work in the checkout, on ${branch}.`,
         `Fix only these criteria: ${(verdict.failed || []).join(', ')}.`,
-        ...(verdict.notes || []).map((n) => `- ${n}`),
+        ...findings.map((f) =>
+          `- ${f.id}: ${f.evidence || ''}`.trim()
+            + ((f.sites || []).length ? `\n  sites: ${f.sites.join(', ')}` : '\n  sites: none given'),
+        ),
+        '',
+        `The round you are repairing is ${run.sha}, cut from ${base}.`,
+        `Read \`${where}git diff ${base}..${run.sha}\` first: the defect is in that diff.`,
+        ...((run.files || []).length ? [`It touched: ${run.files.join(', ')}.`] : []),
+        'Treat the sites above as the places to change. Search the wider tree only for a site that',
+        'is in neither list.',
         '',
         'Reproduce each finding before you change anything.',
         'Change nothing else. Re-run only the checks covering these criteria.',
@@ -320,7 +343,7 @@ while (pending.size) {
       rounds: r.rounds,
       summary: r.summary,
       failed: r.verdict ? r.verdict.failed : undefined,
-      notes: r.verdict ? r.verdict.notes || [] : undefined,
+      findings: r.verdict ? r.verdict.findings || [] : undefined,
       blocker: r.blocker,
       conflict: r.conflict,
       resolution: r.resolution,

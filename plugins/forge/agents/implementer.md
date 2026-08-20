@@ -45,4 +45,11 @@ Never merge. Never push. The reviewer merges what it accepts.
 
 ## Repair rounds
 
+A repair starts from its own diff and the reviewer's sites, never from a search.
+
+- Read `git diff <base>..<sha>` first, with the base and the sha your task names. The defect is
+  in that diff.
+- Each finding carries the sites the reviewer inspected. Those are the places to change.
+- Search the wider tree only for a site that is in neither list, and say what sent you there.
+
 Change only what the named criteria require. Reproduce each finding before you change anything.
