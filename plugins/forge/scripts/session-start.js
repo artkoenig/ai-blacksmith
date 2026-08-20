@@ -7,8 +7,7 @@ const fs = require('fs')
 const { execFileSync } = require('child_process')
 const { readInput, config, emit } = require(path.join(__dirname, 'lib.js'))
 
-// The staleness check, remote sessions only: no network call and no output on
-// a local one, where the checkout is the source and cannot be behind itself.
+// The staleness check.
 //
 // It updates nothing. The CLI resolves a session's components before any hook
 // runs, so an update from inside a session can only reach the next one -
@@ -16,41 +15,62 @@ const { readInput, config, emit } = require(path.join(__dirname, 'lib.js'))
 // script, which runs outside a session. What a session can do about its own
 // staleness is exactly one thing: say so.
 //
-// The comparison needs no claude call and no hard-coded URL. The plugin pins
-// no version, so the installed version is the source commit's SHA, and the CLI
-// keys the checkout by it: CLAUDE_PLUGIN_ROOT is
-// .../plugins/repos/<marketplace>/<sha>/plugins/forge, so the SHA and the
-// marketplace both come out of that path. The tip is asked from the
-// marketplace clone's own remote, which makes a fork check against the fork.
-// No answer, no warning: with the network down there is nothing to compare
-// against, and a wrong warning is worse than none.
+// The comparison needs no claude call and no hard-coded URL. The plugin pins no
+// version, so the installed version is the source commit's SHA, and the CLI
+// keys the cache entry by it: CLAUDE_PLUGIN_ROOT is
+// <cache>/<marketplace>/<plugin>/<version>, and the marketplace clone is the
+// cache directory's sibling - both layouts are documented at
+// https://code.claude.com/docs/en/plugin-marketplaces#pre-populate-plugins-for-containers
+// and the version rule at
+// https://code.claude.com/docs/en/plugins-reference#version-management.
+// That path shape is also the gate: a development checkout or a link-mode
+// source does not sit under the cache, and cannot be behind itself. The tip is
+// asked from the marketplace clone's own remote, which makes a fork check
+// against the fork. No answer, no warning: with the network down there is
+// nothing to compare against, and a wrong warning is worse than none.
 function stale() {
-  if (process.env.CLAUDE_CODE_REMOTE !== 'true') return null
   const root = process.env.CLAUDE_PLUGIN_ROOT
   if (!root) return null
 
-  const parts = root.split(path.sep)
-  const at = parts.map((p) => /^[0-9a-f]{7,40}$/.test(p)).lastIndexOf(true)
-  if (at < 1) return null
-  const running = parts[at]
-  const name = parts[at - 1]
+  const parts = root.split(path.sep).filter(Boolean)
+  const at = parts.lastIndexOf('cache')
+  if (at < 1 || parts.length - at !== 4) return null
+  const [name, plugin, running] = parts.slice(at + 1)
+  // A pinned version names no commit, so there is nothing a tip could be
+  // compared against.
+  if (!/^[0-9a-f]{7,40}$/.test(running)) return null
 
   const home = process.env.CLAUDE_CONFIG_DIR || path.join(require('os').homedir(), '.claude')
-  const clone = path.join(home, 'plugins', 'marketplaces', name)
+  const root0 = root.startsWith(path.sep) ? path.sep : ''
+  const clone = [
+    path.join(root0 + parts.slice(0, at).join(path.sep), 'marketplaces', name),
+    path.join(home, 'plugins', 'marketplaces', name),
+  ].find((d) => fs.existsSync(path.join(d, '.git')))
+  if (!clone) return null
+
+  const git = (args) =>
+    execFileSync('git', ['-C', clone, ...args], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
 
   let tip = ''
   try {
-    tip = execFileSync('git', ['-C', clone, 'ls-remote', 'origin', 'HEAD'], {
-      encoding: 'utf8',
-      timeout: 10000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).split(/\s/)[0]
+    // The clone sits on the ref the marketplace was added with, which is not
+    // always the remote's default branch.
+    let ref = ''
+    try {
+      ref = git(['rev-parse', '--abbrev-ref', 'HEAD'])
+    } catch {}
+    if (!ref || ref === 'HEAD') ref = 'HEAD'
+    tip = git(['ls-remote', 'origin', ref]).split(/\s/)[0]
   } catch {
     return null
   }
   if (!tip || tip.startsWith(running)) return null
 
-  return `WARNING: this session runs an outdated forge plugin (version ${running}, but the repository tip is ${tip}). Its agents, skills and workflows are the old ones, and a running session cannot swap them - tell the human, and recommend a fresh session after claude plugin update forge@${name}.`
+  return `WARNING: this session runs an outdated forge plugin (version ${running}, but the repository tip is ${tip}). Its agents, skills and workflows are the old ones, and a running session cannot swap them - tell the human, and recommend a fresh session after claude plugin update ${plugin}@${name}.`
 }
 
 // The rules the plugin owns travel with the plugin, injected here rather than
