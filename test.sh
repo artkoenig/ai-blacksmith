@@ -326,6 +326,22 @@ grep -q "rules', 'forge.md'" plugins/forge/scripts/session-start.js \
 grep -q '^@${CLAUDE_PLUGIN_ROOT}/rules/forge.md$' plugins/forge/skills/agent-protocol/SKILL.md \
   || fail rules "the agent protocol no longer references the rules file"
 
+# --- the run starts on demand -----------------------------------------------
+# Writing an issue spends no dispatch. The behaviour lives in prose, so the
+# prose is what is checked: a skill that ends by invoking the workflow starts
+# work nobody asked for.
+S=0
+# break: restoring a "## 4. Start the run" step that invokes /forge:work
+grep -q '^## 4. Hand it over$' plugins/forge/skills/issue/SKILL.md \
+  || { fail handoff "the issue skill no longer hands the run over"; S=1; }
+grep -q 'Never invoke `/forge:work` off the back of writing an issue' \
+  plugins/forge/skills/issue/SKILL.md \
+  || { fail handoff "the issue skill no longer forbids starting the run itself"; S=1; }
+# break: a description or a README row that promises the run
+grep -rniq 'starts\? the run' plugins/forge/skills/issue/SKILL.md plugins/forge/README.md \
+  && { fail handoff "forge:issue still advertises that it starts the run"; S=1; }
+[ "$S" = 0 ] && ok "the run starts on demand"
+
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.

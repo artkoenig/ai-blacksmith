@@ -9,14 +9,15 @@ and what is out of scope. Nothing else - no file list, no plan. A map written in
 maintained by nobody; the implementer finds its own way. Storage is per project: `/forge:bootstrap` writes an adapter for GitHub Issues, markdown
 files, or whatever you describe.
 
-**The same session decides the cut**, then starts the run. It is the only place that sees the whole
-issue at once.
+**The same session decides the cut**, and stops there. It is the only place that sees the whole
+issue at once, so it reports the invocation that would run it - and runs nothing. Writing an issue
+never spends a dispatch; the run starts when you ask for it.
 
-**`/forge:work` executes.** One loop per increment: implement, review, repair until the verdict
-converges. The implementer commits each round; the reviewer merges the increment it passes.
-Independent increments run at the same time, each in its own worktree and branch, and each lands
-from that worktree by rebasing onto the issue branch and moving it - so two that finish together
-do not wait for each other. An uncut issue skips all of that and works in the checkout.
+**`/forge:work` executes, on request.** One loop per increment: implement, review, repair until
+the verdict converges. The implementer commits each round; the reviewer merges the increment it
+passes. Independent increments run at the same time, each in its own worktree and branch, and each
+lands from that worktree by rebasing onto the issue branch and moving it - so two that finish
+together do not wait for each other. An uncut issue skips all of that and works in the checkout.
 No user interaction is possible during a run, by design. You get a branch and a commit; push and
 pull requests stay yours.
 
@@ -47,8 +48,8 @@ still merge. A merge conflict is reported, never resolved.
 | Command | Does |
 | --- | --- |
 | `/forge:bootstrap` | One-time project setup. Run this first. |
-| `/forge:issue` | Interview, write the issue, decide the cut, start the run. |
-| `/forge:work <id>` | Execute an issue. Usually started for you by `/forge:issue`. |
+| `/forge:issue` | Interview, write the issue, decide the cut. Starts nothing. |
+| `/forge:work <id>` | Execute an issue, or a cut, when you ask for it. |
 | `/forge:new-agent` | Add a project agent for one area of the codebase. |
 | `/forge:insights <dir>` | Record what you learned about one directory as its area note. |
 | `/forge:stats` | Tool calls per agent run, over time. |
