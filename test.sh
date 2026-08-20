@@ -326,6 +326,62 @@ grep -q "rules', 'forge.md'" plugins/forge/scripts/session-start.js \
 grep -q '^@${CLAUDE_PLUGIN_ROOT}/rules/forge.md$' plugins/forge/skills/agent-protocol/SKILL.md \
   || fail rules "the agent protocol no longer references the rules file"
 
+# --- the run starts on demand -----------------------------------------------
+# Writing an issue spends no dispatch. The behaviour lives in prose, so the
+# prose is what is checked: a skill that ends by invoking the workflow starts
+# work nobody asked for.
+S=0
+# break: restoring a "## 4. Start the run" step that invokes /forge:work
+grep -q '^## 4. Hand it over$' plugins/forge/skills/issue/SKILL.md \
+  || { fail handoff "the issue skill no longer hands the run over"; S=1; }
+grep -q 'Never invoke `/forge:work` off the back of writing an issue' \
+  plugins/forge/skills/issue/SKILL.md \
+  || { fail handoff "the issue skill no longer forbids starting the run itself"; S=1; }
+# break: a description that promises the run
+grep -niq 'starts\? the run' plugins/forge/skills/issue/SKILL.md \
+  && { fail handoff "forge:issue still advertises that it starts the run"; S=1; }
+[ "$S" = 0 ] && ok "the run starts on demand"
+
+# --- the readme states no behaviour -----------------------------------------
+# Behaviour is defined in the skill, agent, workflow and hook that implement it.
+# A second copy in the README is maintained by nobody and drifts.
+# break: pasting a rule or a tuning number back into plugins/forge/README.md
+grep -niqE '[^0-9](8|eight) rounds|200 lines|10000 characters|maxRounds' plugins/forge/README.md \
+  && fail readme "the README restates behaviour that lives in the code" \
+  || ok "the readme states no behaviour"
+
+# --- output language --------------------------------------------------------
+# Two languages, one boundary: the reply follows the user, the artifacts stay
+# English. Both halves are prose, so the prose is what is checked. The style
+# carries the session's half, the agent protocol the agents' half - neither
+# restates the other.
+S=0
+# break: dropping the reply-language line and going English-only again
+grep -q "the language the user writes in" plugins/forge/output-styles/terse.md \
+  || { fail language "the output style no longer replies in the user's language"; S=1; }
+# break: dropping the English-artifacts rule from either reader
+grep -q '^- Write English into every file' plugins/forge/output-styles/terse.md \
+  || { fail language "the output style no longer requires English in files"; S=1; }
+grep -q '^Write English into every file' plugins/forge/skills/agent-protocol/SKILL.md \
+  || { fail language "the agent protocol no longer requires English in files"; S=1; }
+[ "$S" = 0 ] && ok "output language"
+
+# --- the implementer reports ------------------------------------------------
+# The workflow swallows everything an agent returns, so a run shows the user
+# nothing until it ends. One SendMessage per round is that window - and the
+# instruction is dead unless the tool is on the agent's surface.
+S=0
+# break: dropping the report section from the implementer
+grep -q '^## Report$' plugins/forge/agents/implementer.md \
+  || { fail report "the implementer no longer reports its round"; S=1; }
+grep -q 'SendMessage` to `main`' plugins/forge/agents/implementer.md \
+  || { fail report "the implementer's report no longer goes to the main session"; S=1; }
+# break: removing SendMessage from tools: - the section stays, the call cannot be made
+awk '/^---$/{n++; next} n==1 && /^tools:/' plugins/forge/agents/implementer.md \
+  | grep -q 'SendMessage' \
+  || { fail report "SendMessage is not on the implementer's tool surface"; S=1; }
+[ "$S" = 0 ] && ok "the implementer reports"
+
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.

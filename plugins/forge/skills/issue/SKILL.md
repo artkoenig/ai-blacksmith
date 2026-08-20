@@ -1,11 +1,11 @@
 ---
 name: issue
-description: Interview the user, write one issue with verifiable acceptance criteria, decide whether to cut it into increments, and start the run. Use when the user wants to capture work, plan a change, or file a ticket.
+description: Interview the user, write one issue with verifiable acceptance criteria, and decide whether to cut it into increments. Use when the user wants to capture work, plan a change, or file a ticket. The run starts later, on request.
 argument-hint: "[short description of the work]"
 allowed-tools: AskUserQuestion, Read, Write, Bash, Skill
 ---
 
-# Write an issue and start the run
+# Write an issue
 
 ## 1. Interview
 
@@ -54,19 +54,23 @@ rules. A cut adds a dispatch set, and its reviews run one after another. It halv
 **Dependencies are your assertion.** Nothing proves two increments disjoint. Assert independence
 only where the criteria are about different things. A wrong call surfaces as a merge conflict.
 
-## 4. Start the run
+## 4. Hand it over
 
-Invoke `/forge:work` with the issue id, or with the cut:
+Start nothing. Filing an issue is not asking for it to be built: a run spends agent dispatches, and
+when to pay them is the user's call. Never invoke `/forge:work` off the back of writing an issue.
+
+Report the issue id, one line per criterion, one line per increment, and last the invocation that
+starts it, verbatim, for the user to run when they want it:
 
 ```
-{ issue: "<id>", increments: [
-  { id: "a", title: "…", criteria: ["AC1", "AC2"], dependsOn: [] },
-  { id: "b", title: "…", criteria: ["AC3"], dependsOn: ["a"], agent: "project:api" }
+/forge:work { "issue": "<id>", "increments": [
+  { "id": "a", "title": "…", "criteria": ["AC1", "AC2"], "dependsOn": [] },
+  { "id": "b", "title": "…", "criteria": ["AC3"], "dependsOn": ["a"], "agent": "project:api" }
 ]}
 ```
 
-`agent` is optional and names a project agent for that increment.
+`agent` is optional and names a project agent for that increment. Where you did not cut, the
+invocation is the bare id: `/forge:work <id>`.
 
-Do not ask for approval. The run pushes nothing and opens nothing.
-
-Report the issue id, one line per criterion, one line per increment. Nothing else.
+Only where the user asks for the run in the same breath - "and build it", "start it" - invoke it
+then, with that cut. Their request is the approval; do not ask for another.
