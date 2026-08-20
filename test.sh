@@ -515,4 +515,64 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
 JS
 [ "$FAILED" = 0 ] && ok "workflow control flow"
 
+# --- journal status ---------------------------------------------------------
+# A workflow journal carries every agent's whole return value. Reading it to
+# learn whether the run is finished costs all of them, so the status is one
+# call: started = running, result = done, aborted = dead.
+JRN="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$JRN"' EXIT
+WF="$JRN/cfg/projects/p/s/subagents/workflows"
+mkdir -p "$WF/wf_a" "$WF/wf_b"
+# The last line is half written on purpose: the file is appended while the run
+# goes on, and a torn line is the run still going, not a broken journal.
+cat > "$WF/wf_a/journal.jsonl" <<'JSONL'
+{"type":"started","key":"v2:aaa","agentId":"a1a1a1a1a1"}
+{"type":"result","key":"v2:aaa","agentId":"a1a1a1a1a1","result":{"status":"implemented","summary":"padding padding padding padding padding padding padding padding padding TAILMARK"}}
+{"type":"started","key":"v2:bbb","agentId":"b2b2b2b2b2"}
+{"type":"started","key":"v2:ccc","agentId":"c3c3c3c3c3"}
+{"type":"aborted","key":"v2:ccc","agentId":"c3c3c3c3c3"}
+{"type":"started","key":"v2:dd
+JSONL
+printf '{"type":"started","key":"v2:zzz","agentId":"z9z9z9z9z9"}\n' > "$WF/wf_b/journal.jsonl"
+touch -m -t 200001010000 "$WF/wf_a/journal.jsonl"
+
+S=0
+JOUT="$("$BIN/forge-journal" "$WF/wf_a")"; RC=$?
+# the question is answered before anything else - break: dropping the tally line
+[ "$(printf '%s\n' "$JOUT" | head -1)" = "1 running, 1 done, 1 dead" ] \
+  || { fail journal "the status did not open with the tally"; S=1; }
+# it always answers - break: exiting non-zero on a journal it could read
+[ "$RC" = 0 ] || { fail journal "reading a journal did not exit 0"; S=1; }
+# result = done - break: mapping a returned agent to anything else
+printf '%s\n' "$JOUT" | grep -q "^done     a1a1a1a1" \
+  || { fail journal "an agent that returned was not reported done"; S=1; }
+# started without a result = running - break: reporting an unfinished agent as done
+printf '%s\n' "$JOUT" | grep -q "^running  b2b2b2b2" \
+  || { fail journal "an agent that only started was not reported running"; S=1; }
+# aborted = dead - break: ignoring the aborted line, which leaves a dead agent running
+printf '%s\n' "$JOUT" | grep -q "^dead     c3c3c3c3" \
+  || { fail journal "an aborted agent was not reported dead"; S=1; }
+# and it stays cheap - break: printing the return values, which is what the file
+# already does and what this call exists not to do
+printf '%s\n' "$JOUT" | grep -q TAILMARK \
+  && { fail journal "the status printed a return value in full"; S=1; }
+# the one result worth the tokens is still reachable - break: no way to read a
+# result without reading every other one with it
+"$BIN/forge-journal" --result a1a1 "$WF/wf_a" | grep -q TAILMARK \
+  || { fail journal "--result did not print the agent's return value"; S=1; }
+# a bare call takes the run written last - break: making the caller know the path
+[ "$(HOME=/nonexistent CLAUDE_CONFIG_DIR="$JRN/cfg" "$BIN/forge-journal" | head -1)" = "1 running" ] \
+  || { fail journal "a bare call did not read the newest run"; S=1; }
+# and a run id finds its own - break: accepting only a path
+HOME=/nonexistent CLAUDE_CONFIG_DIR="$JRN/cfg" "$BIN/forge-journal" wf_a | grep -q "^1 running, 1 done, 1 dead" \
+  || { fail journal "a run id did not resolve to its journal"; S=1; }
+# a run with no journal is an answer, not a crash - break: an empty output or a stack trace
+MISS="$(HOME=/nonexistent CLAUDE_CONFIG_DIR=/nonexistent "$BIN/forge-journal" wf_gone 2>&1)"; RC=$?
+[ "$RC" = 0 ] && [ -n "$MISS" ] \
+  || { fail journal "a missing journal did not answer in one line"; S=1; }
+# an unknown flag is not a status - break: a typo reading as a run that is done
+("$BIN/forge-journal" --nope >/dev/null 2>&1); [ $? = 2 ] \
+  || { fail journal "an unknown flag did not exit 2"; S=1; }
+[ "$S" = 0 ] && ok "journal status"
+
 exit "$FAILED"
