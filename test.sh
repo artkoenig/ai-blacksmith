@@ -437,22 +437,24 @@ const fs=require('fs')
 const src=fs.readFileSync('plugins/forge/workflows/work.js','utf8').replace('export const meta','const meta')
 const run=(a,{verdicts={},conflicts=[]}={})=>{
   const calls=[]
+  const prompts={}
   const live={review:0,peak:0}
   const agent=async(prompt,o)=>{
     calls.push(o.label)
+    prompts[o.label]=prompt
     if(o.label.startsWith('review')){
       live.review++;live.peak=Math.max(live.peak,live.review)
       await new Promise(r=>setTimeout(r,1))
       live.review--
     }
     const inc=(o.label.split(':')[1]||'').split('/')[1]||'1'
-    if(/^(implement|repair)/.test(o.label)) return {status:'implemented',branch:'b',worktree:a.increments?'/wt':'',base:'b0',sha:'c',summary:'s'}
+    if(/^(implement|repair)/.test(o.label)) return {status:'implemented',branch:'b',worktree:a.increments?'/wt':'',base:'b0',sha:'c',summary:'s',files:['src/one.js']}
     const q=verdicts[inc]||[]
     return q.shift()??{pass:true,failed:[],merged:!conflicts.includes(inc)}
   }
   const said=[]
   return new Function('agent','phase','log','parallel','args',`return (async () => {${src}})()`)
-    (agent,()=>{},m=>said.push(m),t=>Promise.all(t.map(f=>f())),a).then(r=>({r,calls,peak:live.peak,said}))
+    (agent,()=>{},m=>said.push(m),t=>Promise.all(t.map(f=>f())),a).then(r=>({r,calls,peak:live.peak,said,prompts}))
 }
 const st=r=>Object.fromEntries((r.increments||[]).map(i=>[i.increment,i.status]))
 const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.stringify(a));process.exit(1)}}
@@ -484,9 +486,28 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
   let said
   ;({said}=await run('1'))
   eq(said,['1: s','1: passed, landed'],'a clean run told the user nothing')
-  ;({said}=await run('1',{verdicts:{1:[{pass:false,failed:['AC1'],notes:['AC1: still red']}]}}))
+  const rejected={pass:false,failed:['AC1'],
+    findings:[{id:'AC1',evidence:'still red',sites:['src/one.js:12','src/two.js']}]}
+  ;({said}=await run('1',{verdicts:{1:[rejected]}}))
   eq(said,['1: s','1: rejected - AC1 - AC1: still red','1: repair 1 - s','1: passed, landed'],
     'a rejection and its repair did not reach the user')
+
+  // The reviewer hands the repair the sites it already found, so the round does not
+  // re-locate them - break: passing `verdict.notes` to the repair prompt again, or
+  // dropping the `sites` line from it.
+  let prompts
+  ;({prompts}=await run('1',{verdicts:{1:[rejected]}}))
+  const rp=prompts['repair:1:1']
+  for(const want of ['AC1','still red','src/one.js:12','src/two.js'])
+    eq(rp.includes(want),true,`the repair prompt dropped ${want} -`)
+
+  // The repair starts at its own diff - break: dropping the diff instruction, or the
+  // base and sha it names.
+  eq(/git diff b0\.\.c/.test(rp),true,'the repair prompt did not name the round diff -')
+  eq(rp.includes('src/one.js'),true,'the repair prompt did not name the files the round touched -')
+
+  // Nothing reads `verdict.notes` any more - break: reinstating any consumer of it.
+  eq(/verdict\.notes|\.notes\b/.test(src),false,'a consumer of verdict.notes survives -')
 
   eq((await run('')).r.status,'error','a missing issue id was accepted')
   eq((await run({issue:'1',agentPrefix:''})).r.status,'done','agentPrefix did not resolve')

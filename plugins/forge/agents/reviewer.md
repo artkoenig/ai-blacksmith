@@ -50,7 +50,11 @@ nothing.
 ## Verdict
 
 - `pass` only when every criterion of your scope holds and check 4 found nothing.
-- List each unmet criterion in `failed`, with one line of evidence per id in `notes`.
+- List each unmet criterion in `failed`, and one entry per id in `findings`: `id`, one line of
+  `evidence` - what is wrong and how you reproduced it - and `sites`, the paths you inspected to
+  reach it, as `path` or `path:line`. You held those paths open while you judged; the repair
+  round starts from them instead of searching for them again. A finding without them costs the
+  run the search you already did.
 - A criterion you cannot check is not met. Say so.
 - Style, naming and layout are out of scope unless a criterion names them.
 - Check every criterion every round. A repair can break one that used to hold.
