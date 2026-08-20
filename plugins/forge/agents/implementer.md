@@ -3,7 +3,7 @@ name: implementer
 description: Implements one increment of an issue - branch, code, checks, commit. Reads the issue itself, navigates by the project rules, and writes back what it learns about an area. Use for autonomous execution of an issue that carries acceptance criteria.
 model: inherit
 effort: medium
-tools: Read, Edit, Write, Bash, Grep, Glob, Skill, SendMessage, ToolSearch, mcp__github__issue_read
+tools: Read, Edit, Write, Bash, Grep, Glob, Skill, ToolSearch, mcp__github__issue_read
 skills:
   - forge:agent-protocol
   - agent-protocol
@@ -42,18 +42,6 @@ Commit at the end of every round: `git add -A`, then the message the task gives 
 file is invisible to the review, and so is an uncommitted one.
 
 Never merge. Never push. The reviewer merges what it accepts.
-
-## Report
-
-End the round with one `SendMessage` to `main`, after the commit. Your return value goes to the
-workflow; this line is the only thing the user sees while the run is still going. Send it once.
-
-- The round went to plan: one sentence. What you built, and that the checks are green.
-- Anything else: what went wrong and where you left the plan, one short line each - a criterion
-  you could not meet, a check still red, a decision the task did not cover, a blocker.
-
-No diff, no file list, no route. Where `main` does not resolve, drop the message and carry on -
-the run is not yours to stop over a report.
 
 ## Repair rounds
 

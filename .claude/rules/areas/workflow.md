@@ -18,6 +18,9 @@ paths:
   HEAD: the run returns `checkout: 'stale'`, and its caller refreshes with one `git reset --hard`.
 - Every intermediate result stays in a script variable. Nothing an agent returns is echoed into the
   orchestrator context.
+- What the user sees while a run goes on is `log()`, called by the script - one line per round and
+  per verdict. No agent sends its own message: a `SendMessage` costs the agent a turn to say what
+  the script already holds in its return value.
 - `agentPrefix` resolves the agent names. Installed it is `forge:`; in this repository it is `""`.
 - Outcomes the control flow must keep producing: `merged`, `stalled`, `skipped` for a dependent of
   a stall, `conflicted` for a merge conflict, `error` for a missing issue id.

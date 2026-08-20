@@ -6,6 +6,9 @@
 - Checks run through `forge-test`, `forge-lint`, `forge-typecheck`, `forge-build`. Each exits `0`
   with one line, or `1` with every failure and its detail. Nothing to escalate to.
 - Raw runners are rewritten or refused.
+- A run prints its own progress - every round, every verdict - and the user reads it as it
+  appears. Never repeat or summarise those lines when the run ends. Report what is left over:
+  what did not land, and what the user has to decide.
 - Issue storage: `.claude/skills/issue-backend/SKILL.md`.
 - Project knowledge: `.claude/rules/*.md`, committed, one topic per file.
 - What is true of one directory only: `.claude/rules/areas/<area>.md`, under a `paths:` glob. It
