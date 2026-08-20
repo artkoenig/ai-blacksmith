@@ -6,6 +6,8 @@
 - Checks run through `forge-test`, `forge-lint`, `forge-typecheck`, `forge-build`. Each exits `0`
   with one line, or `1` with every failure and its detail. Nothing to escalate to.
 - Raw runners are rewritten or refused.
+- A peer message from a forge agent reaches the user as it is sent. In the main conversation,
+  never repeat or summarise one - act on it, or say nothing.
 - Issue storage: `.claude/skills/issue-backend/SKILL.md`.
 - Project knowledge: `.claude/rules/*.md`, committed, one topic per file.
 - What is true of one directory only: `.claude/rules/areas/<area>.md`, under a `paths:` glob. It
