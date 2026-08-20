@@ -2,70 +2,42 @@
 
 Interview issues into shape. Execute them autonomously on the smallest token budget that works.
 
-## The split
+`/forge:issue` interviews you and writes an issue: a goal, numbered acceptance criteria, what is out
+of scope. `/forge:work` executes one, in a loop of implement and review, until the verdict
+converges. Storage is per project - `/forge:bootstrap` writes the adapter.
 
-**`/forge:issue` writes issues.** It interviews you and stores a goal, numbered acceptance criteria,
-and what is out of scope. Nothing else - no file list, no plan. A map written into an issue is
-maintained by nobody; the implementer finds its own way. Storage is per project: `/forge:bootstrap` writes an adapter for GitHub Issues, markdown
-files, or whatever you describe.
+How each of them behaves is defined in its own file, and only there. This README does not restate
+it; a copy here would drift.
 
-**The same session decides the cut**, and stops there. It is the only place that sees the whole
-issue at once, so it reports the invocation that would run it - and runs nothing. Writing an issue
-never spends a dispatch; the run starts when you ask for it.
-
-**`/forge:work` executes, on request.** One loop per increment: implement, review, repair until
-the verdict converges. The implementer commits each round; the reviewer merges the increment it
-passes. Independent increments run at the same time, each in its own worktree and branch, and each
-lands from that worktree by rebasing onto the issue branch and moving it - so two that finish
-together do not wait for each other. An uncut issue skips all of that and works in the checkout.
-No user interaction is possible during a run, by design. You get a branch and a commit; push and
-pull requests stay yours.
-
-## Why it is cheap
-
-| Lever | What it does |
+| Command | Defined in |
 | --- | --- |
-| Area notes | What is true of one directory only lives in `.claude/rules/areas/<area>.md` under a `paths:` glob, and reaches an agent by itself the first time it reads a file there. Knowledge of an area costs nothing until the agent enters it, and the implementer writes back what it learns, so the second issue in an area is cheaper than the first. |
-| The workflow | The loop and every intermediate result live in script variables. Your conversation pays for the invocation and the final line. |
-| Wrapper commands | `forge-test` answers twice over: exit `0` with one line, `<n>/<n> tests succeeded`, or exit `1` with every failing test and its detail. Nothing to escalate to, nothing to parse for the verdict. |
-| The guard hook | A raw `npm test` is rewritten to the wrapper before it runs, or refused with the wrapper named. |
-| The compaction hook | Bash output past 200 lines or 10000 characters is withheld: the full text goes to a log, and back comes its size, that path and the cheaper ways to read it. stderr is never touched. |
-| The cut | Cutting adds a dispatch set, so `/forge:issue` cuts only for parallelism, for a diff too large to review in one pass, or for a real dependency. |
-| Pre-existing red | The reviewer proves a failing check was already failing before it spends a repair round on it. |
-| Measured startup | Every agent start records what it loaded and what that cost, so a growing skill or rule shows up as a number instead of a feeling. |
-
-## Each increment's loop ends on
-
-- **pass** - every criterion holds. Committed.
-- **stalled** - a round repeated the previous round's failed set. The implementer stopped moving.
-- **cap** - eight rounds, for a verdict that oscillates. Override with `maxRounds`.
-
-A failed increment leaves its branch standing and its dependents skipped; its independent siblings
-still merge. A merge conflict is reported, never resolved.
-
-## Commands
-
-| Command | Does |
-| --- | --- |
-| `/forge:bootstrap` | One-time project setup. Run this first. |
-| `/forge:issue` | Interview, write the issue, decide the cut. Starts nothing. |
-| `/forge:work <id>` | Execute an issue, or a cut, when you ask for it. |
-| `/forge:new-agent` | Add a project agent for one area of the codebase. |
-| `/forge:insights <dir>` | Record what you learned about one directory as its area note. |
-| `/forge:stats` | Tool calls per agent run, over time. |
-| `/forge:context` | What each agent loaded at startup: measured tokens, breakdown by source, saved copies. |
+| `/forge:bootstrap` | `skills/bootstrap/SKILL.md` |
+| `/forge:issue` | `skills/issue/SKILL.md` |
+| `/forge:work <id>` | `workflows/work.js` |
+| `/forge:new-agent` | `skills/new-agent/SKILL.md` |
+| `/forge:insights <dir>` | `skills/insights/SKILL.md` |
+| `/forge:stats` | `skills/stats/SKILL.md` |
+| `/forge:context` | `skills/context/SKILL.md` |
 
 ## Agents
 
-Two, on purpose.
+Two, on purpose - `agents/implementer.md` and `agents/reviewer.md`. `/forge:new-agent` adds project
+agents from the same template.
 
-- **`forge:implementer`** - all file, git and shell work.
-- **`forge:reviewer`** - reads the issue itself, writes nothing into the checkout it judges, and
-  builds throwaway worktrees outside the checkout to run checks at the base or to settle a doubt
-  with a probe.
+## Where the token budget goes
 
-`/forge:new-agent` adds project agents from the same template. `/forge:issue` selects one per
-increment.
+The levers, each with the file that owns it:
+
+| Lever | Owned by |
+| --- | --- |
+| Area notes, loaded only when their directory is read | `skills/insights/SKILL.md` |
+| The loop and its intermediate results, kept in script variables | `workflows/work.js` |
+| Wrapper commands that answer without a second look | `bin/` |
+| The guard hook, rewriting a raw check to its wrapper | `scripts/guard-bash.js` |
+| The compaction hook, withholding oversized Bash output | `scripts/compact-output.js` |
+| Measured startup, per agent run | `scripts/subagent-start.js`, `scripts/subagent-metrics.js` |
+
+`/forge:context` and `/forge:stats` read the measurements back out.
 
 ## Install
 
@@ -89,8 +61,8 @@ the target repository: `/forge:bootstrap`.
 
 ## Output style
 
-**Forge Terse** ships with `force-for-plugin: true`, so it applies while the plugin is enabled. It is
-read once at session start - `/clear` or a new session to pick it up.
+**Forge Terse** ships with `force-for-plugin: true`, so it applies while the plugin is enabled. It
+is read once at session start - `/clear` or a new session to pick it up.
 
 It does not reach subagents; Claude Code does not pass output styles into them. Agent brevity comes
 from the `agent-protocol` skill.

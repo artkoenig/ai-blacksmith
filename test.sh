@@ -337,10 +337,18 @@ grep -q '^## 4. Hand it over$' plugins/forge/skills/issue/SKILL.md \
 grep -q 'Never invoke `/forge:work` off the back of writing an issue' \
   plugins/forge/skills/issue/SKILL.md \
   || { fail handoff "the issue skill no longer forbids starting the run itself"; S=1; }
-# break: a description or a README row that promises the run
-grep -rniq 'starts\? the run' plugins/forge/skills/issue/SKILL.md plugins/forge/README.md \
+# break: a description that promises the run
+grep -niq 'starts\? the run' plugins/forge/skills/issue/SKILL.md \
   && { fail handoff "forge:issue still advertises that it starts the run"; S=1; }
 [ "$S" = 0 ] && ok "the run starts on demand"
+
+# --- the readme states no behaviour -----------------------------------------
+# Behaviour is defined in the skill, agent, workflow and hook that implement it.
+# A second copy in the README is maintained by nobody and drifts.
+# break: pasting a rule or a tuning number back into plugins/forge/README.md
+grep -niqE '[^0-9](8|eight) rounds|200 lines|10000 characters|maxRounds' plugins/forge/README.md \
+  && fail readme "the README restates behaviour that lives in the code" \
+  || ok "the readme states no behaviour"
 
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
