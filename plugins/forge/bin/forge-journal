@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Whether a workflow run's agents are running, done or dead.
+#
+#   forge-journal [<run-id|dir|journal.jsonl>]      -> the tally, then one line per agent
+#   forge-journal --result <agent-id> [<journal>]   -> that agent's full return value
+#
+# started = running, result = done, aborted = dead. Last line of each is the
+# journal it read.
+#
+# A journal line carries an agent's whole return value, so reading the file to
+# learn whether a run is finished costs every result it holds. The question is
+# one line here; --result buys back the one result that is worth the tokens.
+#
+# Exits 0 with the answer, 2 on a usage error - a typo must not read as a status.
+set -uo pipefail
+
+exec node -e '
+const fs = require("fs")
+const path = require("path")
+
+const argv = process.argv.slice(1)
+let mode = "list"
+let want = ""
+let target = argv[0] || ""
+if (target === "--result") {
+  mode = "result"
+  want = argv[1] || ""
+  target = argv[2] || ""
+  if (!want) { process.stderr.write("usage: forge-journal --result <agent-id> [<journal>]\n"); process.exit(2) }
+} else if (target.startsWith("-")) {
+  process.stderr.write("usage: forge-journal [<run-id|dir|journal.jsonl>] | --result <agent-id>\n")
+  process.exit(2)
+}
+
+// Claude Code files a run at <config>/projects/<project>/<session>/subagents/
+// workflows/<runId>/journal.jsonl. Nobody remembers that path, so a bare call
+// takes the run written last.
+const known = () => {
+  const roots = [process.env.CLAUDE_CONFIG_DIR, path.join(process.env.HOME || "", ".claude")].filter(Boolean)
+  const dirs = (d) => {
+    try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name) }
+    catch { return [] }
+  }
+  const found = []
+  for (const root of roots) {
+    const projects = path.join(root, "projects")
+    for (const project of dirs(projects)) {
+      for (const session of dirs(path.join(projects, project))) {
+        const workflows = path.join(projects, project, session, "subagents", "workflows")
+        for (const run of dirs(workflows)) {
+          const file = path.join(workflows, run, "journal.jsonl")
+          let stat
+          try { stat = fs.statSync(file) } catch { continue }
+          found.push({ run, file, mtime: stat.mtimeMs })
+        }
+      }
+    }
+  }
+  return found.sort((a, b) => b.mtime - a.mtime)
+}
+
+const resolve = (arg) => {
+  if (arg) {
+    try {
+      const stat = fs.statSync(arg)
+      if (stat.isFile()) return arg
+      if (stat.isDirectory()) return path.join(arg, "journal.jsonl")
+    } catch {}
+  }
+  const all = known()
+  if (!arg) return all.length ? all[0].file : ""
+  const hit = all.find((j) => j.run === arg) || all.find((j) => j.run.includes(arg))
+  return hit ? hit.file : ""
+}
+
+const file = resolve(target)
+let lines
+try { lines = fs.readFileSync(file, "utf8").split("\n") } catch {
+  console.log(target ? `no journal for ${target}` : "no workflow journal found - a run writes one when its first agent starts")
+  process.exit(0)
+}
+
+// The file is appended while the run goes on, so its last line can be half
+// written. A torn line is not an error, it is the run still going.
+const entries = lines.filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+
+const STATE = { started: "running", result: "done", aborted: "dead" }
+const order = []
+const agents = new Map()
+for (const entry of entries) {
+  const key = String(entry.key ?? entry.agentId ?? "")
+  const status = STATE[entry.type]
+  if (!key || !status) continue
+  if (!agents.has(key)) { order.push(key); agents.set(key, { key, agentId: "", result: undefined }) }
+  const agent = agents.get(key)
+  // A key can start more than once: a respawned agent appends a second started.
+  // The newest line is the one that says where it stands.
+  agent.status = status
+  if (entry.agentId) agent.agentId = String(entry.agentId)
+  if (entry.result !== undefined) agent.result = entry.result
+}
+
+const full = (value) => (typeof value === "string" ? value : JSON.stringify(value, null, 2))
+const compact = (value) => (typeof value === "string" ? value : JSON.stringify(value))
+const short = (agent) => (agent.agentId || agent.key.replace(/^v2:/, "")).slice(0, 8)
+
+if (mode === "result") {
+  const hit = [...agents.values()].find((a) => (a.agentId && a.agentId.startsWith(want)) || a.key.startsWith(want) || a.key.endsWith(want))
+  if (!hit) { console.log(`no agent ${want} in the journal`); console.log(file); process.exit(0) }
+  console.log(hit.result === undefined ? `${short(hit)} is ${hit.status} and has returned nothing` : full(hit.result))
+  console.log(file)
+  process.exit(0)
+}
+
+const MAX_PREVIEW = 80
+const preview = (agent) => {
+  if (agent.result === undefined) return ""
+  const text = compact(agent.result).replace(/\s+/g, " ").trim()
+  return text.length > MAX_PREVIEW ? text.slice(0, MAX_PREVIEW - 1) + "…" : text
+}
+
+const tally = { running: 0, done: 0, dead: 0 }
+for (const agent of agents.values()) tally[agent.status]++
+const counted = ["running", "done", "dead"].filter((k) => tally[k]).map((k) => `${tally[k]} ${k}`)
+console.log(counted.length ? counted.join(", ") : "no agent has started yet")
+for (const key of order) {
+  const agent = agents.get(key)
+  console.log(`${agent.status.padEnd(7)}  ${short(agent).padEnd(8)}  ${preview(agent)}`.trimEnd())
+}
+console.log(file)
+' -- "$@"
