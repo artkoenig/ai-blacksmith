@@ -25,7 +25,7 @@ const RESULT = {
     base: { type: 'string', description: 'commit the increment branch was cut from' },
     sha: { type: 'string', description: 'the commit this round produced, empty when blocked' },
     issueBranch: { type: 'string', description: 'branch the checkout was on before you cut yours' },
-    summary: { type: 'string', description: 'one line, what changed - the commit subject' },
+    summary: { type: 'string', description: 'the one line the user sees while the run goes on: what changed and that the checks are green, or what went wrong' },
     files: { type: 'array', items: { type: 'string' } },
     blocker: { type: 'string', description: 'why it could not be done, empty otherwise' },
   },
@@ -137,8 +137,15 @@ async function runIncrement(inc) {
   )
 
   if (!run) return { inc, status: 'error', reason: 'Implementer returned nothing.' }
-  if (run.status === 'blocked') return { inc, status: 'blocked', blocker: run.blocker || 'unspecified', branch }
-  if (!run.sha) return { inc, status: 'uncommitted', branch, summary: run.summary }
+  if (run.status === 'blocked') {
+    log(`${label}: blocked - ${run.blocker || 'unspecified'}`)
+    return { inc, status: 'blocked', blocker: run.blocker || 'unspecified', branch }
+  }
+  if (!run.sha) {
+    log(`${label}: nothing committed - ${run.summary}`)
+    return { inc, status: 'uncommitted', branch, summary: run.summary }
+  }
+  log(`${label}: ${run.summary}`)
 
   const wt = solo ? '' : run.worktree || worktree
   const base = run.base || 'HEAD'
@@ -207,7 +214,19 @@ async function runIncrement(inc) {
     )
 
     if (!verdict) return { inc, status: 'error', reason: 'Reviewer returned no verdict.', branch, worktree: wt }
-    if (verdict.pass) break
+
+    if (verdict.pass) {
+      log(
+        verdict.merged === false
+          ? `${label}: passed, but the merge conflicted - ${verdict.conflict || 'unspecified'}`
+          : `${label}: passed, landed`,
+      )
+      break
+    }
+    log(
+      `${label}: rejected - ${(verdict.failed || []).join(', ') || 'no criterion named'}`
+        + ((verdict.notes || []).length ? ` - ${verdict.notes.join('; ')}` : ''),
+    )
 
     const failed = [...(verdict.failed || [])].sort().join(',')
 
@@ -242,9 +261,14 @@ async function runIncrement(inc) {
 
     if (!repair) return { inc, status: 'error', reason: `Repair round ${round} returned nothing.`, branch, worktree: wt }
     if (repair.status === 'blocked') {
+      log(`${label}: blocked in repair ${round} - ${repair.blocker || 'unspecified'}`)
       return { inc, status: 'blocked', blocker: repair.blocker || 'unspecified', branch, worktree: wt }
     }
-    if (!repair.sha) return { inc, status: 'uncommitted', branch, worktree: wt, rounds: round, summary: repair.summary }
+    if (!repair.sha) {
+      log(`${label}: repair ${round} committed nothing - ${repair.summary}`)
+      return { inc, status: 'uncommitted', branch, worktree: wt, rounds: round, summary: repair.summary }
+    }
+    log(`${label}: repair ${round} - ${repair.summary}`)
     run = { ...repair, worktree: wt, branch, base }
   }
 

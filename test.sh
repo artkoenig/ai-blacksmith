@@ -366,25 +366,6 @@ grep -q '^Write English into every file' plugins/forge/skills/agent-protocol/SKI
   || { fail language "the agent protocol no longer requires English in files"; S=1; }
 [ "$S" = 0 ] && ok "output language"
 
-# --- the run agents report --------------------------------------------------
-# The workflow swallows everything an agent returns, so a run shows the user
-# nothing until it ends. One SendMessage per implemented round and per verdict
-# is that window - and the instruction is dead unless the tool is on the
-# agent's surface.
-S=0
-for a in implementer reviewer; do
-  # break: dropping the report section from either agent
-  grep -q '^## Report$' "plugins/forge/agents/$a.md" \
-    || { fail report "the $a no longer reports"; S=1; }
-  grep -q 'SendMessage` to `main`' "plugins/forge/agents/$a.md" \
-    || { fail report "the $a's report no longer goes to the main session"; S=1; }
-  # break: removing SendMessage from tools: - the section stays, the call cannot be made
-  awk '/^---$/{n++; next} n==1 && /^tools:/' "plugins/forge/agents/$a.md" \
-    | grep -q 'SendMessage' \
-    || { fail report "SendMessage is not on the $a's tool surface"; S=1; }
-done
-[ "$S" = 0 ] && ok "the run agents report"
-
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.
@@ -445,8 +426,9 @@ const run=(a,{verdicts={},conflicts=[]}={})=>{
     const q=verdicts[inc]||[]
     return q.shift()??{pass:true,failed:[],merged:!conflicts.includes(inc)}
   }
+  const said=[]
   return new Function('agent','phase','log','parallel','args',`return (async () => {${src}})()`)
-    (agent,()=>{},()=>{},t=>Promise.all(t.map(f=>f())),a).then(r=>({r,calls,peak:live.peak}))
+    (agent,()=>{},m=>said.push(m),t=>Promise.all(t.map(f=>f())),a).then(r=>({r,calls,peak:live.peak,said}))
 }
 const st=r=>Object.fromEntries((r.increments||[]).map(i=>[i.increment,i.status]))
 const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.stringify(a));process.exit(1)}}
@@ -472,6 +454,15 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
 
   ;({r}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:[]}]},{conflicts:['b']}))
   eq(st(r),{a:'merged',b:'conflicted'},'a merge conflict was not reported')
+
+  // The run is silent until it ends unless the workflow says what happened, and
+  // no agent has SendMessage any more - break: dropping either log call.
+  let said
+  ;({said}=await run('1'))
+  eq(said,['1: s','1: passed, landed'],'a clean run told the user nothing')
+  ;({said}=await run('1',{verdicts:{1:[{pass:false,failed:['AC1'],notes:['AC1: still red']}]}}))
+  eq(said,['1: s','1: rejected - AC1 - AC1: still red','1: repair 1 - s','1: passed, landed'],
+    'a rejection and its repair did not reach the user')
 
   eq((await run('')).r.status,'error','a missing issue id was accepted')
   eq((await run({issue:'1',agentPrefix:''})).r.status,'done','agentPrefix did not resolve')

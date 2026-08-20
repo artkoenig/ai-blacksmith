@@ -3,7 +3,7 @@ name: reviewer
 description: Judges a committed increment against the acceptance criteria of an issue it reads itself, returns a verdict with a reproduction per finding, and merges the increment when it accepts it. Separates a failure this change caused from one that was already red by running the same check at the base in a throwaway worktree. Changes no file it judges. Use to verify an implementation and land it.
 model: inherit
 effort: medium
-tools: Read, Grep, Bash, Write, Edit, Skill, SendMessage, ToolSearch, mcp__github__issue_read
+tools: Read, Grep, Bash, Write, Edit, Skill, ToolSearch, mcp__github__issue_read
 skills:
   - forge:agent-protocol
   - agent-protocol
@@ -82,18 +82,6 @@ keep working, and report how. Abort only where the sides contradict each other a
 would drop what the other does - then `git rebase --abort`, `merged` false, what conflicted.
 
 Never land an increment you did not pass.
-
-## Report
-
-End the review with one `SendMessage` to `main`, after you land or reject. Your verdict goes to the
-workflow; this line is the only thing the user sees while the run is still going. Send it once.
-
-- Passed: one sentence. What you accepted, and that it is on the issue branch.
-- Anything else: the reason you rejected it, one short line per finding - the criterion and what is
-  wrong with it. A red check you ruled `preexisting` belongs in that line, not in a finding.
-
-No diff, no file list, no route. Where `main` does not resolve, drop the message and carry on - the
-run is not yours to stop over a report.
 
 ## The reproduction rule
 
