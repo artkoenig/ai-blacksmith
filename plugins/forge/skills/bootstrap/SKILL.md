@@ -72,7 +72,7 @@ Merge into `.claude/settings.json`, keeping existing keys:
   "permissions": {
     "allow": [
       "Bash(forge-test:*)", "Bash(forge-lint:*)", "Bash(forge-typecheck:*)", "Bash(forge-build:*)",
-      "Bash(forge-context:*)", "Bash(forge-journal:*)",
+      "Bash(forge-context:*)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
       "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)",
       "Bash(git merge:*)", "Bash(cd:*)"
