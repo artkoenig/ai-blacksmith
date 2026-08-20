@@ -200,9 +200,10 @@ sized 30 300 | assert_hint || { fail hooks "compact-output did not withhold an o
 [ "$S" = 0 ] && ok "hook decisions"
 
 # --- staleness warning ------------------------------------------------------
-# A cloud session whose plugin checkout is behind the marketplace tip is told so.
-# The version is the SHA path segment of CLAUDE_PLUGIN_ROOT, the tip comes from
-# the marketplace clone's own origin.
+# A session whose plugin checkout is behind the marketplace tip is told so. The
+# version is the last segment of CLAUDE_PLUGIN_ROOT, which the CLI lays out as
+# <cache>/<marketplace>/<plugin>/<version>, and the tip comes from the
+# marketplace clone beside that cache.
 S=0
 SS="$(mktemp -d)"
 git init -q "$SS/remote"
@@ -213,23 +214,30 @@ TIP="$(git -C "$SS/remote" rev-parse HEAD)"
 mkdir -p "$SS/cfg/plugins/marketplaces"
 git clone -q "$SS/remote" "$SS/cfg/plugins/marketplaces/mkt"
 mkdir -p "$SS/cfg/plugins/marketplaces/nogit"
-start() { # <sha> <marketplace dir> [remote flag]
+start() { # <sha> <marketplace> [plugin root, default the cache layout]
   echo '{}' | env CLAUDE_CONFIG_DIR="$SS/cfg" \
-    CLAUDE_PLUGIN_ROOT="$SS/cfg/plugins/repos/$2/$1/plugins/forge" \
-    CLAUDE_CODE_REMOTE="${3-true}" node plugins/forge/scripts/session-start.js
+    CLAUDE_PLUGIN_ROOT="${3-$SS/cfg/plugins/cache/$2/forge/$1}" \
+    node plugins/forge/scripts/session-start.js
 }
 # an outdated checkout is named - break: dropping the mismatch branch
 start 0000000 mkt | grep -q "outdated forge plugin" \
   || { fail staleness "no warning for a checkout behind the tip"; S=1; }
-# it names the update command with the marketplace it came from - break: a hard-coded name
+# it names the update command with the plugin and the marketplace it came from,
+# both read off the cache path - break: reading the marketplace off the wrong
+# path segment, which is what the pre-cache layout did
 start 0000000 mkt | grep -q "forge@mkt" \
-  || { fail staleness "the warning did not name the marketplace to update from"; S=1; }
+  || { fail staleness "the warning did not name the plugin and marketplace to update"; S=1; }
 # the current checkout is not warned - break: warning without comparing
 start "${TIP:0:7}" mkt | grep -q "outdated forge plugin" \
   && { fail staleness "a session on the tip was warned"; S=1; }
-# a local session makes no network call and no noise - break: dropping the remote gate
-start 0000000 mkt '' | grep -q "outdated forge plugin" \
-  && { fail staleness "a local session was warned"; S=1; }
+# a development checkout is not under the cache and makes no network call and no
+# noise - break: dropping the cache-path gate
+start 0000000 mkt "$SS/checkout/plugins/forge" | grep -q "outdated forge plugin" \
+  && { fail staleness "a development checkout was warned"; S=1; }
+# a pinned version names no commit, so nothing is compared - break: treating any
+# version string as a SHA
+start 2.1.0 mkt | grep -q "outdated forge plugin" \
+  && { fail staleness "a pinned version was compared against a commit"; S=1; }
 # no answer, no warning - break: treating an empty tip as a mismatch
 start 0000000 nogit | grep -q "outdated forge plugin" \
   && { fail staleness "a missing marketplace clone produced a warning"; S=1; }
