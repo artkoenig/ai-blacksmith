@@ -10,6 +10,10 @@ allowed-tools: Bash, Read
 
 Group by `agent`. Report a table: runs, median tool calls, trend across the most recent runs.
 
+Anything `/forge:work` spawned is grouped as `workflow-subagent`: the `Workflow` tool does not pass
+the agent's own type to the hook, so the implementer and the reviewer share one row. Say so rather
+than reading that row as the implementer's.
+
 The number that matters is tool calls per implementer run over time. Rising means the agent is
 searching more to reach the same place - say that, and name the likely cause.
 

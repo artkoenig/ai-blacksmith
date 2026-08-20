@@ -30,17 +30,41 @@ const parse = (file) => {
   }
 }
 
-// An agent writes its own transcript beside the session's:
-//   <project>/<session>/subagents/agent-<agentId>.jsonl
-// The path a SubagentStop hook is handed is the session's, so derive the agent's
-// from it. Verified on Claude Code 2.1.234.
+// An agent writes its own transcript beside the session's. SubagentStop is handed
+// both paths: `transcript_path` is the session's, `agent_transcript_path` the
+// agent's own. Verified on Claude Code 2.1.237.
+//
+// Where a build does not send the second, derive it. The layout is
+//   <project>/<session>/subagents/agent-<agentId>.jsonl                for a Task-spawned agent
+//   <project>/<session>/subagents/workflows/<runId>/agent-<agentId>.jsonl  for one the Workflow tool spawned
+// Every forge agent runs through a workflow, so the second layout is the one
+// /forge:stats lives on.
 function transcriptOf(input) {
   const given = input.transcript_path || ''
   const id = input.agent_id || ''
   if (!id) return given
-  const bases = [given.replace(/\.jsonl$/, ''), path.join(path.dirname(given), input.session_id || '')]
-  const own = bases.map((b) => path.join(b, 'subagents', `agent-${id}.jsonl`)).find((p) => fs.existsSync(p))
-  return own || given
+
+  const own = input.agent_transcript_path || ''
+  if (own && fs.existsSync(own)) return own
+
+  const name = `agent-${id}.jsonl`
+  const roots = [given.replace(/\.jsonl$/, ''), path.join(path.dirname(given), input.session_id || '')]
+  for (const root of roots) {
+    const dir = path.join(root, 'subagents')
+    const direct = path.join(dir, name)
+    if (fs.existsSync(direct)) return direct
+    let runs = []
+    try {
+      runs = fs.readdirSync(path.join(dir, 'workflows'))
+    } catch {
+      runs = []
+    }
+    for (const run of runs) {
+      const inRun = path.join(dir, 'workflows', run, name)
+      if (fs.existsSync(inRun)) return inRun
+    }
+  }
+  return given
 }
 
 // Narrow to this agent's turns. A transcript that does not name them is not this

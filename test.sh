@@ -276,12 +276,30 @@ cat > "$CTX/t/s1/subagents/agent-a1.jsonl" <<'JSONL'
 {"type":"assistant","agentId":"a1","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":2000},"content":[{"type":"tool_use"},{"type":"tool_use"}]}}
 JSONL
 
+# Every forge agent runs through a workflow, and the Workflow tool files its
+# agents one level deeper: subagents/workflows/<runId>/. The hook is handed the
+# session's transcript, so it has to find that file.
+mkdir -p "$CTX/t/s1/subagents/workflows/wf_x" "$CTX/t/elsewhere"
+cat > "$CTX/t/s1/subagents/workflows/wf_x/agent-a3.jsonl" <<'JSONL'
+{"type":"user","agentId":"a3","message":{"role":"user","content":[{"type":"text","text":"twelve chars"}]}}
+{"type":"assistant","agentId":"a3","message":{"usage":{"input_tokens":7,"cache_creation_input_tokens":700},"content":[{"type":"tool_use"},{"type":"tool_use"}]}}
+JSONL
+# A build that sends agent_transcript_path is believed over any derivation.
+cat > "$CTX/t/elsewhere/agent-a4.jsonl" <<'JSONL'
+{"type":"user","agentId":"a4","message":{"role":"user","content":[{"type":"text","text":"twelve chars"}]}}
+{"type":"assistant","agentId":"a4","message":{"usage":{"input_tokens":9,"cache_creation_input_tokens":400},"content":[{"type":"tool_use"}]}}
+JSONL
+
 S=0
 echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober"}' \
   | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-start.js >/dev/null
 echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a1","agent_type":"forge:prober","transcript_path":"'"$CTX/t/s1.jsonl"'"}' \
   | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
 echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a2","agent_type":"forge:prober","transcript_path":"'"$CTX/t/s1.jsonl"'"}' \
+  | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
+echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a3","agent_type":"workflow-subagent","transcript_path":"'"$CTX/t/s1.jsonl"'"}' \
+  | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
+echo '{"cwd":"'"$CTX"'","session_id":"s1","agent_id":"a4","agent_type":"workflow-subagent","transcript_path":"'"$CTX/t/s1.jsonl"'","agent_transcript_path":"'"$CTX/t/elsewhere/agent-a4.jsonl"'"}' \
   | CLAUDE_PROJECT_DIR="$CTX" node plugins/forge/scripts/subagent-metrics.js >/dev/null
 
 CTX="$CTX" node -e '
@@ -305,6 +323,12 @@ CTX="$CTX" node -e '
   if (m.peakTokens!==2005) bad("peak tokens: "+m.peakTokens)
   if (m.toolCalls!==3) bad("tool calls counted another agents turns: "+m.toolCalls)
   if (m.promptTokens!==3) bad("prompt tokens: "+m.promptTokens)
+  const wf=lines.find(l=>l.agentId==="a3")
+  if (wf.toolCalls!==2||wf.startTokens!==707||wf.peakTokens!==707)
+    bad("a workflow-spawned agent was not measured: "+JSON.stringify(wf))
+  const told=lines.find(l=>l.agentId==="a4")
+  if (told.toolCalls!==1||told.startTokens!==409)
+    bad("agent_transcript_path was ignored: "+JSON.stringify(told))
 ' || { fail context "the start hook or the metrics hook measured wrong"; S=1; }
 
 echo '{"cwd":"/nonexistent","agent_type":"forge:prober"}' | node plugins/forge/scripts/subagent-start.js >/dev/null 2>&1 \

@@ -20,20 +20,23 @@ paths:
 
 ## Where an agent's transcript lives
 
-Verified on 2.1.234, by running an agent: `SubagentStart` and `SubagentStop` both fire for
-`Task`-spawned agents with hooks registered in project settings, and the path a `SubagentStop` hook
-is handed is the *session's* transcript, not the agent's. The agent's own file is
-`<project>/<session-id>/subagents/agent-<agent-id>.jsonl`, and every entry in it carries `agentId`.
+Verified on 2.1.237, by running an agent: `SubagentStart` and `SubagentStop` both fire with hooks
+registered in project settings, for a `Task`-spawned agent and for one the `Workflow` tool spawned.
+`SubagentStop` is handed both paths - `transcript_path` is the *session's*, `agent_transcript_path`
+the agent's own. Use the second.
 
-`subagent-metrics.js` derives that path and refuses to measure anything it cannot attribute by
-`agentId`: measuring the file it was handed would report the session's tokens and tool calls under
-the agent's name. A missing number is the expected failure; a wrong one is not. The estimate from
-`SubagentStart` reads files, not the transcript, so it holds either way.
+The agent's own file sits beside the session's, one level deeper for a workflow:
 
-## The staleness warning
+    <project>/<session-id>/subagents/agent-<agent-id>.jsonl                    Task
+    <project>/<session-id>/subagents/workflows/<run-id>/agent-<agent-id>.jsonl Workflow
 
-`session-start.js` warns a cloud session whose plugin checkout is behind the marketplace tip. It
-runs only when `CLAUDE_CODE_REMOTE=true`, reads the installed SHA and the marketplace name out of
-the `CLAUDE_PLUGIN_ROOT` path (`.../plugins/repos/<marketplace>/<sha>/plugins/forge`) and asks the
-tip from the marketplace clone's own `origin`, so a fork checks against the fork. No answer means no
-warning. The `git ls-remote` is capped at 10s, which is why the hook's timeout is 20.
+Every entry in it carries `agentId`. `subagent-metrics.js` falls back to deriving both layouts, and
+refuses to measure anything it cannot attribute by `agentId`: measuring the file it was handed would
+report the session's tokens and tool calls under the agent's name. A missing number is the expected
+failure; a wrong one is not. The estimate from `SubagentStart` reads files, not the transcript, so it
+holds either way.
+
+`/forge:work` runs every agent through the `Workflow` tool, so the workflow layout is the one
+`/forge:stats` lives on. That tool also reports `agent_type` as `workflow-subagent` for all of them -
+the `agentType` passed to `agent()` reaches neither the hook nor the transcript's `.meta.json`, so
+the implementer and the reviewer cannot be told apart in `.forge/metrics.jsonl`.
