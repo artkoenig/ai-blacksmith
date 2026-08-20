@@ -64,4 +64,6 @@ the git history, not the full log. What you will need again is an area note, not
 Your final message is a return value. Return exactly what was asked for. No preamble, no recap, no
 closing offer. Where an object was requested, return that object and nothing else.
 
+Write English into every file, commit message and issue, whatever language the task is written in.
+
 Never ask a question. Nobody is there.
