@@ -366,6 +366,22 @@ grep -q '^Write English into every file' plugins/forge/skills/agent-protocol/SKI
   || { fail language "the agent protocol no longer requires English in files"; S=1; }
 [ "$S" = 0 ] && ok "output language"
 
+# --- the implementer reports ------------------------------------------------
+# The workflow swallows everything an agent returns, so a run shows the user
+# nothing until it ends. One SendMessage per round is that window - and the
+# instruction is dead unless the tool is on the agent's surface.
+S=0
+# break: dropping the report section from the implementer
+grep -q '^## Report$' plugins/forge/agents/implementer.md \
+  || { fail report "the implementer no longer reports its round"; S=1; }
+grep -q 'SendMessage` to `main`' plugins/forge/agents/implementer.md \
+  || { fail report "the implementer's report no longer goes to the main session"; S=1; }
+# break: removing SendMessage from tools: - the section stays, the call cannot be made
+awk '/^---$/{n++; next} n==1 && /^tools:/' plugins/forge/agents/implementer.md \
+  | grep -q 'SendMessage' \
+  || { fail report "SendMessage is not on the implementer's tool surface"; S=1; }
+[ "$S" = 0 ] && ok "the implementer reports"
+
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.
