@@ -18,9 +18,13 @@ paths:
   HEAD: the run returns `checkout: 'stale'`, and its caller refreshes with one `git reset --hard`.
 - Every intermediate result stays in a script variable. Nothing an agent returns is echoed into the
   orchestrator context.
-- What the user sees while a run goes on is `log()`, called by the script - one line per round and
-  per verdict. No agent sends its own message: a `SendMessage` costs the agent a turn to say what
-  the script already holds in its return value.
+- `log()` does not reach the conversation. Measured: its lines go to the run's progress view and
+  to the `logs` array of the finished run's output file - the completion notification carries only
+  the return value. A user who is not watching `/workflows` sees nothing until the run ends.
+- So the round report is a `SendMessage` to `main`, sent by the implementer and the reviewer, which
+  arrives in the conversation while the run goes on. Verified from a workflow-spawned agent. It
+  costs that agent one turn; the script has no tool of its own to send with, and a dispatch that
+  only reports would cost far more. The `log()` calls stay for the progress view.
 - `agentPrefix` resolves the agent names. Installed it is `forge:`; in this repository it is `""`.
 - Outcomes the control flow must keep producing: `merged`, `stalled`, `skipped` for a dependent of
   a stall, `conflicted` for a merge conflict, `error` for a missing issue id.

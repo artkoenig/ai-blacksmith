@@ -398,6 +398,27 @@ grep -q '^Write English into every file' plugins/forge/skills/agent-protocol/SKI
   || { fail language "the agent protocol no longer requires English in files"; S=1; }
 [ "$S" = 0 ] && ok "output language"
 
+# --- the run reports while it goes on ---------------------------------------
+# `log()` reaches the progress view, never the conversation - measured on a
+# probe run, whose completion notification carried the return value alone. So
+# the mid-run report is a SendMessage from the two agents that already run.
+S=0
+for a in implementer reviewer; do
+  f="plugins/forge/agents/$a.md"
+  # break: dropping SendMessage from the agent's tools line
+  grep -q '^tools:.*SendMessage' "$f" \
+    || { fail reporting "$a cannot send its round report"; S=1; }
+  # break: deleting the "## Report" section that tells it to send one
+  grep -q '^## Report$' "$f" \
+    || { fail reporting "$a no longer reports the round"; S=1; }
+  grep -q 'one `SendMessage` to `main`' "$f" \
+    || { fail reporting "$a no longer names main as the recipient"; S=1; }
+done
+# break: letting the main session echo the reports the user already read
+grep -q 'never repeat or summarise one' plugins/forge/rules/forge.md \
+  || { fail reporting "the rules no longer stop the session repeating a report"; S=1; }
+[ "$S" = 0 ] && ok "the run reports while it goes on"
+
 # --- committed rules --------------------------------------------------------
 # The rules are the only channel that carries project knowledge into an agent.
 # Ignored or untracked, every run rediscovers what was already written down.
@@ -489,8 +510,9 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
   ;({r}=await run({issue:'1',increments:[{id:'a',dependsOn:[]},{id:'b',dependsOn:[]}]},{conflicts:['b']}))
   eq(st(r),{a:'merged',b:'conflicted'},'a merge conflict was not reported')
 
-  // The run is silent until it ends unless the workflow says what happened, and
-  // no agent has SendMessage any more - break: dropping either log call.
+  // The progress view is silent unless the workflow says what happened - break:
+  // dropping either log call. What reaches the conversation is the agents'
+  // SendMessage; these stubs cannot see it.
   let said
   ;({said}=await run('1'))
   eq(said,['1: s','1: passed, landed'],'a clean run told the user nothing')
