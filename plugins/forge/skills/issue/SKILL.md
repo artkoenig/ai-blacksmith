@@ -1,23 +1,48 @@
 ---
 name: issue
-description: Interview the user, write one issue with verifiable acceptance criteria, and decide whether to cut it into increments. Use when the user wants to capture work, plan a change, or file a ticket. The run starts later, on request.
+description: Interview the user, write one issue with verifiable acceptance criteria, and decide whether to cut it into increments. Use when the user wants to capture work, plan a change, or file a ticket. The run is left for the user to invoke.
 argument-hint: "[short description of the work]"
-allowed-tools: AskUserQuestion, Read, Write, Bash, Skill
+allowed-tools: AskUserQuestion, Read, Write, Bash, Skill, Agent(Explore)
 ---
 
 # Write an issue
 
-## 1. Interview
+## 1. Ground it
 
-Ask only what changes the outcome, in as few rounds as possible:
+Find out what the codebase already answers, before the first question reaches the user.
+
+One dispatch of the built-in `Explore` agent does it. It is read-only, it searches broadly, and it
+returns the finding rather than the files it read - so this context stays free for the issue. Ask
+it for what the interview would otherwise ask the user:
+
+- what the behaviour is today, at the sites the request names, with `path:line` for each;
+- whether what is asked for exists already, in part or under another name;
+- which command exercises that behaviour.
+
+Give it the request verbatim and a breadth - `medium`, or `very thorough` where the request spans
+several areas. Ask for prose and file references, nothing else.
+
+**Why a dispatch here.** Asking the user first spends a round on what a search answers, and buys a
+memory instead of the code. Searching from this session instead puts every excerpt into the one
+context that has to hold the whole issue at once - which is why this skill has no search tool of
+its own. Leaving it to the implementer is too late: the criteria and the cut are decided here, so a
+wrong assumption about today's behaviour survives into the diff.
+
+Skip it only where there is nothing to find - a greenfield project, a file that does not exist yet.
+Say that you skipped it.
+
+## 2. Interview
+
+Ask only what the grounding left open, in as few rounds as possible:
 
 - What is true when this is done? One sentence.
 - How would you check it? Push for something runnable.
 - What must not change?
 
-Never ask what the codebase answers.
+Never ask what the codebase answers. Where the grounding contradicts the user, put the finding to
+them with its `path:line` rather than asking the question again.
 
-## 2. Write it
+## 3. Write it
 
 Use `${CLAUDE_SKILL_DIR}/issue-template.md`. The issue holds a goal, its acceptance criteria,
 and what is out of scope. Nothing else: no file paths, no line ranges, no plan, no agent.
@@ -36,13 +61,13 @@ that survives the work and reads as a failure nobody caused. Scope it and run it
 - a `grep` over `src/ui` matched i18n strings and fixtures - narrow the glob, or match the call
   site rather than the string.
 
-You have no search tools here. The implementer finds its own way. A map written into an issue is
-maintained by nobody.
+What the grounding found shapes the criteria and their verify commands. It does not go into the
+issue. The implementer finds its own way. A map written into an issue is maintained by nobody.
 
 Persist through the project's `issue-backend` skill. Where it does not exist, stop and say
 `/forge:bootstrap` has not run.
 
-## 3. Decide the cut
+## 4. Decide the cut
 
 You are the only place that sees the whole issue at once. Decide now.
 
@@ -67,7 +92,7 @@ rules. A cut adds a dispatch set, and its reviews run one after another. It halv
 **Dependencies are your assertion.** Nothing proves two increments disjoint. Assert independence
 only where the criteria are about different things. A wrong call surfaces as a merge conflict.
 
-## 4. Hand it over
+## 5. Hand it over
 
 Start nothing. Filing an issue is not asking for it to be built: a run spends agent dispatches, and
 when to pay them is the user's call. Never invoke `/forge:work` off the back of writing an issue.
