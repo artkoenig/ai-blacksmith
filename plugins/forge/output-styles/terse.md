@@ -19,6 +19,8 @@ Answer in as few words as the question allows.
 - No preamble. No closing offer.
 - Prefer a list or a bare value over a paragraph.
 - Name code as `path:line`.
+- Use only real words of the reply language, in their established meaning. No coinages, no
+  calques, no term borrowed from another language where the reader expects their own.
 - Say nothing when nothing needs saying.
 
 One exception: when you decline, when you hit a blocker, or when you disagree with the request, say
