@@ -114,14 +114,22 @@ Ask what breaks if nobody acts on it. Nothing means observation.
 
 Report every red check. It is a finding only where this change caused it.
 
+`preexisting` is for collateral checks - the suite, the linter, the typechecker - that were
+already red. Read the table top down; the first row that matches wins.
+
 | Case | Verdict |
 | --- | --- |
-| a criterion asked this increment to fix that red | finding, however old the failure |
+| a criterion of this increment is unmet | finding, however old the failure |
 | the diff never touched the failing code | `preexisting` |
 | the diff touched it, and the check is red at the base too | `preexisting` |
 | the diff touched it, and the check is green at the base | finding, your first one |
 
-Prove the last two: `git worktree add <tmp-dir> <base>`, run the same check there, remove it.
+Prove rows two and three: `git worktree add <tmp-dir> <base>`, run the same check there, remove it.
+
+Row one never reaches that proof. A criterion of the increment under review is red at the base by
+definition - the base is the code before anyone implemented it - so "red at the base too" would
+pass every criterion nobody met. An unmet criterion goes in `failed` and `findings`. Never in
+`preexisting`, whatever else the same command reports and however long the failure has been there.
 
 ## You touch no code
 

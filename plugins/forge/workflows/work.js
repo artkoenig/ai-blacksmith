@@ -57,7 +57,7 @@ const VERDICT = {
     preexisting: {
       type: 'array',
       items: { type: 'string' },
-      description: 'failures this change did not cause, proven at the base. Reported, never a finding',
+      description: 'collateral checks - suite, lint, typecheck - this change did not cause, proven at the base. Reported, never a finding. Never an acceptance criterion of this increment: those are red at the base by definition',
     },
     observations: {
       type: 'array',
@@ -105,6 +105,15 @@ const criteriaLine = (inc) =>
   inc.criteria.length
     ? `Only these acceptance criteria are yours: ${inc.criteria.join(', ')}. The issue holds others; they belong to another increment and are not your scope.`
     : 'Every acceptance criterion in the issue is yours.'
+
+// The criterion an entry names, empty where it names none of this increment's. The
+// issue skill numbers criteria `AC1`, `AC2`, …; an increment that lists its own is
+// authoritative, an uncut one owns every criterion in the issue.
+const criterionIn = (inc) => (text) => {
+  const m = String(text || '').match(/\bAC\d+\b/)
+  if (!m) return ''
+  return !inc.criteria.length || inc.criteria.includes(m[0]) ? m[0] : ''
+}
 
 
 // A worktree exists only to keep concurrent implementers off each other. An
@@ -177,6 +186,9 @@ async function runIncrement(inc) {
     `Read issue ${issue} yourself, through the project's issue-backend skill.`,
     criteriaLine(inc),
     `Prove a red check at the base before filing it: \`git worktree add <tmp-dir> ${base}\`.`,
+    'That exit is for collateral checks only - suite, lint, typecheck. A criterion of this increment',
+    'is red at the base by definition; red there never passes one. An unmet criterion is a finding,',
+    'however old the failure and whatever else the same command reports.',
     'File nothing you cannot reproduce. A true remark that blocks nothing goes in `observations`.',
     'Answer the blast radius too: what this change breaks that no criterion names.',
   ].join('\n')
@@ -226,6 +238,30 @@ async function runIncrement(inc) {
     )
 
     if (!verdict) return { inc, status: 'error', reason: 'Reviewer returned no verdict.', branch, worktree: wt }
+
+    // A criterion of this increment is red at the base by definition - that is what
+    // "not implemented yet" looks like. Filed as preexisting it would pass every
+    // criterion nobody met, so it is an unmet criterion, not an excuse. Collateral
+    // checks - suite, lint, typecheck - keep their preexisting exit.
+    const nameOf = criterionIn(inc)
+    const misfiled = (verdict.preexisting || []).filter(nameOf)
+    if (misfiled.length) {
+      verdict = {
+        ...verdict,
+        pass: false,
+        failed: [...new Set([...(verdict.failed || []), ...misfiled.map(nameOf)])],
+        findings: [
+          ...(verdict.findings || []),
+          ...misfiled.map((p) => ({
+            id: nameOf(p),
+            evidence: 'filed as preexisting - a criterion of this increment is red at the base by'
+              + ` definition, so that is not a reason to pass it: ${p}`,
+            sites: [],
+          })),
+        ],
+        preexisting: (verdict.preexisting || []).filter((p) => !nameOf(p)),
+      }
+    }
 
     if (verdict.pass) {
       log(

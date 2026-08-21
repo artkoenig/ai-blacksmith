@@ -526,6 +526,38 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
   // Nothing reads `verdict.notes` any more - break: reinstating any consumer of it.
   eq(/verdict\.notes|\.notes\b/.test(src),false,'a consumer of verdict.notes survives -')
 
+  // A criterion of the increment can never be preexisting: an unmet criterion is red at
+  // the base by definition, so "proven at the base" would pass every criterion nobody
+  // implemented. Case: one criterion over two sites, only one of them fixed - break:
+  // dropping the misfiled-criterion check before `if (verdict.pass)`.
+  ;({r,said,calls,prompts}=await run('1',{verdicts:{1:[
+    {pass:true,failed:[],preexisting:['AC2: the grep over src/one.js and src/two.js is still red, red at the base too']},
+  ]}}))
+  eq(said[1],'1: rejected - AC2 - AC2: filed as preexisting - a criterion of this increment is red at the base '
+    +'by definition, so that is not a reason to pass it: AC2: the grep over src/one.js and src/two.js is still red, '
+    +'red at the base too','a criterion filed as preexisting was not rejected -')
+  eq(calls,['implement:1','review:1:0','repair:1:1','review:1:1'],'a misfiled criterion did not cost a repair round')
+  eq(prompts['repair:1:1'].includes('Fix only these criteria: AC2.'),true,'the repair was not pointed at the criterion -')
+  eq(r.status,'done','the run did not recover after the repair')
+  eq(r.increments[0].preexisting,[],'the misfiled criterion stayed in preexisting -')
+
+  // A collateral check red at the base is still preexisting and still blocks nothing -
+  // break: rejecting on any non-empty `preexisting` instead of on a criterion in it.
+  ;({r,calls}=await run('1',{verdicts:{1:[
+    {pass:true,failed:[],preexisting:['forge-test: the lint suite is red at the base too']},
+  ]}}))
+  eq(calls,['implement:1','review:1:0'],'a collateral preexisting failure cost a repair round')
+  eq(r.increments[0].preexisting,['forge-test: the lint suite is red at the base too'],
+    'a collateral preexisting failure was not reported')
+
+  // Only the increment's own criteria count. A cut increment that does not own AC9 must
+  // still be able to report it red at the base - break: matching /AC\d+/ without the
+  // increment's criteria list.
+  ;({r,calls}=await run({issue:'1',increments:[{id:'a',criteria:['AC1'],dependsOn:[]}]},{verdicts:{1:[
+    {pass:true,failed:[],preexisting:['AC9 of the other increment is red at the base']},
+  ]}}))
+  eq(calls,['implement:1','review:1:0'],"another increment's criterion was treated as this one's")
+
   eq((await run('')).r.status,'error','a missing issue id was accepted')
   eq((await run({issue:'1',agentPrefix:''})).r.status,'done','agentPrefix did not resolve')
 })()
