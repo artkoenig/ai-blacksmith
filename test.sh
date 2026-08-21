@@ -358,6 +358,15 @@ grep -q "rules', 'forge.md'" plugins/forge/scripts/session-start.js \
 grep -q '^@${CLAUDE_PLUGIN_ROOT}/rules/forge.md$' plugins/forge/skills/agent-protocol/SKILL.md \
   || fail rules "the agent protocol no longer references the rules file"
 
+# --- a stopped run is resumed -----------------------------------------------
+# The runtime keeps a stopped run's finished agents for a resume in the same
+# session, so a restart pays for them twice. The behaviour is the session's, not
+# the script's, so the rule that states it is what is checked.
+# break: dropping the resume line from the plugin rules
+grep -q 'resumed, never restarted' plugins/forge/rules/forge.md \
+  && ok "a stopped run is resumed" \
+  || fail resume "the plugin rules no longer require resuming a stopped run"
+
 # --- the run starts on demand -----------------------------------------------
 # Writing an issue spends no dispatch. The behaviour lives in prose, so the
 # prose is what is checked: a skill that ends by invoking the workflow starts
