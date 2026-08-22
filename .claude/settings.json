@@ -1,6 +1,6 @@
 {
   "autoMemoryEnabled": false,
-  "outputStyle": "Forge Terse",
+  "outputStyle": "Concise",
   "hooks": {
     "PreToolUse": [
       {

@@ -61,11 +61,13 @@ the target repository: `/forge:bootstrap`.
 
 ## Output style
 
-**Forge Terse** ships with `force-for-plugin: true`, so it applies while the plugin is enabled. It
-is read once at session start - `/clear` or a new session to pick it up.
+forge ships none. Set `outputStyle` to Claude Code's built-in **Concise**, which needs v2.1.237 or
+later. A style is read once at session start - `/clear` or a new session to pick it up.
 
-It does not reach subagents; Claude Code does not pass output styles into them. Agent brevity comes
-from the `agent-protocol` skill.
+What Concise does not cover - which language to answer in, English in files, `path:line`, and that
+brevity never hides a blocker - lives in `rules/forge.md`, injected by the `SessionStart` hook.
+That reaches subagents; an output style does not. Agent brevity comes from the `agent-protocol`
+skill.
 
 ## What it writes into your project
 
