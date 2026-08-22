@@ -983,7 +983,7 @@ const PAGE_CSS = [
   // The one thing a highlight does to an arrow it did not name: fade it. The
   // arrows it does name are left alone, so their colour, width, dash and head
   // are the ones they carry at rest.
-  '.edge.dim{opacity:.5}',
+  '.edge.dim{opacity:.15}',
   '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
   '#mermaid{overflow-x:auto}',
 ].join('')
