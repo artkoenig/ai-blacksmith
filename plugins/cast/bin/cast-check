@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# The layer rules as a check. Runs without arguments, on the same contract as the
+# forge wrappers: exit 0 with a single line, exit 1 with every violation and its
+# site, exit 2 where the check could not run at all.
+#
+# It scans first, so the answer is the code as it is now and never a graph that
+# was written before the last edit.
+set -uo pipefail
+CAST="$(dirname "$0")/../scripts/cast.js"
+node "$CAST" scan >/dev/null || exit 2
+exec node "$CAST" check

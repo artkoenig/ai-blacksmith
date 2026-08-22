@@ -7,11 +7,20 @@
     {
       "name": "forge",
       "displayName": "Forge",
-      "description": "Interview-driven issues with acceptance criteria, executed autonomously by a token-frugal workflow.",
+      "description": "Interview issues into shape, then execute them autonomously on the smallest possible token budget.",
       "author": { "name": "artkoenig" },
       "license": "MIT",
       "keywords": ["issues", "workflow", "subagents", "tokens", "automation"],
       "source": "./plugins/forge"
+    },
+    {
+      "name": "cast",
+      "displayName": "Cast",
+      "description": "The module graph of a project, and what is wrong with it - cast scan writes it, cast report reads it.",
+      "author": { "name": "artkoenig" },
+      "license": "MIT",
+      "keywords": ["cast", "dependency-graph", "javascript", "typescript"],
+      "source": "./plugins/cast"
     }
   ]
 }

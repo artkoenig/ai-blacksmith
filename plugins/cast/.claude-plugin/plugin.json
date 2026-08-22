@@ -1,0 +1,10 @@
+{
+  "name": "cast",
+  "displayName": "Cast",
+  "description": "The module graph of a project, and what is wrong with it - cast scan writes it, cast report reads it.",
+  "author": {
+    "name": "artkoenig"
+  },
+  "license": "MIT",
+  "keywords": ["cast", "dependency-graph", "javascript", "typescript"]
+}

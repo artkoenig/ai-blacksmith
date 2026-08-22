@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The cast CLI. All behaviour lives in scripts/cast.js; this is the entry point
+# the plugin's bin/ exposes.
+exec node "$(dirname "$0")/../scripts/cast.js" "$@"

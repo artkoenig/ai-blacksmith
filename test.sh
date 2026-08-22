@@ -9,22 +9,44 @@ fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILED=1; }
 ok()   { printf 'ok   %s\n' "$1"; }
 
 # --- manifest and syntax ----------------------------------------------------
-# The plugin pins no version on purpose - it is released from the tip of main, so
+# No plugin pins a version on purpose - each is released from the tip of main, so
 # the commit is the version. --strict warns about exactly that one thing, and
 # every other line it prints is a break.
-if command -v claude >/dev/null; then
-  V="$(claude plugin validate ./plugins/forge --strict 2>&1 \
-        | grep '^  > ' | grep -v '^  > version: No version specified')"
-  [ -z "$V" ] || fail manifest "claude plugin validate rejected plugins/forge:${V}"
-fi
-for f in plugins/forge/workflows/*.js plugins/forge/scripts/*.js; do
-  node --check "$f" 2>/dev/null || fail syntax "$f"
+for d in plugins/*/; do
+  d="${d%/}"
+  if command -v claude >/dev/null; then
+    V="$(claude plugin validate "./$d" --strict 2>&1 \
+          | grep '^  > ' | grep -v '^  > version: No version specified')"
+    [ -z "$V" ] || fail manifest "claude plugin validate rejected $d:${V}"
+  fi
+  for f in "$d"/workflows/*.js "$d"/scripts/*.js; do
+    [ -f "$f" ] || continue
+    node --check "$f" 2>/dev/null || fail syntax "$f"
+  done
+  for f in "$d"/bin/*; do
+    [ -f "$f" ] || continue
+    bash -n "$f" 2>/dev/null || fail syntax "$f"
+    [ -x "$f" ] || fail permissions "$f is not executable"
+  done
+  for f in "$d"/scripts/*.js; do
+    [ -f "$f" ] || continue
+    [ -x "$f" ] || fail permissions "$f is not executable"
+  done
 done
-for f in plugins/forge/bin/*; do
-  bash -n "$f" 2>/dev/null || fail syntax "$f"
-  [ -x "$f" ] || fail permissions "$f is not executable"
-done
-for f in plugins/forge/scripts/*.js; do [ -x "$f" ] || fail permissions "$f is not executable"; done
+# The marketplace entry is what a user reads before installing, so it mirrors the
+# plugin's own manifest - break: shipping behaviour in a plugin and leaving the
+# marketplace describing the version before it.
+M="$(node -e '
+const fs=require("fs");
+const mkt=JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json","utf8"));
+for (const p of mkt.plugins) {
+  const own=JSON.parse(fs.readFileSync(`plugins/${p.name}/.claude-plugin/plugin.json`,"utf8"));
+  for (const k of ["displayName","description","keywords"])
+    if (JSON.stringify(p[k])!==JSON.stringify(own[k]))
+      console.log(`${p.name}: marketplace ${k} ${JSON.stringify(p[k])} does not mirror plugin.json ${JSON.stringify(own[k])}`);
+}' 2>&1)"
+[ -z "$M" ] || fail manifest "the marketplace does not mirror the plugin manifests: $M"
+# forge's own hooks manifest: the only plugin that ships one, so it stays named.
 node -e 'JSON.parse(require("fs").readFileSync("plugins/forge/hooks/hooks.json","utf8"))' 2>/dev/null \
   || fail manifest "hooks/hooks.json is not valid JSON"
 [ "$FAILED" = 0 ] && ok "manifest and syntax"
@@ -592,5 +614,862 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
 })()
 JS
 [ "$FAILED" = 0 ] && ok "workflow control flow"
+
+# --- cast: the module graph -------------------------------------------------
+# One fixture project, scanned once, six suites reading the one graph. It carries
+# a relative import, an alias import of the same module, a require, an export
+# from, a dynamic import, a statement type import, an external package, a broken
+# relative import, a broken alias, an a->b->c->a cycle, and two modules of a
+# language the engine has never heard of, described by an adapter the fixture
+# itself ships.
+CASTFIX="$(mktemp -d)"
+CASTIDS="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS"' EXIT
+mkdir -p "$CASTFIX/src" "$CASTFIX/pkg" "$CASTFIX/.cast/adapters" "$CASTFIX/node_modules/react"
+cat > "$CASTFIX/tsconfig.json" <<'JSON'
+{ "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/*"] } } }
+JSON
+cat > "$CASTFIX/src/a.ts" <<'TS'
+import { b } from './b'
+import type { T } from '@app/t'
+import React from 'react'
+import './missing-file'
+import { g } from '@app/gone'
+export async function load() { return import('./c') }
+TS
+cat > "$CASTFIX/src/b.ts" <<'TS'
+const { c } = require('./c')
+module.exports = { c }
+TS
+printf "export { load } from './a'\n" > "$CASTFIX/src/c.ts"
+printf 'export type T = string\n' > "$CASTFIX/src/t.ts"
+printf "import type { T } from './t'\nexport type U = T\n" > "$CASTFIX/src/rel.ts"
+cat > "$CASTFIX/src/multi.ts" <<'TS'
+import {
+  T,
+} from './t'
+TS
+cat > "$CASTFIX/.cast/adapters/toy.js" <<'JS'
+'use strict'
+const p = require('path').posix
+module.exports = {
+  name: 'toy', extensions: ['.toy'], patterns: [{ kind: 'value', re: /use\s+"([^"]+)"/g }],
+  resolve(s, from, ctx) { const t = p.join(p.dirname(from), s + '.toy'); return ctx.isFile(t) ? { to: t } : null },
+}
+JS
+printf 'use "two"\n' > "$CASTFIX/pkg/one.toy"
+printf 'nothing here\n' > "$CASTFIX/pkg/two.toy"
+# The layers the fixture is read at: one module in its own layer, the rest of src
+# below it, and pkg claimed by no glob at all.
+cat > "$CASTFIX/.cast/layers.json" <<'JSON'
+{ "src/a.ts": "ui", "src/**": "logic" }
+JSON
+
+CAST_BIN="$PWD/plugins/cast/bin/cast"
+S=0
+(cd "$CASTFIX" && "$CAST_BIN" scan >/dev/null 2>&1) \
+  || { fail "cast graph" "cast scan did not run"; S=1; }
+CAST_REPORT="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"
+# Assert against the written graph, never against an in-process call: the file is
+# the contract, and a scan that computes the right answer without writing it is a
+# scan nothing downstream can read.
+graph() { CASTFIX="$CASTFIX" node -e '
+  const bad=(s)=>{console.log(s);process.exit(1)}
+  let g
+  try { g=JSON.parse(require("fs").readFileSync(process.env.CASTFIX+"/.cast/graph.json","utf8")) }
+  catch(e) { bad("no readable .cast/graph.json: "+e.message) }
+  const mod=(id)=>g.modules.find(x=>x.id===id)
+  const edge=(id,t)=>((mod(id)||{}).edges||[]).find(x=>x.target===t)
+  '"$1"'
+'; }
+
+# AC1 one entry per source module with its outgoing edges, driven by an adapter
+# break: dropping a module from the walk, or the edges from an entry
+O="$(graph '
+  for (const id of ["src/a.ts","src/b.ts","src/c.ts","src/t.ts","src/rel.ts","src/multi.ts"])
+    if (!mod(id)) bad("no entry for the source module "+id)
+  if (!(mod("src/a.ts").edges||[]).length) bad("a module with imports carries no outgoing edges")
+  if (mod("src/t.ts").edges.length) bad("a module with no imports was given edges")
+  if (mod("tsconfig.json")) bad("a file no adapter claims was scanned as a module")
+')" || { fail "cast graph" "$O"; S=1; }
+# the language knowledge is the adapter file, not the engine
+# break: hardcoding the javascript extensions, patterns or resolver into cast.js,
+# which leaves a project-supplied adapter with nothing to drive
+O="$(graph '
+  if (!mod("pkg/one.toy")) bad("a project adapter did not put its own modules in the graph")
+  const e=edge("pkg/one.toy","two")
+  if (!e) bad("a project adapter pattern produced no edge")
+  if (e.to!=="pkg/two.toy") bad("a project adapter resolver was not used: "+e.to)
+')" || { fail "cast graph" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast graph"
+
+# AC2 every edge carries its kind
+S=0
+# break: dropping the type pattern, which reclassifies `import type` as value
+O="$(graph '
+  const want={"src/a.ts":{"./b":"value","@app/t":"type","react":"value","./c":"dynamic"},
+              "src/b.ts":{"./c":"value"},"src/c.ts":{"./a":"value"},"src/rel.ts":{"./t":"type"}}
+  for (const [id,edges] of Object.entries(want))
+    for (const [t,k] of Object.entries(edges)) {
+      const e=edge(id,t)
+      if (!e) bad("no edge for "+t+" in "+id)
+      if (e.kind!==k) bad(id+" -> "+t+" is "+e.kind+", not "+k)
+    }
+  for (const m of g.modules) for (const e of m.edges)
+    if (!["value","type","dynamic"].includes(e.kind)) bad("an edge carries no kind: "+JSON.stringify(e))
+')" || { fail "cast edge kinds" "$O"; S=1; }
+# the same import counted once, not once per pattern that matches its text
+# break: dropping the (line, specifier) dedupe
+O="$(graph '
+  const seen=new Set()
+  for (const m of g.modules) for (const e of m.edges) {
+    const k=e.file+":"+e.line+" "+e.target
+    if (seen.has(k)) bad("one import produced two edges: "+k)
+    seen.add(k)
+  }
+')" || { fail "cast edge kinds" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast edge kinds"
+
+# AC3 every edge carries the file and the line of its import
+S=0
+# break: dropping file or line from the edge, or counting lines from the wrong end
+O="$(graph '
+  const at={"./b":1,"@app/t":2,"react":3,"./missing-file":4,"@app/gone":5,"./c":6}
+  for (const [t,line] of Object.entries(at)) {
+    const e=edge("src/a.ts",t)
+    if (!e) bad("no edge for "+t)
+    if (e.file!=="src/a.ts") bad(t+" names the file "+e.file)
+    if (e.line!==line) bad(t+" is at line "+e.line+", not "+line)
+  }
+  for (const m of g.modules) for (const e of m.edges) {
+    if (e.file!==m.id) bad("an edge of "+m.id+" names the file "+e.file)
+    if (!Number.isInteger(e.line)||e.line<1) bad("an edge of "+m.id+" carries no line")
+  }
+')" || { fail "cast edge sites" "$O"; S=1; }
+# an import spread over several lines is reported where it starts
+# break: taking the offset of the specifier instead of the start of the statement
+O="$(graph '
+  const e=edge("src/multi.ts","./t")
+  if (!e) bad("a multi-line import produced no edge")
+  if (e.line!==1) bad("a multi-line import is reported at line "+e.line+", not where it starts")
+')" || { fail "cast edge sites" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast edge sites"
+
+# AC4 an alias import lands on the node the relative import lands on
+S=0
+# break: dropping the tsconfig paths lookup, which makes @app/t external or unresolved
+O="$(graph '
+  const a=edge("src/a.ts","@app/t"), r=edge("src/rel.ts","./t")
+  if (!a) bad("an alias import produced no edge")
+  if (a.resolution!=="module") bad("an alias import resolved to "+a.resolution)
+  if (a.to!==r.to) bad("the alias landed on "+a.to+", the relative import on "+r.to)
+  if (a.to!=="src/t.ts") bad("the alias landed on "+a.to)
+')" || { fail "cast alias" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast alias"
+
+# AC5 an import that resolves to nothing is counted and named, never dropped
+S=0
+# break: dropping the edge when resolve answers nothing
+O="$(graph '
+  for (const t of ["./missing-file","@app/gone"]) {
+    const e=edge("src/a.ts",t)
+    if (!e) bad("an unresolvable import was dropped from the graph: "+t)
+    if (e.resolution!=="unresolved") bad(t+" was filed as "+e.resolution)
+  }
+  const ext=edge("src/a.ts","react")
+  if (ext.resolution!=="external") bad("an installed package was filed as "+ext.resolution)
+')" || { fail "cast unresolved" "$O"; S=1; }
+# break: reporting a count without the sites, which names nothing to go and fix
+printf '%s\n' "$CAST_REPORT" | grep -q '^unresolved 2$' \
+  || { fail "cast unresolved" "cast report did not count the unresolved imports: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q 'src/a.ts:4 \./missing-file' \
+  || { fail "cast unresolved" "cast report did not name an unresolved import"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q 'src/a.ts:5 @app/gone' \
+  || { fail "cast unresolved" "cast report did not name every unresolved import"; S=1; }
+[ "$S" = 0 ] && ok "cast unresolved"
+
+# AC6 a cycle is named by all of its modules
+S=0
+# break: reporting the module the walk entered the cycle through instead of the
+# whole strongly connected component
+printf '%s\n' "$CAST_REPORT" | grep -q '^cycles 1$' \
+  || { fail "cast cycles" "cast report did not count the cycle: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep '^  cycle:' \
+  | grep -q 'src/a\.ts.*src/b\.ts.*src/c\.ts' \
+  || { fail "cast cycles" "cast report did not name every module of the cycle: $CAST_REPORT"; S=1; }
+# a module outside the cycle is not swept into it - break: reporting every
+# reachable module rather than the component
+printf '%s\n' "$CAST_REPORT" | grep '^  cycle:' | grep -q 'src/t\.ts' \
+  && { fail "cast cycles" "a module outside the cycle was named in it"; S=1; }
+[ "$S" = 0 ] && ok "cast cycles"
+
+# AC1 layers.json maps globs to layer names and every module lands in exactly one
+S=0
+# break: dropping the layers section from the report, or placing a module in
+# every layer whose glob matches it instead of the first
+printf '%s\n' "$CAST_REPORT" | grep -q '^layers 2$' \
+  || { fail "cast layers" "cast report did not count the layers: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q '^  ui 1$' \
+  || { fail "cast layers" "cast report did not size the ui layer: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q '^  logic 5$' \
+  || { fail "cast layers" "cast report did not size the logic layer: $CAST_REPORT"; S=1; }
+# exactly one: the layer counts and the unassigned count add up to the modules,
+# so a module placed twice or dropped shows here
+# break: letting a later glob place a module a earlier one already claimed
+SUM="$(printf '%s\n' "$CAST_REPORT" | awk '
+  /^layers /{inl=1;next} /^unassigned /{n+=$2;inl=0;next}
+  inl&&/^  /{n+=$2;next} {inl=0} END{print n+0}')"
+MODS="$(printf '%s\n' "$CAST_REPORT" | awk '/^modules /{print $2}')"
+[ "$SUM" = "$MODS" ] \
+  || { fail "cast layers" "$MODS modules were placed $SUM times: $CAST_REPORT"; S=1; }
+[ "$S" = 0 ] && ok "cast layers"
+
+# a layers.json that is present but unreadable stops the run: the directory-level
+# fallback answers for a missing file only
+S=0
+CAST_LAYERS="$CASTFIX/.cast/layers.json"
+cp "$CAST_LAYERS" "$CASTFIX/layers.bak"
+printf '{ "src/a.ts": ' > "$CAST_LAYERS"
+CAST_LM="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+# break: catching the parse the way the missing file is caught, which reads the
+# graph at an altitude nobody declared and never says the layer file was ignored
+[ "$RC" = 2 ] \
+  || { fail "cast layers malformed" "a malformed layers.json exited $RC, not 2: $CAST_LM"; S=1; }
+printf '%s\n' "$CAST_LM" | grep -q 'layers.json is not valid JSON' \
+  || { fail "cast layers malformed" "the malformed layer file was not named: $CAST_LM"; S=1; }
+printf '%s\n' "$CAST_LM" | grep -q '^layers ' \
+  && { fail "cast layers malformed" "the run fell back to directory layering: $CAST_LM"; S=1; }
+# a file that cannot be read at all is the same answer, not a fallback either
+rm -f "$CAST_LAYERS"; mkdir "$CAST_LAYERS"
+CAST_LU="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+# break: one bare catch around read and parse together, which swallows this too
+[ "$RC" = 2 ] \
+  || { fail "cast layers malformed" "an unreadable layers.json exited $RC, not 2: $CAST_LU"; S=1; }
+printf '%s\n' "$CAST_LU" | grep -q 'layers.json could not be read' \
+  || { fail "cast layers malformed" "the unreadable layer file was not named: $CAST_LU"; S=1; }
+rmdir "$CAST_LAYERS"
+# no layers.json at all is still the documented default, not an error
+# break: turning the missing file into an exit 2, which makes a first run need a
+# layer file before it can say anything
+CAST_LN="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast layers malformed" "no layers.json exited $RC, not 0: $CAST_LN"; S=1; }
+printf '%s\n' "$CAST_LN" | grep -q '^layers ' \
+  || { fail "cast layers malformed" "the directory-level fallback did not run: $CAST_LN"; S=1; }
+cp "$CASTFIX/layers.bak" "$CAST_LAYERS"; rm -f "$CASTFIX/layers.bak"
+[ "$S" = 0 ] && ok "cast layers malformed"
+
+# AC2 a module no glob claims is counted and named, never silently dropped
+S=0
+# break: skipping the unmatched modules instead of filing them as unassigned
+printf '%s\n' "$CAST_REPORT" | grep -q '^unassigned 2$' \
+  || { fail "cast unassigned" "cast report did not count the unassigned modules: $CAST_REPORT"; S=1; }
+# break: reporting a count without the names, which says nothing to go and place
+for m in pkg/one.toy pkg/two.toy; do
+  printf '%s\n' "$CAST_REPORT" | grep -q "^  $m\$" \
+    || { fail "cast unassigned" "cast report did not name the unassigned module $m: $CAST_REPORT"; S=1; }
+done
+# an unassigned module is not also counted inside a layer
+# break: defaulting an unmatched module into the first declared layer
+printf '%s\n' "$CAST_REPORT" | grep -q '^  ui 1$' \
+  || { fail "cast unassigned" "an unassigned module was swept into a layer: $CAST_REPORT"; S=1; }
+[ "$S" = 0 ] && ok "cast unassigned"
+
+# AC3 cast edges --from --to lists the module edges behind one layer edge
+S=0
+CAST_EDGES="$(cd "$CASTFIX" && "$CAST_BIN" edges --from ui --to logic 2>&1)" \
+  || { fail "cast edges" "cast edges did not run: $CAST_EDGES"; S=1; }
+# every module edge behind the layer edge, each with its file and its line
+# break: dropping the file or the line from the line, or listing only the first edge
+for e in 'src/a.ts:1 -> src/b.ts' 'src/a.ts:2 -> src/t.ts' 'src/a.ts:6 -> src/c.ts'; do
+  printf '%s\n' "$CAST_EDGES" | grep -q "^  $e " \
+    || { fail "cast edges" "cast edges did not list $e: $CAST_EDGES"; S=1; }
+done
+printf '%s\n' "$CAST_EDGES" | grep -q '^edges ui -> logic 3$' \
+  || { fail "cast edges" "cast edges did not count the module edges: $CAST_EDGES"; S=1; }
+# the direction is the layer edge asked for, not every edge that touches it
+# break: ignoring --from and --to and listing the whole graph
+CAST_BACK="$(cd "$CASTFIX" && "$CAST_BIN" edges --from logic --to ui 2>&1)"
+printf '%s\n' "$CAST_BACK" | grep -q '^  src/c.ts:1 -> src/a.ts ' \
+  || { fail "cast edges" "the reverse layer edge was not listed: $CAST_BACK"; S=1; }
+printf '%s\n' "$CAST_BACK" | grep -q 'src/b.ts' \
+  && { fail "cast edges" "an edge outside the layer edge was listed: $CAST_BACK"; S=1; }
+[ "$S" = 0 ] && ok "cast edges"
+
+# AC4 cast render --mermaid opens at layer altitude: one node per layer, no module
+S=0
+CAST_MMD="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)" \
+  || { fail "cast altitude" "cast render --mermaid did not run: $CAST_MMD"; S=1; }
+# break: emitting one node per module, the view every project is unreadable at
+printf '%s\n' "$CAST_MMD" | grep -q 'src/' \
+  && { fail "cast altitude" "a module node was emitted without --expand: $CAST_MMD"; S=1; }
+# one node per layer, the unassigned modules included - a layer left out is a
+# part of the project the picture denies
+# break: rendering only the layers that carry an edge, or dropping unassigned
+for l in 'ui (1)' 'logic (5)' 'unassigned (2)'; do
+  printf '%s\n' "$CAST_MMD" | grep -q "\"$l\"" \
+    || { fail "cast altitude" "no node for the layer $l: $CAST_MMD"; S=1; }
+done
+printf '%s\n' "$CAST_MMD" | grep -q '^graph ' \
+  || { fail "cast altitude" "the output is not a mermaid graph: $CAST_MMD"; S=1; }
+[ "$S" = 0 ] && ok "cast altitude"
+
+# AC5 a layer edge carries the number of module edges behind it
+S=0
+# break: drawing the arrow without its label, or labelling it 1 per layer pair
+# instead of counting the module edges layerEdges lists
+printf '%s\n' "$CAST_MMD" | grep -q '^  L_ui -->|3| L_logic$' \
+  || { fail "cast edge weight" "the ui -> logic edge is not weighted 3: $CAST_MMD"; S=1; }
+printf '%s\n' "$CAST_MMD" | grep -q '^  L_logic -->|1| L_ui$' \
+  || { fail "cast edge weight" "the logic -> ui edge is not weighted 1: $CAST_MMD"; S=1; }
+# an edge inside one collapsed layer is not an arrow at this altitude
+# break: emitting a self loop for the module edges within a layer
+printf '%s\n' "$CAST_MMD" | grep -qE '^  (L_[A-Za-z_]+) -->\|[0-9]+\| \1$' \
+  && { fail "cast edge weight" "a layer was given a self edge: $CAST_MMD"; S=1; }
+[ "$S" = 0 ] && ok "cast edge weight"
+
+# AC6 --expand resolves one layer to its modules and leaves the others alone
+S=0
+CAST_EXP="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --expand logic 2>&1)" \
+  || { fail "cast expand" "cast render --expand did not run: $CAST_EXP"; S=1; }
+# break: ignoring --expand, which leaves the layer a single node
+printf '%s\n' "$CAST_EXP" | grep -q '^  subgraph L_logic\["logic"\]$' \
+  || { fail "cast expand" "the expanded layer is not a subgraph: $CAST_EXP"; S=1; }
+for m in src/b.ts src/c.ts src/t.ts src/rel.ts src/multi.ts; do
+  printf '%s\n' "$CAST_EXP" | grep -q "^    M_[A-Za-z0-9_]*\[\"$m\"\]" \
+    || { fail "cast expand" "the module $m is not inside the expanded layer: $CAST_EXP"; S=1; }
+done
+# every other layer stays one node
+# break: expanding the whole graph instead of the named layer
+printf '%s\n' "$CAST_EXP" | grep -q '"ui (1)"' \
+  || { fail "cast expand" "the ui layer did not stay a single node: $CAST_EXP"; S=1; }
+printf '%s\n' "$CAST_EXP" | grep -q '"src/a.ts"' \
+  && { fail "cast expand" "a module of an unexpanded layer became a node: $CAST_EXP"; S=1; }
+# the edge into the expanded layer lands on the module, not the layer node
+# break: keeping the layer endpoint after expanding, which hides what is imported
+printf '%s\n' "$CAST_EXP" | grep -q '^  L_ui -->|1| M_src_2f_b_2e_ts$' \
+  || { fail "cast expand" "an edge into the expanded layer did not reach a module: $CAST_EXP"; S=1; }
+[ "$S" = 0 ] && ok "cast expand"
+
+# two modules whose ids differ only in punctuation are two nodes, never one
+S=0
+# a fixture of its own: the ids have to collide under a lossy sanitiser, and the
+# layer sizes the suites above assert must not move
+mkdir -p "$CASTIDS/src"
+printf 'export const a = 1\n' > "$CASTIDS/src/x-y.ts"
+printf 'export const b = 2\n' > "$CASTIDS/src/x_y.ts"
+(cd "$CASTIDS" && "$CAST_BIN" scan >/dev/null 2>&1) \
+  || { fail "cast node ids" "cast scan did not run on the collision fixture"; S=1; }
+CAST_IDS="$(cd "$CASTIDS" && "$CAST_BIN" render --mermaid --expand src 2>&1)"
+node_of() { printf '%s\n' "$CAST_IDS" | sed -n "s/^ *\(M_[A-Za-z0-9_]*\)\[\"$1\"\]\$/\1/p"; }
+ID_A="$(node_of 'src\/x-y\.ts')"
+ID_B="$(node_of 'src\/x_y\.ts')"
+# break: mapping every character mermaid rejects to a bare `_`, which gives both
+# modules the id M_src_x_y_ts - one node drawn for two modules, and an edge of
+# one of them silently attributed to the other
+[ -n "$ID_A" ] && [ -n "$ID_B" ] \
+  || { fail "cast node ids" "a module was not drawn as its own node: $CAST_IDS"; S=1; }
+[ "$ID_A" != "$ID_B" ] \
+  || { fail "cast node ids" "two modules share the node id $ID_A: $CAST_IDS"; S=1; }
+[ "$S" = 0 ] && ok "cast node ids"
+
+# AC7 cast render --html writes one self-contained page carrying the layer names
+S=0
+CAST_HTML_OUT="$(cd "$CASTFIX" && "$CAST_BIN" render --html view.html 2>&1)" \
+  || { fail "cast html" "cast render --html did not run: $CAST_HTML_OUT"; S=1; }
+# break: rendering to stdout and writing no file
+[ -f "$CASTFIX/view.html" ] \
+  || { fail "cast html" "cast render --html wrote no page: $CAST_HTML_OUT"; S=1; }
+CAST_HTML="$(cat "$CASTFIX/view.html" 2>/dev/null)"
+# break: writing the mermaid source under an .html name, with no page around it
+printf '%s\n' "$CAST_HTML" | grep -qi '<html' \
+  || { fail "cast html" "the page is not html: $CAST_HTML"; S=1; }
+# the layer names are the whole claim
+# break: emitting the graph without ever naming a layer
+for l in ui logic unassigned; do
+  printf '%s\n' "$CAST_HTML" | grep -q "$l" \
+    || { fail "cast html" "the page does not carry the layer $l: $CAST_HTML"; S=1; }
+done
+# self-contained: it fetches nothing
+# break: pulling mermaid off a cdn, which makes the page useless offline
+printf '%s\n' "$CAST_HTML" | grep -qE 'src="https?:|href="https?:' \
+  && { fail "cast html" "the page loads an external asset: $CAST_HTML"; S=1; }
+[ "$S" = 0 ] && ok "cast html"
+
+
+# --- cast: the rules ---------------------------------------------------------
+# The same scanned fixture, read through .cast/rules.json. Rules are read at
+# check time, so every case here rewrites the file and rescans nothing.
+CAST_RULES="$CASTFIX/.cast/rules.json"
+
+# AC1 rules.json holds forbidden and allowed rules, each with name, severity,
+# from, to and kinds, and a side is a layer or a path
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{
+  "forbidden": [
+    { "name": "ui-owns-nothing", "severity": "error", "from": "ui", "to": "logic",
+      "kinds": ["value", "type", "dynamic"] }
+  ],
+  "allowed": [
+    { "name": "a-may-type-t", "severity": "error", "from": "src/a.ts", "to": "src/t.ts",
+      "kinds": ["type"] }
+  ]
+}
+JSON
+CAST_CHECK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"
+# a forbidden rule written between two layers catches the edges behind them
+# break: reading `from`/`to` as a path only, which leaves a layer rule matching nothing
+for v in 'src/a.ts:1 -> src/b.ts' 'src/a.ts:6 -> src/c.ts'; do
+  printf '%s\n' "$CAST_CHECK" | grep -q "$v" \
+    || { fail "cast rules" "the forbidden layer rule did not catch $v: $CAST_CHECK"; S=1; }
+done
+# an allowed rule, written between two paths, is the exception to it
+# break: ignoring the allowed list, which makes every exception unwritable
+printf '%s\n' "$CAST_CHECK" | grep -q 'src/a.ts:2' \
+  && { fail "cast rules" "an edge an allowed rule claims was still a violation: $CAST_CHECK"; S=1; }
+printf '%s\n' "$CAST_CHECK" | grep -q '^2 violations' \
+  || { fail "cast rules" "the violations were not counted: $CAST_CHECK"; S=1; }
+# a rule attribute the evaluator cannot decide is named, never quietly passed
+# break: dropping the unknown-key report, which reads as a rule that held
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "guess", "severity": "warn", "from": "ui", "to": "unassigned",
+                   "kinds": ["value"], "unless": "friday" } ] }
+JSON
+CAST_UNK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"
+printf '%s\n' "$CAST_UNK" | grep -q 'not evaluated: guess: unless' \
+  || { fail "cast rules" "an attribute the evaluator cannot decide was passed silently: $CAST_UNK"; S=1; }
+[ "$S" = 0 ] && ok "cast rules"
+
+# AC2 a project that breaks no rule exits 0 with a single line
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_CLEAN="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: exiting non-zero on a graph that breaks nothing
+[ "$RC" = 0 ] || { fail "cast check clean" "a clean project did not exit 0: $CAST_CLEAN"; S=1; }
+# break: printing a header, or a line per rule, above the answer
+[ "$(printf '%s\n' "$CAST_CLEAN" | wc -l)" = 1 ] \
+  || { fail "cast check clean" "a clean check answered in more than one line: $CAST_CLEAN"; S=1; }
+printf '%s\n' "$CAST_CLEAN" | grep -q '^0 violations' \
+  || { fail "cast check clean" "the one line does not say the project is clean: $CAST_CLEAN"; S=1; }
+[ "$S" = 0 ] && ok "cast check clean"
+
+# AC3 a violated error rule exits 1 and names every violation, grouped by rule
+# and layer edge
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_BAD="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reporting the violation and still exiting 0, which lets the build pass
+[ "$RC" = 1 ] || { fail "cast check violation" "a violated error rule exited $RC, not 1: $CAST_BAD"; S=1; }
+# the rule, the file and the line: a violation without its site is unopenable
+# break: dropping the site from the line, or naming the count only
+printf '%s\n' "$CAST_BAD" | grep -q '^no-back-edge (error) logic -> ui 1$' \
+  || { fail "cast check violation" "the violations are not grouped under their rule: $CAST_BAD"; S=1; }
+printf '%s\n' "$CAST_BAD" | grep -q '^  logic -> ui 1$' \
+  || { fail "cast check violation" "the violations are not grouped by layer edge: $CAST_BAD"; S=1; }
+printf '%s\n' "$CAST_BAD" | grep -q '^    src/c.ts:1 -> src/a.ts (value)$' \
+  || { fail "cast check violation" "the violation does not carry its file and line: $CAST_BAD"; S=1; }
+[ "$S" = 0 ] && ok "cast check violation"
+
+# AC4 the same rule at severity warn is listed and leaves the exit code 0
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "warn", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_WARN="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reading severity as decoration, which fails the build on a warning
+[ "$RC" = 0 ] || { fail "cast severity" "a warn rule exited $RC, not 0: $CAST_WARN"; S=1; }
+# break: silencing what does not fail, which makes a warning unfindable
+printf '%s\n' "$CAST_WARN" | grep -q '^no-back-edge (warn) logic -> ui 1$' \
+  || { fail "cast severity" "a warn violation was not listed: $CAST_WARN"; S=1; }
+printf '%s\n' "$CAST_WARN" | grep -q '^    src/c.ts:1 -> src/a.ts (value)$' \
+  || { fail "cast severity" "a warn violation was listed without its site: $CAST_WARN"; S=1; }
+printf '%s\n' "$CAST_WARN" | grep -q '(0 errors)' \
+  || { fail "cast severity" "a warn violation was counted as an error: $CAST_WARN"; S=1; }
+[ "$S" = 0 ] && ok "cast severity"
+
+# AC5 a rule carrying kinds: ["value"] is not violated by an import type edge
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "rel-off-t", "severity": "error", "from": "src/rel.ts", "to": "src/t.ts",
+                   "kinds": ["value"] } ] }
+JSON
+CAST_KIND="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# src/rel.ts imports src/t.ts with `import type` and nothing else
+# break: evaluating a rule over every edge whatever its kind
+[ "$RC" = 0 ] || { fail "cast kinds" "a value rule was violated by a type edge: $CAST_KIND"; S=1; }
+printf '%s\n' "$CAST_KIND" | grep -q '^0 violations' \
+  || { fail "cast kinds" "a value rule caught a type edge: $CAST_KIND"; S=1; }
+# and the same rule over the kind that is there does catch it
+# break: dropping every edge whose kind is not value, which would pass either way
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "rel-off-t", "severity": "error", "from": "src/rel.ts", "to": "src/t.ts",
+                   "kinds": ["type"] } ] }
+JSON
+CAST_KIND2="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast kinds" "the type edge was not caught by a type rule: $CAST_KIND2"; S=1; }
+printf '%s\n' "$CAST_KIND2" | grep -q '^    src/rel.ts:1 -> src/t.ts (type)$' \
+  || { fail "cast kinds" "the type edge was not named: $CAST_KIND2"; S=1; }
+[ "$S" = 0 ] && ok "cast kinds"
+
+# AC6 a violation inside one layer is still found: the check reads the module
+# graph, never the aggregate the render draws
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "b-off-c", "severity": "error", "from": "src/b.ts", "to": "src/c.ts",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_IN="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# src/b.ts and src/c.ts are both in `logic`, so this edge has no arrow at layer
+# altitude at all - the render drops it as a self edge
+# break: evaluating the rules over the layer edges the render aggregates, which
+# never carries an edge whose endpoints collapse to one node
+[ "$RC" = 1 ] || { fail "cast check altitude" "an edge inside one layer was not checked: $CAST_IN"; S=1; }
+printf '%s\n' "$CAST_IN" | grep -q '^    src/b.ts:1 -> src/c.ts (value)$' \
+  || { fail "cast check altitude" "the intra-layer violation was not named with its site: $CAST_IN"; S=1; }
+printf '%s\n' "$CAST_IN" | grep -q '^  logic -> logic 1$' \
+  || { fail "cast check altitude" "the intra-layer violation lost its layer edge: $CAST_IN"; S=1; }
+[ "$S" = 0 ] && ok "cast check altitude"
+
+# AC7 bin/cast-check runs the check without arguments, on the wrapper contract
+S=0
+CAST_CHECK_BIN="$PWD/plugins/cast/bin/cast-check"
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_W="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
+# break: requiring a subcommand or a --root, which no check command passes
+[ "$RC" = 0 ] || { fail "cast check wrapper" "the wrapper exited $RC on a clean project: $CAST_W"; S=1; }
+[ "$(printf '%s\n' "$CAST_W" | wc -l)" = 1 ] \
+  || { fail "cast check wrapper" "a green wrapper run answered in more than one line: $CAST_W"; S=1; }
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_W1="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
+# break: swallowing the check's exit code, which reports every red run as green
+[ "$RC" = 1 ] || { fail "cast check wrapper" "the wrapper exited $RC on a violation: $CAST_W1"; S=1; }
+printf '%s\n' "$CAST_W1" | grep -q '^    src/c.ts:1 -> src/a.ts (value)$' \
+  || { fail "cast check wrapper" "the wrapper dropped the detail of the failure: $CAST_W1"; S=1; }
+# exit 2 is the third answer: the check could not run
+# break: reporting a broken rules file as a violation, or as a pass
+printf 'not json\n' > "$CAST_RULES"
+CAST_W2="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast check wrapper" "an unreadable rules file exited $RC, not 2: $CAST_W2"; S=1; }
+[ "$S" = 0 ] && ok "cast check wrapper"
+
+# AC10 cast rules preview <rule> reports how many module edges that rule would
+# flag today, counted per edge and not per module
+S=0
+# The rule under preview is written nowhere: rules.json holds an unrelated one,
+# so a preview that only looks up a written rule finds nothing to report.
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+TRY='{ "name": "try-me", "severity": "error", "from": "ui", "to": "logic",
+       "kinds": ["value", "type", "dynamic"] }'
+CAST_PRE="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
+# src/a.ts is the only module in `ui` and carries three edges into `logic`
+# break: counting the modules that violate the rule, or the distinct layer
+# edges, either of which answers 1 where three imports have to move
+printf '%s\n' "$CAST_PRE" | grep -q '^3 edges flagged in 1 module of ' \
+  || { fail "cast preview" "the edges a rule would flag were not counted per edge: $CAST_PRE"; S=1; }
+# break: previewing only a rule already in rules.json, which cannot try one
+printf '%s\n' "$CAST_PRE" | grep -q '^try-me (error) ui -> logic 3$' \
+  || { fail "cast preview" "a rule that is written nowhere was not previewed: $CAST_PRE"; S=1; }
+# break: dropping the sites, which leaves a count nobody can act on
+printf '%s\n' "$CAST_PRE" | grep -q '^    src/a.ts:6 -> src/c.ts (dynamic)$' \
+  || { fail "cast preview" "the flagged edges were not named with their sites: $CAST_PRE"; S=1; }
+# break: routing the preview through the check's exit code, which fails a build
+# on a rule the project has not agreed to
+[ "$RC" = 0 ] || { fail "cast preview" "a preview of a violated error rule exited $RC, not 0: $CAST_PRE"; S=1; }
+# today, not in the abstract: the exceptions the project has already written
+# down are the ones a new rule lands beside
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [],
+  "allowed": [ { "name": "a-may-type-t", "severity": "error", "from": "src/a.ts", "to": "src/t.ts",
+                 "kinds": ["type"] } ] }
+JSON
+CAST_PRE2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"
+# break: previewing the rule alone, which counts an edge an allowed rule drops
+printf '%s\n' "$CAST_PRE2" | grep -q '^2 edges flagged in 1 module of ' \
+  || { fail "cast preview" "an edge the allowed list claims was still flagged: $CAST_PRE2"; S=1; }
+# break: dropping the unknown-key report on the preview path, which reads as a
+# rule the preview evaluated whole
+CAST_PRE3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview \
+  '{ "name": "guess", "from": "ui", "to": "logic", "unless": "friday" }' 2>&1)"
+printf '%s\n' "$CAST_PRE3" | grep -q 'not evaluated: guess: unless' \
+  || { fail "cast preview" "a previewed attribute the evaluator cannot decide was passed silently: $CAST_PRE3"; S=1; }
+# break: reading a malformed rule as a rule that flags nothing
+CAST_PRE4="$(cd "$CASTFIX" && "$CAST_BIN" rules preview 'not json' 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast preview" "an unreadable rule exited $RC, not 2: $CAST_PRE4"; S=1; }
+[ "$S" = 0 ] && ok "cast preview"
+
+# a preview still previews where the project's own rules.json cannot be read
+S=0
+printf '{ "forbidden": [ ' > "$CAST_RULES"
+CAST_PR="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
+# break: reading the exceptions with the same die() the check reads them with,
+# which kills a preview of a rule the broken file has nothing to do with
+[ "$RC" = 0 ] \
+  || { fail "cast preview robust" "a preview beside an unreadable rules.json exited $RC, not 0: $CAST_PR"; S=1; }
+printf '%s\n' "$CAST_PR" | grep -q '^3 edges flagged in 1 module of ' \
+  || { fail "cast preview robust" "the rule was not previewed: $CAST_PR"; S=1; }
+# break: falling back to an empty allowed list in silence, which prints a number
+# that is not what cast check would add today
+printf '%s\n' "$CAST_PR" | grep -q 'the allowed list was not available' \
+  || { fail "cast preview robust" "the missing allowed list was not reported: $CAST_PR"; S=1; }
+printf '%s\n' "$CAST_PR" | grep -q 'rules.json is not valid JSON' \
+  || { fail "cast preview robust" "the unreadable rules file was not named: $CAST_PR"; S=1; }
+# the same file still stops cast check: exit 2 is what a file cast cannot run on
+# break: making every rules read soft, which turns a broken file into a pass
+CAST_PRC="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast preview robust" "cast check on an unreadable rules.json exited $RC, not 2: $CAST_PRC"; S=1; }
+[ "$S" = 0 ] && ok "cast preview robust"
+
+
+# AC8 a violation listed in .cast/baseline.json leaves the check green; one that
+# is not listed turns it red
+S=0
+CAST_BASE="$CASTFIX/.cast/baseline.json"
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "no-back-edge", "file": "src/c.ts", "to": "src/a.ts", "kind": "value" } ] }
+JSON
+CAST_B="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: checking without reading the baseline, which fails a build on inherited debt
+[ "$RC" = 0 ] || { fail "cast baseline" "a baselined violation exited $RC, not 0: $CAST_B"; S=1; }
+# break: holding a violation silently, which hides the size of the debt
+printf '%s\n' "$CAST_B" | grep -q '1 baselined' \
+  || { fail "cast baseline" "the held violation was not counted in the summary: $CAST_B"; S=1; }
+printf '%s\n' "$CAST_B" | grep -q '^0 violations (0 errors)' \
+  || { fail "cast baseline" "a baselined violation was still counted as live: $CAST_B"; S=1; }
+# two violations, one of them listed: the unlisted one is still red and still named
+# break: reading the baseline as a switch per rule, or as "any entry means green"
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-logic", "severity": "error", "from": "ui", "to": "logic",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "ui-off-logic", "file": "src/a.ts", "to": "src/b.ts", "kind": "value" } ] }
+JSON
+CAST_B2="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast baseline" "an unlisted violation exited $RC, not 1: $CAST_B2"; S=1; }
+printf '%s\n' "$CAST_B2" | grep -q '^    src/a.ts:6 -> src/c.ts (dynamic)$' \
+  || { fail "cast baseline" "the unlisted violation was not named: $CAST_B2"; S=1; }
+printf '%s\n' "$CAST_B2" | grep -q 'src/a.ts:1 -> src/b.ts' \
+  && { fail "cast baseline" "the baselined violation was listed as live: $CAST_B2"; S=1; }
+[ "$S" = 0 ] && ok "cast baseline"
+
+# AC9 cast baseline --update refuses a baseline holding more violations than the
+# one it replaces
+S=0
+# the rules above are violated twice, the baseline on disk holds one
+CAST_R1="$(cd "$CASTFIX" && "$CAST_BIN" baseline --update 2>&1)"; RC=$?
+# break: writing the current violations unconditionally, which lets debt grow
+[ "$RC" = 1 ] || { fail "cast ratchet" "growing the baseline exited $RC, not 1: $CAST_R1"; S=1; }
+printf '%s\n' "$CAST_R1" | grep -q 'refused' \
+  || { fail "cast ratchet" "the refusal did not say it refused: $CAST_R1"; S=1; }
+# break: refusing but writing anyway, which is the same growth one run later
+grep -q 'src/c.ts' "$CAST_BASE" \
+  && { fail "cast ratchet" "the refused baseline was written to disk: $(cat "$CAST_BASE")"; S=1; }
+# a baseline that shrinks is written, and the check is green on it
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_R2="$(cd "$CASTFIX" && "$CAST_BIN" baseline --update 2>&1)"; RC=$?
+# break: refusing every update, which makes the baseline unwritable
+[ "$RC" = 0 ] || { fail "cast ratchet" "an equal-sized baseline exited $RC, not 0: $CAST_R2"; S=1; }
+grep -q 'src/c.ts' "$CAST_BASE" \
+  || { fail "cast ratchet" "the accepted baseline was not written: $(cat "$CAST_BASE")"; S=1; }
+CAST_R3="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast ratchet" "the written baseline did not hold its violation: $CAST_R3"; S=1; }
+rm -f "$CAST_BASE"
+[ "$S" = 0 ] && ok "cast ratchet"
+
+
+# --- cast: a plan, simulated -------------------------------------------------
+# The same scanned fixture, read through .cast/plans/<name>.json. A plan is
+# applied to a copy of the graph, so every case here rescans nothing and every
+# case leaves the fixture exactly as it found it.
+mkdir -p "$CASTFIX/.cast/plans"
+cat > "$CASTFIX/.cast/plans/cut.json" <<'JSON'
+{ "operations": [
+  { "op": "move", "module": "src/rel.ts", "to": "pkg/rel.ts" },
+  { "op": "merge", "modules": ["src/b.ts", "src/c.ts"], "into": "src/bc.ts" },
+  { "op": "invert", "from": "src/a.ts", "to": "src/bc.ts" },
+  { "op": "invert", "from": "src/a.ts", "to": "src/t.ts" },
+  { "op": "split", "module": "src/multi.ts",
+    "into": [ { "id": "src/multi-core.ts", "imports": ["src/t.ts"] },
+              { "id": "src/multi-shell.ts" } ] }
+] }
+JSON
+
+# AC1 the plan file holds an ordered list of move, split, merge and invert, and
+# the simulation applies them to a copy of the graph
+S=0
+CAST_PLAN="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"; RC=$?
+# break: dying on an operation kind the plan may hold, or on the plan file itself
+[ "$RC" = 0 ] || { fail "cast plan" "simulating the plan exited $RC: $CAST_PLAN"; S=1; }
+# every operation is named, in the order the file writes them
+# break: applying the operations but never saying which ones were applied
+for o in 'move src/rel.ts -> pkg/rel.ts' \
+         'merge src/b.ts, src/c.ts -> src/bc.ts' \
+         'invert src/a.ts -> src/bc.ts' \
+         'invert src/a.ts -> src/t.ts' \
+         'split src/multi.ts -> src/multi-core.ts, src/multi-shell.ts'; do
+  printf '%s\n' "$CAST_PLAN" | grep -qF "$o" \
+    || { fail "cast plan" "the plan did not report the operation $o: $CAST_PLAN"; S=1; }
+done
+# the operations are ordered: the invert names a module only the merge before it
+# creates, so an unordered or independently applied plan cannot resolve it
+# break: applying each operation to the graph as scanned instead of to the graph
+# the operation before it left behind, which makes src/bc.ts an unknown module
+printf '%s\n' "$CAST_PLAN" | grep -q 'no module src/bc.ts' \
+  && { fail "cast plan" "the operations were not applied in order: $CAST_PLAN"; S=1; }
+# the graph really changed: the merge dropped the edge between the merged pair
+# and the invert turned two edges around
+# break: reporting the plan and comparing the graph with itself
+printf '%s\n' "$CAST_PLAN" | grep -q '^edges 8 -> 7' \
+  || { fail "cast plan" "the operations did not reach the copied graph: $CAST_PLAN"; S=1; }
+[ "$S" = 0 ] && ok "cast plan"
+
+# every edge the simulation produces names a site in the module that holds it
+S=0
+# a simulation writes nothing, so the after graph is read in process: stdout
+# carries only the edges a rule flags, and this is about all of them
+CAST_SITES="$(CASTFIX="$CASTFIX" CAST_JS="$PWD/plugins/cast/scripts/cast.js" node -e '
+  const cast = require(process.env.CAST_JS)
+  const root = process.env.CASTFIX
+  const graph = JSON.parse(require("fs").readFileSync(root + "/.cast/graph.json", "utf8"))
+  const after = cast.simulateGraph(graph, cast.readPlan(root, "cut"))
+  const bad = []
+  for (const m of after.modules)
+    for (const e of m.edges)
+      if (e.file !== m.id) bad.push(m.id + " holds an edge sited in " + e.file)
+  const t = after.modules.find((x) => x.id === "src/t.ts")
+  const inv = ((t || {}).edges || []).find((e) => e.to === "src/a.ts")
+  if (!inv) bad.push("the inverted edge did not land on src/t.ts")
+  else if (inv.line !== 0)
+    bad.push("the inverted edge names line " + inv.line + ", a line of the file it came from")
+  console.log(bad.join("; "))
+' 2>&1)"
+# break: renaming the module a move or a merge produces without retargeting the
+# sites of its edges, which names a file the plan has just retired
+[ -z "$CAST_SITES" ] || { fail "cast plan sites" "$CAST_SITES"; S=1; }
+[ "$S" = 0 ] && ok "cast plan sites"
+
+# AC2 every source file is byte-identical before and after the simulation
+S=0
+sums() { (cd "$CASTFIX" && find . -type f | sort | xargs cksum); }
+CAST_BEFORE="$(sums)"
+CAST_RO="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"; RC=$?
+CAST_AFTER="$(sums)"
+# a run that died changed nothing either, and would pass this suite for the wrong
+# reason - the simulation has to have happened
+[ "$RC" = 0 ] || { fail "cast plan readonly" "the simulation exited $RC: $CAST_RO"; S=1; }
+# break: applying the operations to the loaded graph and writing it back, or
+# executing the moves against the source tree - a simulation that costs a diff
+[ "$CAST_BEFORE" = "$CAST_AFTER" ] \
+  || { fail "cast plan readonly" "the simulation changed the project: $(diff <(printf '%s\n' "$CAST_BEFORE") <(printf '%s\n' "$CAST_AFTER"))"; S=1; }
+[ "$S" = 0 ] && ok "cast plan readonly"
+
+# AC3 cycles, fan-in, fan-out and instability, before and after
+S=0
+# the fixture's a -> b -> c -> a cycle survives the merge and is broken by the
+# invert, and both sides of that are reported
+# break: reporting the after only, which leaves the reader to remember today
+printf '%s\n' "$CAST_PLAN" | grep -q '^cycles 1 -> 0' \
+  || { fail "cast plan metrics" "the cycles were not counted before and after: $CAST_PLAN"; S=1; }
+printf '%s\n' "$CAST_PLAN" | grep -q 'cycle: src/a.ts -> src/b.ts -> src/c.ts' \
+  || { fail "cast plan metrics" "the cycle the plan breaks was not named: $CAST_PLAN"; S=1; }
+# fan-in, fan-out and instability per layer, both sides. The invert moves ui from
+# three outgoing edges to none, and the move puts a module in another layer.
+# break: computing the metrics on the scanned graph for both columns
+for m in 'ui fan-in 1 -> 4, fan-out 3 -> 0, instability 0.75 -> 0.00' \
+         'logic fan-in 3 -> 1, fan-out 1 -> 4, instability 0.25 -> 0.80' \
+         'unassigned fan-in 0 -> 0, fan-out 0 -> 1, instability 0.00 -> 1.00'; do
+  printf '%s\n' "$CAST_PLAN" | grep -qF "$m" \
+    || { fail "cast plan metrics" "the metrics line $m is not in the report: $CAST_PLAN"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast plan metrics"
+
+# AC4 the rule violations before and after, so a plan that removes one shows it
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [
+  { "name": "ui-owns-nothing", "severity": "error", "from": "ui", "to": "logic",
+    "kinds": ["value", "type", "dynamic"] },
+  { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+    "kinds": ["value"] }
+] }
+JSON
+CAST_PV="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"
+# break: evaluating the rules against one graph only
+printf '%s\n' "$CAST_PV" | grep -q '^violations 4 -> 2' \
+  || { fail "cast plan rules" "the violations were not counted before and after: $CAST_PV"; S=1; }
+V_BEFORE="$(printf '%s\n' "$CAST_PV" | sed -n '/^violations /,$p' | sed -n '/^  before$/,/^  after$/p')"
+V_AFTER="$(printf '%s\n' "$CAST_PV" | sed -n '/^violations /,$p' | sed -n '/^  after$/,$p')"
+# the sites are under each rule, the same listing cast check gives
+printf '%s\n' "$V_BEFORE" | grep -q 'src/a.ts:1 -> src/b.ts' \
+  || { fail "cast plan rules" "the violations the project has today were not listed: $CAST_PV"; S=1; }
+# a plan that removes a violation is visible as one that does
+# break: listing the same violations under both headings
+printf '%s\n' "$V_AFTER" | grep -q 'ui-owns-nothing' \
+  && { fail "cast plan rules" "a violation the plan removes was still listed after it: $CAST_PV"; S=1; }
+printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
+  || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
+[ "$S" = 0 ] && ok "cast plan rules"
+
+# --- cast skills ------------------------------------------------------------
+# The three skills a session reaches cast through. Each one runs its wrapper in
+# the prompt, so the model never has to know the flags - a skill that only
+# describes the command is the failure these exist to prevent.
+S=0
+for s in map rules plan; do
+  F="plugins/cast/skills/$s/SKILL.md"
+  if [ ! -f "$F" ]; then fail "cast skills" "$F is missing"; S=1; continue; fi
+  # break: dropping allowed-tools, which hands the skill the whole tool surface
+  # instead of the two tools it reads its answer with.
+  FM="$(sed -n '2,/^---$/p' "$F")"
+  for k in name description allowed-tools; do
+    printf '%s\n' "$FM" | grep -q "^$k:" \
+      || { fail "cast skills" "$F carries no $k in its frontmatter"; S=1; }
+  done
+  # break: copying the skill body's name from another skill
+  printf '%s\n' "$FM" | grep -qx "name: $s" \
+    || { fail "cast skills" "$F does not name itself $s"; S=1; }
+  # break: copying the skill into .claude/skills, where an edit to the source in
+  # plugins/cast is not live in the session.
+  [ -L ".claude/skills/$s" ] \
+    || { fail "cast skills" ".claude/skills/$s is not a symbolic link"; S=1; }
+  [ "$(readlink -f ".claude/skills/$s")" = "$PWD/plugins/cast/skills/$s" ] \
+    || { fail "cast skills" ".claude/skills/$s does not point at plugins/cast/skills/$s"; S=1; }
+done
+# break: writing the wrapper as prose, or in a fenced block, instead of a `!`
+# line the prompt expansion executes before the model reads it.
+skill_runs() {
+  F="plugins/cast/skills/$1/SKILL.md"
+  [ -f "$F" ] || return 0
+  grep '^!' "$F" | grep -q -- "$2" \
+    || { fail "cast skills" "$F does not run '$2' in the prompt"; S=1; }
+}
+skill_runs map 'report'
+skill_runs rules 'rules preview'
+skill_runs plan 'plan simulate'
+[ "$S" = 0 ] && ok "cast skills"
 
 exit "$FAILED"
