@@ -8,6 +8,9 @@ cast report [--root <dir>]   reads it and says what is wrong
 cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
 cast rules preview <rule json> [--root <dir>]
                              one rule, tried before it is written down
+cast plan simulate <name> [--root <dir>]
+                             applies <root>/.cast/plans/<name>.json to a copy of
+                             the graph and says what it would change
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
 cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -112,6 +115,41 @@ many held entries the code no longer violates. `cast baseline --update` rewrites
 violations there are now - dropping the ones already fixed - and **refuses**, with exit 1, to write
 a baseline holding more violations than the one it replaces. That refusal is the ratchet: the file
 can only shrink, so a rule cannot quietly stop meaning anything.
+
+## Plans
+
+`<root>/.cast/plans/<name>.json` is a refactoring written down before anyone edits a file: an
+ordered list of operations, applied by `cast plan simulate <name>` to a copy of the graph.
+
+```json
+{
+  "operations": [
+    { "op": "move", "module": "src/rel.ts", "to": "pkg/rel.ts" },
+    { "op": "merge", "modules": ["src/b.ts", "src/c.ts"], "into": "src/bc.ts" },
+    { "op": "invert", "from": "src/a.ts", "to": "src/bc.ts" },
+    { "op": "split", "module": "src/multi.ts", "into": [
+      { "id": "src/multi-core.ts", "imports": ["src/t.ts"], "importedBy": ["src/a.ts"] },
+      { "id": "src/multi-shell.ts" } ] }
+  ]
+}
+```
+
+`move` renames a module and every edge that pointed at it - a module moved into another directory
+lands in whatever layer the globs give its new path. `merge` folds several modules into one; an
+edge between two of them stops being an edge. `invert` turns the edges between two modules around,
+keeping their kind and their site. `split` breaks one module into parts: an outgoing edge lands on
+the part whose `imports` names its target, an incoming one on the part whose `importedBy` names
+its importer, and the first part takes everything no part claims.
+
+The operations are ordered - each one is applied to the graph the one before it left behind, so an
+operation may name a module an earlier one created. An operation kind, or an attribute, that cast
+cannot apply is an error, never a silent skip.
+
+The simulation writes nothing: no source file, no `.cast/graph.json`. It reports, before and
+after, the modules and edges, the cycles, the fan-in, fan-out and instability of every layer
+(`I = fan-out / (fan-in + fan-out)`, counting only the edges that cross a layer boundary), and the
+rule violations of `.cast/rules.json` - so a plan that removes a violation is visible as one that
+does. The baseline is not applied: a plan is judged against every violation there is.
 
 ## Rendering
 

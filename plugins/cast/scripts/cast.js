@@ -9,6 +9,10 @@
 //   cast rules preview <rule json> [--root <dir>]
 //                                one rule, tried before it is written down: the
 //                                module edges it would flag today, per edge
+//   cast plan simulate <name> [--root <dir>]
+//                                a refactoring written down before it is done:
+//                                <root>/.cast/plans/<name>.json applied to a copy
+//                                of the graph, before and after, writing nothing
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
 //   cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -693,11 +697,256 @@ function ratchet(root, found) {
   }
 }
 
+// --- plans ------------------------------------------------------------------
+
+// A plan is a refactoring written down before anyone edits a file: an ordered
+// list of operations, read at simulate time from `<root>/.cast/plans/<name>.json`
+// like the rules and the layers are, and applied to a copy of the graph. The
+// simulation never touches a source file and never rewrites the graph - the whole
+// point is to see the answer before the move costs anything.
+const PLAN_KEYS = {
+  move: ['op', 'module', 'to'],
+  split: ['op', 'module', 'into'],
+  merge: ['op', 'modules', 'into'],
+  invert: ['op', 'from', 'to'],
+}
+
+function planString(o, key, at) {
+  if (typeof o[key] !== 'string' || !o[key]) die(`${at} carries no ${key}`)
+  return o[key]
+}
+
+function planList(o, key, at) {
+  if (!Array.isArray(o[key]) || !o[key].length || o[key].some((s) => typeof s !== 'string' || !s))
+    die(`${at}: ${key} is not a list of module ids`)
+  return o[key]
+}
+
+// One operation, validated. An attribute this simulator cannot apply is a
+// die(), never a silent pass: a plan whose answer ignored half of what it says
+// is worse than no plan.
+function readOperation(o, at) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) die(`${at} is not an operation object`)
+  const keys = PLAN_KEYS[o.op]
+  if (!keys) die(`${at} has op ${JSON.stringify(o.op)}, not ${Object.keys(PLAN_KEYS).join(', ')}`)
+  for (const k of Object.keys(o)) if (!keys.includes(k)) die(`${at} (${o.op}) carries an unknown key ${k}`)
+  if (o.op === 'move') return { op: 'move', module: planString(o, 'module', at), to: planString(o, 'to', at) }
+  if (o.op === 'merge')
+    return { op: 'merge', modules: planList(o, 'modules', at), into: planString(o, 'into', at) }
+  if (o.op === 'invert')
+    return { op: 'invert', from: planString(o, 'from', at), to: planString(o, 'to', at) }
+  if (!Array.isArray(o.into) || o.into.length < 2) die(`${at}: split needs two or more parts in into`)
+  const into = o.into.map((p, i) => {
+    const pat = `${at}: into[${i}]`
+    if (!p || typeof p !== 'object' || Array.isArray(p)) die(`${pat} is not a part object`)
+    for (const k of Object.keys(p))
+      if (!['id', 'imports', 'importedBy'].includes(k)) die(`${pat} carries an unknown key ${k}`)
+    return {
+      id: planString(p, 'id', pat),
+      imports: p.imports === undefined ? [] : planList(p, 'imports', pat),
+      importedBy: p.importedBy === undefined ? [] : planList(p, 'importedBy', pat),
+    }
+  })
+  return { op: 'split', module: planString(o, 'module', at), into }
+}
+
+function readPlan(root, name) {
+  const file = path.join(root, '.cast', 'plans', `${name}.json`)
+  let raw
+  try {
+    raw = fs.readFileSync(file, 'utf8')
+  } catch {
+    die(`no plan at ${path.relative(root, file)}`)
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    die(`${file} is not valid JSON: ${e.message}`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.operations))
+    die(`${file} is not an object holding an operations array`)
+  // Ordered: operation n is applied to the graph operation n-1 left behind, so a
+  // module a move renamed is named by its new id from there on.
+  return {
+    name,
+    file,
+    operations: parsed.operations.map((o, i) => readOperation(o, `${file}: operations[${i}]`)),
+  }
+}
+
+function describe(o) {
+  if (o.op === 'move') return `move ${o.module} -> ${o.to}`
+  if (o.op === 'merge') return `merge ${o.modules.join(', ')} -> ${o.into}`
+  if (o.op === 'invert') return `invert ${o.from} -> ${o.to}`
+  return `split ${o.module} -> ${o.into.map((p) => p.id).join(', ')}`
+}
+
+function findModule(graph, id, at) {
+  const m = graph.modules.find((x) => x.id === id)
+  if (!m) die(`${at}: no module ${id} in the graph`)
+  return m
+}
+
+function retarget(graph, was, now) {
+  for (const m of graph.modules)
+    for (const e of m.edges) if (e.resolution === 'module' && e.to === was) e.to = now
+}
+
+// Every operation rewrites the copy in place. An edge keeps its site - the file
+// and line it was read from - because a simulated edge that names no site is one
+// nobody could go and look at once the plan is executed.
+function apply(graph, o, at) {
+  if (o.op === 'move') {
+    const m = findModule(graph, o.module, at)
+    if (graph.modules.some((x) => x.id === o.to)) die(`${at}: ${o.to} is already a module`)
+    m.id = o.to
+    retarget(graph, o.module, o.to)
+    return
+  }
+  if (o.op === 'merge') {
+    const parts = o.modules.map((id) => findModule(graph, id, at))
+    const gone = new Set(o.modules)
+    if (graph.modules.some((x) => x.id === o.into && !gone.has(x.id)))
+      die(`${at}: ${o.into} is already a module`)
+    const merged = {
+      id: o.into,
+      adapter: parts[0].adapter,
+      // An edge between two merged modules stops being an edge at all: it is a
+      // call inside the one module now, which is what merging them means.
+      edges: parts.flatMap((p) => p.edges).filter((e) => !(e.resolution === 'module' && gone.has(e.to))),
+    }
+    const at0 = graph.modules.indexOf(parts[0])
+    graph.modules = graph.modules.filter((x) => !gone.has(x.id))
+    graph.modules.splice(Math.min(at0, graph.modules.length), 0, merged)
+    for (const id of o.modules) retarget(graph, id, o.into)
+    return
+  }
+  if (o.op === 'invert') {
+    const from = findModule(graph, o.from, at)
+    findModule(graph, o.to, at)
+    const inverted = from.edges.filter((e) => e.resolution === 'module' && e.to === o.to)
+    if (!inverted.length) die(`${at}: no edge ${o.from} -> ${o.to} to invert`)
+    from.edges = from.edges.filter((e) => !inverted.includes(e))
+    const target = findModule(graph, o.to, at)
+    // The direction is what an inversion turns around; the kind and the site are
+    // the ones the import has today, so the answer stays traceable to real code.
+    for (const e of inverted)
+      target.edges.push({ ...e, target: o.from, to: o.from, file: o.to, resolution: 'module' })
+    return
+  }
+  const m = findModule(graph, o.module, at)
+  for (const p of o.into)
+    if (p.id !== o.module && graph.modules.some((x) => x.id === p.id)) die(`${at}: ${p.id} is already a module`)
+  const parts = o.into.map((p) => ({ id: p.id, adapter: m.adapter, edges: [] }))
+  // An outgoing edge lands on the part that declares it, an incoming one on the
+  // part that declares its importer. The first part is the remainder: nothing a
+  // plan forgot to place is dropped, which would flatter the plan's own answer.
+  for (const e of m.edges) {
+    const i = o.into.findIndex((p) => p.imports.includes(e.resolution === 'module' ? e.to : e.target))
+    parts[i === -1 ? 0 : i].edges.push({ ...e, file: parts[i === -1 ? 0 : i].id })
+  }
+  const at0 = graph.modules.indexOf(m)
+  graph.modules.splice(at0, 1, ...parts)
+  for (const other of graph.modules) {
+    if (parts.includes(other)) continue
+    for (const e of other.edges) {
+      if (e.resolution !== 'module' || e.to !== o.module) continue
+      const i = o.into.findIndex((p) => p.importedBy.includes(other.id))
+      e.to = parts[i === -1 ? 0 : i].id
+    }
+  }
+}
+
+function simulateGraph(graph, plan) {
+  // A copy, never the graph that was read: `cast plan simulate` answers a
+  // question, and a question that edits its own subject is not one.
+  const after = JSON.parse(JSON.stringify(graph))
+  plan.operations.forEach((o, i) => apply(after, o, `${plan.file}: operations[${i}]`))
+  return after
+}
+
+// Fan-in, fan-out and instability are read at layer altitude, the altitude every
+// cast view opens at. An edge inside one layer is neither in nor out of it: the
+// numbers are about what a layer depends on and what depends on it.
+// I = fan-out / (fan-in + fan-out), Martin's instability - 1 depends on
+// everything and nothing depends on it, 0 is depended on and depends on nothing.
+function layerMetrics(graph, rules) {
+  const { of, names } = assign(graph, rules)
+  const all = layerList(graph, of, names)
+  const metrics = new Map()
+  for (const l of all) metrics.set(l, { in: 0, out: 0 })
+  for (const m of graph.modules) {
+    const from = of.get(m.id)
+    for (const e of m.edges) {
+      if (e.resolution !== 'module') continue
+      const to = of.get(e.to)
+      if (to === from || !metrics.has(from) || !metrics.has(to)) continue
+      metrics.get(from).out++
+      metrics.get(to).in++
+    }
+  }
+  return metrics
+}
+
+const instability = (m) => (m.in + m.out === 0 ? 0 : m.out / (m.in + m.out))
+
+function indent(lines, by) {
+  return lines.length ? lines.map((l) => by + l) : [by + 'none']
+}
+
+// Before and after, side by side, for every number the plan could move: a
+// simulation that printed only the after leaves the reader to remember what the
+// project looks like today, and a plan is judged by the difference.
+function simulate(graph, after, rules, plan, ruleFile) {
+  const lines = [`plan ${plan.name} ${plural(plan.operations.length, 'operation')}`]
+  for (const o of plan.operations) lines.push(`  ${describe(o)}`)
+  lines.push(`modules ${graph.modules.length} -> ${after.modules.length}`)
+  lines.push(`edges ${moduleEdges(graph)} -> ${moduleEdges(after)}`)
+
+  const was = cycles(graph)
+  const now = cycles(after)
+  lines.push(`cycles ${was.length} -> ${now.length}`)
+  lines.push('  before')
+  lines.push(...indent(was.map((c) => `cycle: ${c.join(' -> ')}`), '    '))
+  lines.push('  after')
+  lines.push(...indent(now.map((c) => `cycle: ${c.join(' -> ')}`), '    '))
+
+  const mWas = layerMetrics(graph, rules)
+  const mNow = layerMetrics(after, rules)
+  const zero = { in: 0, out: 0 }
+  lines.push('metrics')
+  for (const l of [...new Set([...mWas.keys(), ...mNow.keys()])].sort()) {
+    const a = mWas.get(l) || zero
+    const b = mNow.get(l) || zero
+    lines.push(
+      `  ${l} fan-in ${a.in} -> ${b.in}, fan-out ${a.out} -> ${b.out}, ` +
+        `instability ${instability(a).toFixed(2)} -> ${instability(b).toFixed(2)}`
+    )
+  }
+
+  if (!ruleFile) {
+    lines.push(`violations: no rules: write ${path.join('.cast', 'rules.json')} to check any`)
+    return lines.join('\n')
+  }
+  // The rules are evaluated against both graphs, so a plan that removes a
+  // violation is visible as one that does.
+  const vWas = violations(graph, assign(graph, rules).of, ruleFile)
+  const vNow = violations(after, assign(after, rules).of, ruleFile)
+  lines.push(`violations ${vWas.length} -> ${vNow.length}`)
+  lines.push('  before')
+  lines.push(...indent(group(vWas, ruleFile.forbidden), '    '))
+  lines.push('  after')
+  lines.push(...indent(group(vNow, ruleFile.forbidden), '    '))
+  return lines.join('\n')
+}
+
 // --- cli --------------------------------------------------------------------
 
 const USAGE =
   'usage: cast <scan|report|check> [--root <dir>]\n' +
   '       cast rules preview <rule json> [--root <dir>]\n' +
+  '       cast plan simulate <name> [--root <dir>]\n' +
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
   '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
@@ -712,12 +961,12 @@ function main(argv) {
   let htmlOut = null
   let asMermaid = false
   let update = false
-  // `rules` is the one command with a subcommand and a positional; both are
-  // taken before the flag loop, which knows only flags.
+  // `rules` and `plan` are the commands with a subcommand and a positional; both
+  // are taken before the flag loop, which knows only flags.
   let sub = null
   let ruleArg = null
   let first = 1
-  if (cmd === 'rules') {
+  if (cmd === 'rules' || cmd === 'plan') {
     sub = argv[1]
     ruleArg = argv[2]
     first = 3
@@ -776,6 +1025,19 @@ function main(argv) {
     process.stdout.write(preview(graph, of, rule, written ? written.allowed : [], notEvaluated) + '\n')
     // A preview reports; it never fails a build. The rule it tried is not one
     // the project has agreed to yet.
+    return 0
+  }
+  if (cmd === 'plan') {
+    if (sub !== 'simulate' || !ruleArg) die(USAGE)
+    const graph = readGraph(out)
+    const rules = layerRules(root)
+    const plan = readPlan(root, ruleArg)
+    const after = simulateGraph(graph, plan)
+    // Both assignments contribute the layer names a rule side may be written
+    // against, so a rule naming a layer only the plan creates still reads as one.
+    const names = [...new Set([...assign(graph, rules).names, ...assign(after, rules).names])]
+    process.stdout.write(simulate(graph, after, rules, plan, readRules(root, names)) + '\n')
+    // A simulation reports. It writes no file, so there is nothing to fail on.
     return 0
   }
   if (cmd === 'baseline') {
@@ -840,4 +1102,5 @@ if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
   readRules, violations, check, preview, readBaseline, ratchet,
+  readPlan, simulateGraph, simulate, layerMetrics,
 }

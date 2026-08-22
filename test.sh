@@ -1220,4 +1220,113 @@ CAST_R3="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
 rm -f "$CAST_BASE"
 [ "$S" = 0 ] && ok "cast ratchet"
 
+
+# --- cast: a plan, simulated -------------------------------------------------
+# The same scanned fixture, read through .cast/plans/<name>.json. A plan is
+# applied to a copy of the graph, so every case here rescans nothing and every
+# case leaves the fixture exactly as it found it.
+mkdir -p "$CASTFIX/.cast/plans"
+cat > "$CASTFIX/.cast/plans/cut.json" <<'JSON'
+{ "operations": [
+  { "op": "move", "module": "src/rel.ts", "to": "pkg/rel.ts" },
+  { "op": "merge", "modules": ["src/b.ts", "src/c.ts"], "into": "src/bc.ts" },
+  { "op": "invert", "from": "src/a.ts", "to": "src/bc.ts" },
+  { "op": "invert", "from": "src/a.ts", "to": "src/t.ts" },
+  { "op": "split", "module": "src/multi.ts",
+    "into": [ { "id": "src/multi-core.ts", "imports": ["src/t.ts"] },
+              { "id": "src/multi-shell.ts" } ] }
+] }
+JSON
+
+# AC1 the plan file holds an ordered list of move, split, merge and invert, and
+# the simulation applies them to a copy of the graph
+S=0
+CAST_PLAN="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"; RC=$?
+# break: dying on an operation kind the plan may hold, or on the plan file itself
+[ "$RC" = 0 ] || { fail "cast plan" "simulating the plan exited $RC: $CAST_PLAN"; S=1; }
+# every operation is named, in the order the file writes them
+# break: applying the operations but never saying which ones were applied
+for o in 'move src/rel.ts -> pkg/rel.ts' \
+         'merge src/b.ts, src/c.ts -> src/bc.ts' \
+         'invert src/a.ts -> src/bc.ts' \
+         'invert src/a.ts -> src/t.ts' \
+         'split src/multi.ts -> src/multi-core.ts, src/multi-shell.ts'; do
+  printf '%s\n' "$CAST_PLAN" | grep -qF "$o" \
+    || { fail "cast plan" "the plan did not report the operation $o: $CAST_PLAN"; S=1; }
+done
+# the operations are ordered: the invert names a module only the merge before it
+# creates, so an unordered or independently applied plan cannot resolve it
+# break: applying each operation to the graph as scanned instead of to the graph
+# the operation before it left behind, which makes src/bc.ts an unknown module
+printf '%s\n' "$CAST_PLAN" | grep -q 'no module src/bc.ts' \
+  && { fail "cast plan" "the operations were not applied in order: $CAST_PLAN"; S=1; }
+# the graph really changed: the merge dropped the edge between the merged pair
+# and the invert turned two edges around
+# break: reporting the plan and comparing the graph with itself
+printf '%s\n' "$CAST_PLAN" | grep -q '^edges 8 -> 7' \
+  || { fail "cast plan" "the operations did not reach the copied graph: $CAST_PLAN"; S=1; }
+[ "$S" = 0 ] && ok "cast plan"
+
+# AC2 every source file is byte-identical before and after the simulation
+S=0
+sums() { (cd "$CASTFIX" && find . -type f | sort | xargs cksum); }
+CAST_BEFORE="$(sums)"
+CAST_RO="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"; RC=$?
+CAST_AFTER="$(sums)"
+# a run that died changed nothing either, and would pass this suite for the wrong
+# reason - the simulation has to have happened
+[ "$RC" = 0 ] || { fail "cast plan readonly" "the simulation exited $RC: $CAST_RO"; S=1; }
+# break: applying the operations to the loaded graph and writing it back, or
+# executing the moves against the source tree - a simulation that costs a diff
+[ "$CAST_BEFORE" = "$CAST_AFTER" ] \
+  || { fail "cast plan readonly" "the simulation changed the project: $(diff <(printf '%s\n' "$CAST_BEFORE") <(printf '%s\n' "$CAST_AFTER"))"; S=1; }
+[ "$S" = 0 ] && ok "cast plan readonly"
+
+# AC3 cycles, fan-in, fan-out and instability, before and after
+S=0
+# the fixture's a -> b -> c -> a cycle survives the merge and is broken by the
+# invert, and both sides of that are reported
+# break: reporting the after only, which leaves the reader to remember today
+printf '%s\n' "$CAST_PLAN" | grep -q '^cycles 1 -> 0' \
+  || { fail "cast plan metrics" "the cycles were not counted before and after: $CAST_PLAN"; S=1; }
+printf '%s\n' "$CAST_PLAN" | grep -q 'cycle: src/a.ts -> src/b.ts -> src/c.ts' \
+  || { fail "cast plan metrics" "the cycle the plan breaks was not named: $CAST_PLAN"; S=1; }
+# fan-in, fan-out and instability per layer, both sides. The invert moves ui from
+# three outgoing edges to none, and the move puts a module in another layer.
+# break: computing the metrics on the scanned graph for both columns
+for m in 'ui fan-in 1 -> 4, fan-out 3 -> 0, instability 0.75 -> 0.00' \
+         'logic fan-in 3 -> 1, fan-out 1 -> 4, instability 0.25 -> 0.80' \
+         'unassigned fan-in 0 -> 0, fan-out 0 -> 1, instability 0.00 -> 1.00'; do
+  printf '%s\n' "$CAST_PLAN" | grep -qF "$m" \
+    || { fail "cast plan metrics" "the metrics line $m is not in the report: $CAST_PLAN"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast plan metrics"
+
+# AC4 the rule violations before and after, so a plan that removes one shows it
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [
+  { "name": "ui-owns-nothing", "severity": "error", "from": "ui", "to": "logic",
+    "kinds": ["value", "type", "dynamic"] },
+  { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+    "kinds": ["value"] }
+] }
+JSON
+CAST_PV="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"
+# break: evaluating the rules against one graph only
+printf '%s\n' "$CAST_PV" | grep -q '^violations 4 -> 2' \
+  || { fail "cast plan rules" "the violations were not counted before and after: $CAST_PV"; S=1; }
+V_BEFORE="$(printf '%s\n' "$CAST_PV" | sed -n '/^violations /,$p' | sed -n '/^  before$/,/^  after$/p')"
+V_AFTER="$(printf '%s\n' "$CAST_PV" | sed -n '/^violations /,$p' | sed -n '/^  after$/,$p')"
+# the sites are under each rule, the same listing cast check gives
+printf '%s\n' "$V_BEFORE" | grep -q 'src/a.ts:1 -> src/b.ts' \
+  || { fail "cast plan rules" "the violations the project has today were not listed: $CAST_PV"; S=1; }
+# a plan that removes a violation is visible as one that does
+# break: listing the same violations under both headings
+printf '%s\n' "$V_AFTER" | grep -q 'ui-owns-nothing' \
+  && { fail "cast plan rules" "a violation the plan removes was still listed after it: $CAST_PV"; S=1; }
+printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
+  || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
+[ "$S" = 0 ] && ok "cast plan rules"
+
 exit "$FAILED"
