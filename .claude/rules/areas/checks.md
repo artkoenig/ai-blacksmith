@@ -17,6 +17,8 @@ paths:
   `cast check` suites rewrite its `.cast/rules.json` per case - rules are read at check time, so
   none of them rescans. The `cast baseline` and `cast ratchet` suites also write and remove its
   `.cast/baseline.json`; the last one deletes it, so a suite added after them starts unbaselined.
+  The `cast skills` suite reads no fixture at all: it asserts the frontmatter, the `!` line and the
+  `.claude/skills/<name>` symlink of each cast skill in the repository itself.
 - The manifest and syntax suite loops `for d in plugins/*/`: validate, `node --check`, `bash -n`
   and the executable-bit checks are derived from the plugin directories, each guarded by
   `[ -f "$f" ] || continue` so a plugin shipping no `bin/`, `scripts/` or `workflows/` is skipped.

@@ -1329,4 +1329,42 @@ printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
   || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
 [ "$S" = 0 ] && ok "cast plan rules"
 
+# --- cast skills ------------------------------------------------------------
+# The three skills a session reaches cast through. Each one runs its wrapper in
+# the prompt, so the model never has to know the flags - a skill that only
+# describes the command is the failure these exist to prevent.
+S=0
+for s in map rules plan; do
+  F="plugins/cast/skills/$s/SKILL.md"
+  if [ ! -f "$F" ]; then fail "cast skills" "$F is missing"; S=1; continue; fi
+  # break: dropping allowed-tools, which hands the skill the whole tool surface
+  # instead of the two tools it reads its answer with.
+  FM="$(sed -n '2,/^---$/p' "$F")"
+  for k in name description allowed-tools; do
+    printf '%s\n' "$FM" | grep -q "^$k:" \
+      || { fail "cast skills" "$F carries no $k in its frontmatter"; S=1; }
+  done
+  # break: copying the skill body's name from another skill
+  printf '%s\n' "$FM" | grep -qx "name: $s" \
+    || { fail "cast skills" "$F does not name itself $s"; S=1; }
+  # break: copying the skill into .claude/skills, where an edit to the source in
+  # plugins/cast is not live in the session.
+  [ -L ".claude/skills/$s" ] \
+    || { fail "cast skills" ".claude/skills/$s is not a symbolic link"; S=1; }
+  [ "$(readlink -f ".claude/skills/$s")" = "$PWD/plugins/cast/skills/$s" ] \
+    || { fail "cast skills" ".claude/skills/$s does not point at plugins/cast/skills/$s"; S=1; }
+done
+# break: writing the wrapper as prose, or in a fenced block, instead of a `!`
+# line the prompt expansion executes before the model reads it.
+skill_runs() {
+  F="plugins/cast/skills/$1/SKILL.md"
+  [ -f "$F" ] || return 0
+  grep '^!' "$F" | grep -q -- "$2" \
+    || { fail "cast skills" "$F does not run '$2' in the prompt"; S=1; }
+}
+skill_runs map 'report'
+skill_runs rules 'rules preview'
+skill_runs plan 'plan simulate'
+[ "$S" = 0 ] && ok "cast skills"
+
 exit "$FAILED"
