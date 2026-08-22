@@ -60,6 +60,9 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node
   holding both is opened. The page fetches nothing: its data a `<script>` with `<` escaped.
 - `.cast` is in `ALWAYS_IGNORED` - adapters are loaded, never scanned; walking skips dot dirs.
+- `README.md`'s `--html` paragraph is the page's prose spec: a change to what a press hits, or to
+  what a node shows, leaves it false until that paragraph is edited in the same commit. No check
+  greps it - the reviewer reads it.
 - The regex limit belongs in `README.md`, not a workaround: `import { type X }` stays `value`.
 - Separators and control characters in `scripts/cast.js` are escapes (`'\0'`), never the raw byte:
   one literal NUL makes git and grep treat the whole file as binary.

@@ -186,8 +186,9 @@ in grey. The render reads both files at render time, exactly as `cast check` doe
 description embedded in the file, and fetches nothing at view time. Where the mermaid output knows
 two altitudes, the page carries a containment tree over the whole project - the layer, then each
 folder level, then the file - and any node with children opens at any depth. An open node keeps its
-outline and stacks its children inside it, so a box is only ever as tall as what it shows; clicking
-it again closes it. Every arrow runs between two closed nodes and is labelled with the number of
+outline and stacks its children inside it, so a box is only ever as tall as what it shows. A node's
+header is its control: pressing the header band across the top of a box opens it and closes it
+again, while the ground of an open box, where the children sit, answers no press. Every arrow runs between two closed nodes and is labelled with the number of
 module imports behind it: opening a node splits its arrows over the children that carry the imports,
 and the arrows leaving a node always sum to the imports leaving its subtree. Clicking an arrow lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
