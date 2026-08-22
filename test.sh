@@ -640,6 +640,8 @@ TS
 cat > "$CASTFIX/src/b.ts" <<'TS'
 const { c } = require('./c')
 module.exports = { c }
+const lib = require(path.join(__dirname, 'lib.js'))
+const load = (n) => import(BASE + n)
 TS
 printf "export { load } from './a'\n" > "$CASTFIX/src/c.ts"
 printf 'export type T = string\n' > "$CASTFIX/src/t.ts"
@@ -788,6 +790,34 @@ printf '%s\n' "$CAST_REPORT" | grep -q 'src/a.ts:5 @app/gone' \
   || { fail "cast unresolved" "cast report did not name every unresolved import"; S=1; }
 [ "$S" = 0 ] && ok "cast unresolved"
 
+# AC1 an import or require whose target is not a literal string is counted and
+# named, so a graph that is missing edges says so instead of reading as complete
+S=0
+# break: passing the line over because no pattern reads a computed specifier,
+# which drops the edge and leaves nothing in the report to say it was dropped
+O="$(graph '
+  const op=(mod("src/b.ts").edges||[]).filter(x=>x.resolution==="opaque")
+  if (op.length!==2) bad("the computed imports of src/b.ts made "+op.length+" opaque edges")
+  if (op.some(x=>x.to!==null)) bad("an opaque import was given a target module")
+  if (!op.some(x=>x.target.indexOf("path.join")!==-1))
+    bad("an opaque edge does not carry the expression: "+JSON.stringify(op))
+  const lit=edge("src/b.ts","./c")
+  if (!lit||lit.resolution!=="module") bad("a literal require was filed as "+(lit&&lit.resolution))
+  if (!edge("pkg/one.toy","two")) bad("an adapter that declares no opaque patterns lost its edges")
+')" || { fail "cast opaque imports" "$O"; S=1; }
+# break: counting them into unresolved, where a site nobody can resolve reads as
+# an import that was looked up and missed
+printf '%s\n' "$CAST_REPORT" | grep -q '^opaque 2$' \
+  || { fail "cast opaque imports" "cast report did not count the opaque imports: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q '^unresolved 2$' \
+  || { fail "cast opaque imports" "an opaque import was counted as unresolved: $CAST_REPORT"; S=1; }
+# break: a count without the sites, which names nothing to go and look at
+printf '%s\n' "$CAST_REPORT" | grep -qF "  src/b.ts:3 path.join(__dirname, 'lib.js') (value)" \
+  || { fail "cast opaque imports" "cast report did not name the computed require: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -qF "  src/b.ts:4 BASE + n (dynamic)" \
+  || { fail "cast opaque imports" "cast report did not name the computed import: $CAST_REPORT"; S=1; }
+[ "$S" = 0 ] && ok "cast opaque imports"
+
 # AC6 a cycle is named by all of its modules
 S=0
 # break: reporting the module the walk entered the cycle through instead of the
@@ -858,6 +888,30 @@ printf '%s\n' "$CAST_LN" | grep -q '^layers ' \
 cp "$CASTFIX/layers.bak" "$CAST_LAYERS"; rm -f "$CASTFIX/layers.bak"
 [ "$S" = 0 ] && ok "cast layers malformed"
 
+# AC2 a layers.json whose values are not layer names stops the run
+S=0
+cp "$CAST_LAYERS" "$CASTFIX/layers.bak"
+printf '{ "src/**": { "name": "logic" } }\n' > "$CAST_LAYERS"
+CAST_LSH="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+# break: String(name) on the value, which invents a layer named [object Object]
+# and reads the whole graph at an altitude nobody declared
+[ "$RC" = 2 ] \
+  || { fail "cast layers shape" "a layers.json of non-names exited $RC, not 2: $CAST_LSH"; S=1; }
+printf '%s\n' "$CAST_LSH" | grep -q 'not a layer name' \
+  || { fail "cast layers shape" "the message did not say what was expected: $CAST_LSH"; S=1; }
+printf '%s\n' "$CAST_LSH" | grep -qF 'src/**' \
+  || { fail "cast layers shape" "the glob whose value is wrong was not named: $CAST_LSH"; S=1; }
+printf '%s\n' "$CAST_LSH" | grep -q 'object Object' \
+  && { fail "cast layers shape" "the value was coerced into a layer name: $CAST_LSH"; S=1; }
+printf '%s\n' "$CAST_LSH" | grep -q '^layers ' \
+  && { fail "cast layers shape" "the run carried on and reported layers: $CAST_LSH"; S=1; }
+cp "$CASTFIX/layers.bak" "$CAST_LAYERS"; rm -f "$CASTFIX/layers.bak"
+# the layer names the fixture does write are still read
+CAST_LOK="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast layers shape" "a layers.json of names exited $RC, not 0: $CAST_LOK"; S=1; }
+[ "$S" = 0 ] && ok "cast layers shape"
+
 # AC2 a module no glob claims is counted and named, never silently dropped
 S=0
 # break: skipping the unmatched modules instead of filing them as unassigned
@@ -884,7 +938,7 @@ for e in 'src/a.ts:1 -> src/b.ts' 'src/a.ts:2 -> src/t.ts' 'src/a.ts:6 -> src/c.
   printf '%s\n' "$CAST_EDGES" | grep -q "^  $e " \
     || { fail "cast edges" "cast edges did not list $e: $CAST_EDGES"; S=1; }
 done
-printf '%s\n' "$CAST_EDGES" | grep -q '^edges ui -> logic 3$' \
+printf '%s\n' "$CAST_EDGES" | grep -q '^module edges ui -> logic 3$' \
   || { fail "cast edges" "cast edges did not count the module edges: $CAST_EDGES"; S=1; }
 # the direction is the layer edge asked for, not every edge that touches it
 # break: ignoring --from and --to and listing the whole graph
@@ -1237,6 +1291,32 @@ CAST_PRC="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
 [ "$S" = 0 ] && ok "cast preview robust"
 
 
+# AC3 a rule side that is present but is not a string is rejected for its shape,
+# never as a side that is absent
+S=0
+CAST_RSH="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","from":3,"to":"logic"}' 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast rule shape" "a rule with a non-string from exited $RC, not 2: $CAST_RSH"; S=1; }
+# break: letting side() answer null for a wrong shape and a missing key alike,
+# which sends the author looking for a key that is in the file
+printf '%s\n' "$CAST_RSH" | grep -qF 'has from 3, not a layer name or a path glob' \
+  || { fail "cast rule shape" "the shape that was expected was not named: $CAST_RSH"; S=1; }
+printf '%s\n' "$CAST_RSH" | grep -q 'carries no from' \
+  && { fail "cast rule shape" "a present from was reported as absent: $CAST_RSH"; S=1; }
+CAST_RSH2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","from":"ui","to":["logic"]}' 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast rule shape" "a rule with a non-string to exited $RC, not 2: $CAST_RSH2"; S=1; }
+printf '%s\n' "$CAST_RSH2" | grep -qF 'has to ["logic"], not a layer name or a path glob' \
+  || { fail "cast rule shape" "the shape expected of to was not named: $CAST_RSH2"; S=1; }
+# a side that really is absent still says so - break: reporting every side by its
+# shape, which leaves a forgotten key describing itself as undefined
+CAST_RSH3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","to":"logic"}' 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast rule shape" "a rule with no from exited $RC, not 2: $CAST_RSH3"; S=1; }
+printf '%s\n' "$CAST_RSH3" | grep -q 'carries no from' \
+  || { fail "cast rule shape" "an absent from was not reported as absent: $CAST_RSH3"; S=1; }
+[ "$S" = 0 ] && ok "cast rule shape"
+
 # AC8 a violation listed in .cast/baseline.json leaves the check green; one that
 # is not listed turns it red
 S=0
@@ -1343,7 +1423,7 @@ printf '%s\n' "$CAST_PLAN" | grep -q 'no module src/bc.ts' \
 # the graph really changed: the merge dropped the edge between the merged pair
 # and the invert turned two edges around
 # break: reporting the plan and comparing the graph with itself
-printf '%s\n' "$CAST_PLAN" | grep -q '^edges 8 -> 7' \
+printf '%s\n' "$CAST_PLAN" | grep -q '^module edges 8 -> 7' \
   || { fail "cast plan" "the operations did not reach the copied graph: $CAST_PLAN"; S=1; }
 [ "$S" = 0 ] && ok "cast plan"
 
@@ -1433,6 +1513,42 @@ printf '%s\n' "$V_AFTER" | grep -q 'ui-owns-nothing' \
 printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
   || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
 [ "$S" = 0 ] && ok "cast plan rules"
+
+# AC4 a count labelled edges counts the same thing everywhere: the report's is
+# every import met, and every narrower count says it counts module edges
+S=0
+E_TOTAL="$(printf '%s\n' "$CAST_REPORT" | awk '/^edges /{print $2; exit}')"
+# break: reporting the resolved edges under the same label the graph's every-edge
+# count carries, which loses the unresolved and opaque ones without saying so
+O="$(E_TOTAL="$E_TOTAL" graph '
+  const all=g.modules.flatMap(m=>m.edges)
+  if (all.length!==Number(process.env.E_TOTAL))
+    bad("cast report says edges "+process.env.E_TOTAL+" of "+all.length+" edges in the graph")
+')" || { fail "cast edge counts" "$O"; S=1; }
+# the breakdown under it accounts for every one of them
+# break: dropping a resolution from the breakdown, which hides a population
+RES="$(printf '%s\n' "$CAST_REPORT" | sed -n '/^edges /{n;p;}' | tr ',' '\n')"
+SUMRES="$(printf '%s\n' "$RES" | awk '{n+=$2} END{print n+0}')"
+[ "$SUMRES" = "$E_TOTAL" ] \
+  || { fail "cast edge counts" "$E_TOTAL edges break down into $SUMRES: $CAST_REPORT"; S=1; }
+E_MOD="$(printf '%s\n' "$RES" | awk '$1=="module"{print $2}')"
+[ -n "$E_MOD" ] && [ "$E_MOD" != "$E_TOTAL" ] \
+  || { fail "cast edge counts" "the fixture cannot tell the two counts apart: $CAST_REPORT"; S=1; }
+# the narrower counts carry the narrower label, and it is the same number
+# break: labelling the module edges of one command `edges`, which makes two
+# lines of one run disagree about what an edge is
+printf '%s\n' "$CAST_PLAN" | awk '/^module edges /{print $3}' | grep -qx "$E_MOD" \
+  || { fail "cast edge counts" "cast plan simulate started from another count than $E_MOD: $CAST_PLAN"; S=1; }
+for o in "$CAST_PLAN" "$CAST_EDGES"; do
+  printf '%s\n' "$o" | grep -q '^edges ' \
+    && { fail "cast edge counts" "a count of module edges is labelled edges: $o"; S=1; }
+  printf '%s\n' "$o" | grep -q '^module edges ' \
+    || { fail "cast edge counts" "the count does not say which edges it counts: $o"; S=1; }
+done
+CAST_EC="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)" || true
+printf '%s\n' "$CAST_EC" | grep -q 'module edges against' \
+  || { fail "cast edge counts" "the check summary does not say which edges it read: $CAST_EC"; S=1; }
+[ "$S" = 0 ] && ok "cast edge counts"
 
 # --- cast skills ------------------------------------------------------------
 # The three skills a session reaches cast through. Each one runs its wrapper in

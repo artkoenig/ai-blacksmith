@@ -210,7 +210,13 @@ function layerRules(root) {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     die(`${file} is not an object mapping globs to layer names`)
-  return Object.entries(raw).map(([glob, name]) => ({ glob, name: String(name), re: globToRe(glob) }))
+  // A value that is not a layer name is the file's own error. Coercing it would
+  // invent a layer named `[object Object]` and place modules in it, an altitude
+  // nobody declared - the same answer the unreadable file gets.
+  for (const [glob, name] of Object.entries(raw))
+    if (typeof name !== 'string' || !name)
+      die(`${file} maps ${glob} to ${JSON.stringify(name)}, not a layer name`)
+  return Object.entries(raw).map(([glob, name]) => ({ glob, name, re: globToRe(glob) }))
 }
 
 function layerOf(id, rules) {
@@ -355,8 +361,18 @@ function scan(root) {
     const adapter = byExt.get(path.posix.extname(id))
     const text = ctx.read(id) || ''
     const edges = []
-    for (const imp of imports(text, adapter)) {
-      const answer = adapter.resolve(imp.target, id, { ...ctx, state: adapter.state }) || null
+    // An import whose target is not a literal string is met here too: the
+    // adapter's `opaque` patterns say which text that is, and the edge is kept
+    // with the expression as its target. Passed over, it would leave a graph
+    // that is missing edges reading as a complete one.
+    const found = [
+      ...imports(text, adapter).map((i) => ({ ...i, opaque: false })),
+      ...imports(text, { patterns: adapter.opaque || [] }).map((i) => ({ ...i, opaque: true })),
+    ].sort((a, b) => a.line - b.line || (a.target < b.target ? -1 : 1))
+    for (const imp of found) {
+      const answer = imp.opaque
+        ? null
+        : adapter.resolve(imp.target, id, { ...ctx, state: adapter.state }) || null
       // The site travels with the edge: without the file and the line, a report
       // names a problem nobody can open.
       const edge = {
@@ -365,7 +381,7 @@ function scan(root) {
         file: id,
         line: imp.line,
         to: null,
-        resolution: 'unresolved',
+        resolution: imp.opaque ? 'opaque' : 'unresolved',
       }
       if (answer && answer.to && known.has(answer.to)) {
         edge.to = answer.to
@@ -450,6 +466,8 @@ function cycles(graph) {
   return found.sort((a, b) => (a[0] < b[0] ? -1 : 1))
 }
 
+const RESOLUTIONS = ['module', 'external', 'unresolved', 'opaque']
+
 function report(graph, rules) {
   const out = []
   const edges = graph.modules.flatMap((m) => m.edges)
@@ -461,6 +479,13 @@ function report(graph, rules) {
     .join(', ')
   out.push(`modules ${graph.modules.length}`)
   out.push(`edges ${edges.length}${kindLine ? ` (${kindLine})` : ''}`)
+  // What that count counts: every import met, whatever became of it. Every
+  // narrower count in cast is labelled `module edges`, and this line is where
+  // the difference between the two is readable.
+  const byResolution = (r) => edges.filter((e) => e.resolution === r)
+  out.push(
+    '  ' + RESOLUTIONS.map((r) => `${r} ${byResolution(r).length}`).join(', ')
+  )
 
   const { of, names } = assign(graph, rules)
   const count = (l) => graph.modules.filter((m) => of.get(m.id) === l).length
@@ -476,6 +501,14 @@ function report(graph, rules) {
   // Every one of them is named. An unresolved import that is only counted is an
   // import nobody can go and fix.
   for (const e of unresolved) out.push(`  ${e.file}:${e.line} ${e.target} (${e.kind})`)
+
+  // An import cast cannot read is neither resolved nor unresolved: nothing was
+  // looked up. Counted and named all the same - the edges it stands for are
+  // missing from every count below, and a report that passed over it would say
+  // the graph has them.
+  const opaque = byResolution('opaque')
+  out.push(`opaque ${opaque.length}`)
+  for (const e of opaque) out.push(`  ${e.file}:${e.line} ${e.target} (${e.kind})`)
 
   const found = cycles(graph)
   out.push(`cycles ${found.length}`)
@@ -512,6 +545,16 @@ function side(spec, names) {
   return { re: globToRe(spec) }
 }
 
+// A side that is there but is not a layer name or a path glob is its own error:
+// told it carries no from, the author looks for a key that is in the file. The
+// message names the shape that was expected instead.
+function sideShape(r, key, at) {
+  const v = r[key]
+  if (v === undefined || v === null) die(`${at} (${r.name}) carries no ${key}`)
+  if (typeof v !== 'string' || !v)
+    die(`${at} (${r.name}) has ${key} ${JSON.stringify(v)}, not a layer name or a path glob`)
+}
+
 // One rule object, validated. Every path into the evaluator goes through this -
 // the rules file and `cast rules preview` alike - so a rule tried on the command
 // line is read by exactly the rules the file is read by, unknown attribute
@@ -519,10 +562,10 @@ function side(spec, names) {
 function readRule(r, at, names, notEvaluated) {
   if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${at} is not a rule object`)
   if (typeof r.name !== 'string' || !r.name) die(`${at} carries no name`)
+  sideShape(r, 'from', at)
+  sideShape(r, 'to', at)
   const from = side(r.from, names)
   const to = side(r.to, names)
-  if (!from) die(`${at} (${r.name}) carries no from`)
-  if (!to) die(`${at} (${r.name}) carries no to`)
   const severity = r.severity === undefined ? 'error' : r.severity
   if (severity !== 'error' && severity !== 'warn')
     die(`${at} (${r.name}) has severity ${JSON.stringify(r.severity)}, not error or warn`)
@@ -700,7 +743,7 @@ function preview(graph, of, rule, allowed, notEvaluated, unreadable) {
   if (unreadable) lines.push(`the allowed list was not available: ${unreadable}`)
   lines.push(
     `${plural(found.length, 'edge')} flagged in ${plural(mods, 'module')} ` +
-      `of ${plural(moduleEdges(graph), 'edge')}`
+      `of ${plural(moduleEdges(graph), 'module edge')}`
   )
   return lines.join('\n')
 }
@@ -715,7 +758,7 @@ function check(graph, of, rules, baseline) {
   // wrapper contract, and it says what was read so a green check is not a silence.
   lines.push(
     `${plural(found.length, 'violation')} (${plural(errors, 'error')}) in ` +
-      `${plural(edges, 'edge')} against ${plural(rules.forbidden.length, 'rule')}` +
+      `${plural(edges, 'module edge')} against ${plural(rules.forbidden.length, 'rule')}` +
       (held.length ? `, ${held.length} baselined` : '')
   )
   return { text: lines.join('\n'), code: errors ? 1 : 0 }
@@ -964,7 +1007,10 @@ function simulate(graph, after, rules, plan, ruleFile) {
   const lines = [`plan ${plan.name} ${plural(plan.operations.length, 'operation')}`]
   for (const o of plan.operations) lines.push(`  ${describe(o)}`)
   lines.push(`modules ${graph.modules.length} -> ${after.modules.length}`)
-  lines.push(`edges ${moduleEdges(graph)} -> ${moduleEdges(after)}`)
+  // `module edges`, never `edges`: the simulation moves resolved edges only, and
+  // a label shared with the report's every-import count would read as a graph
+  // that lost the unresolved ones.
+  lines.push(`module edges ${moduleEdges(graph)} -> ${moduleEdges(after)}`)
 
   const was = cycles(graph)
   const now = cycles(after)
@@ -1138,7 +1184,7 @@ function main(argv) {
     const graph = readGraph(out)
     const { of } = assign(graph, layerRules(root))
     const found = layerEdges(graph, of, from, to)
-    const lines = [`edges ${from} -> ${to} ${found.length}`]
+    const lines = [`module edges ${from} -> ${to} ${found.length}`]
     // Each one with its file and its line: a layer edge is only actionable
     // where the imports behind it can be opened.
     for (const e of found) lines.push(`  ${e.file}:${e.line} -> ${e.to} (${e.kind})`)

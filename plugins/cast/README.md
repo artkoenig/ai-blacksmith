@@ -23,11 +23,13 @@ cast render --html <file> [--expand <layer>] [--root <dir>]
 
 `scan` writes one entry per source module with its outgoing edges. Every edge carries the
 specifier it came from, its kind (`value`, `type`, `dynamic`), the file and the line of the import
-that produced it, and where it resolved to: another module, something outside the project, or
-nothing at all.
+that produced it, and where it resolved to: another module, something outside the project,
+nothing at all, or `opaque` - an import whose target is not a literal string, kept with the
+expression as its target because nothing was looked up at all.
 
-`report` counts the modules and the edges by kind, names every import that resolved to nothing,
-and names every module of every dependency cycle - the whole strongly connected component, not the
+`report` counts the modules and the edges by kind and breaks them down by resolution, names every
+import that resolved to nothing and every one it could not read, and names every module of every
+dependency cycle - the whole strongly connected component, not the
 module the walk entered it through. It also places every module in exactly one layer and sizes each
 one.
 
@@ -42,15 +44,20 @@ The altitude the graph is read at. `<root>/.cast/layers.json` maps globs to laye
 First match wins, so the file's order is the priority. `**` spans whole path segments, `*` and `?`
 stay inside one. A module no glob claims is `unassigned`: `cast report` counts it and names it,
 never drops it. Without a `layers.json` the first directory level is the layer - enough to open a
-view on any project, and no wizard.
+view on any project, and no wizard. A value that is not a layer name stops the run, exit 2, like a
+file that cannot be read: coerced, it would name a layer after the value and place modules in it.
 
 `cast edges --from ui --to logic` lists the module edges behind that one layer edge, each with the
 file and the line of the import that made it:
 
 ```
-edges ui -> logic 3
+module edges ui -> logic 3
   src/ui/app.ts:1 -> src/logic/load.ts (value)
 ```
+
+A count labelled `edges` is every import cast met - the one `cast report` prints. Every narrower
+count says so: `module edges` is the resolved ones, in `cast edges`, `cast plan simulate`, the
+preview and the check summary alike.
 
 Only edges that landed on a module have a far layer; an unresolved or external import is named by
 `cast report` instead.
@@ -76,7 +83,8 @@ rule caught is dropped where an allowed rule claims the same edge.
 
 `from` and `to` are a layer name where the project declares one, and a path glob otherwise (the
 same glob engine `layers.json` uses), so a rule can be written between two layers or between two
-files that share one. `kinds` limits the rule to those edge kinds: a rule carrying
+files that share one. A side that is there but is not a string is rejected for its shape, naming
+what was expected; only a missing one is reported as missing. `kinds` limits the rule to those edge kinds: a rule carrying
 `kinds: ["value"]` is not violated by an `import type`. `severity` is `error` or `warn`; a warning
 is listed and leaves the exit code alone. An attribute this evaluator does not know is reported as
 `not evaluated`, never quietly passed.
@@ -149,7 +157,7 @@ operation may name a module an earlier one created. An operation kind, or an att
 cannot apply is an error, never a silent skip.
 
 The simulation writes nothing: no source file, no `.cast/graph.json`. It reports, before and
-after, the modules and edges, the cycles, the fan-in, fan-out and instability of every layer
+after, the modules and module edges, the cycles, the fan-in, fan-out and instability of every layer
 (`I = fan-out / (fan-in + fan-out)`, counting only the edges that cross a layer boundary), and the
 rule violations of `.cast/rules.json` - so a plan that removes a violation is visible as one that
 does. The baseline is not applied: a plan is judged against every violation there is.
@@ -183,6 +191,7 @@ module.exports = {
   extensions: ['.ts', '.js'],
   ignore: ['node_modules'],                       // directories never walked
   patterns: [{ kind: 'value', re: /.../g }],      // one capture group: the specifier
+  opaque: [{ kind: 'value', re: /.../g }],        // optional; a target that is no literal string
   init(ctx),                                      // optional; its return is ctx.state
   resolve(spec, fromModuleId, ctx),               // {to} | {external: true} | null
 }
@@ -190,7 +199,9 @@ module.exports = {
 
 `ctx` carries `root`, `exists(rel)`, `isFile(rel)`, `read(rel)` and the adapter's own `state`. A
 `null` from `resolve` is an unresolved import: it is kept as an edge and named in the report, never
-dropped.
+dropped. `opaque` patterns capture the expression of an import whose target is no literal string -
+`require(path.join(dir, name))` - which is never resolved, and counted and named as `opaque` in the
+report rather than passed over: a graph missing those edges must say so.
 
 Adapters ship in `adapters/`. A project adds its own in `<root>/.cast/adapters/`, which is how a
 second language arrives without touching the engine.
