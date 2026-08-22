@@ -729,10 +729,24 @@ function edgeLines(edges, id) {
 // it may touch nothing this module holds beyond the functions `fns` inlines
 // beside it, which travel together.
 function draw() {
-  const data = JSON.parse(document.getElementById('cast-data').textContent)
+  // One or two descriptions, the same shape, drawn by the same procedure. The
+  // second one is there only when a plan was given; where it is, the page still
+  // holds a single drawing and the switch replaces what is in it.
+  const read = (id) => {
+    const n = document.getElementById(id)
+    return n ? JSON.parse(n.textContent) : null
+  }
+  const states = [{ name: 'the graph as it is', data: read('cast-data') }]
+  const planned = read('cast-plan-data')
+  if (planned) states.push({ name: 'the graph the plan would leave', data: planned })
+  let at = 0
+  let data = states[0].data
   const svg = document.getElementById('graph')
   const panel = document.getElementById('sites')
   const NS = 'http://www.w3.org/2000/svg'
+  // What the reader opened is state of the reading, not of the graph: it
+  // survives the switch, an id the other state does not hold simply draws
+  // nothing, and a node the plan created is closed like any other unopened one.
   const open = {}
   for (const id of data.open || []) open[id] = true
   const el = (name, attrs, text) => {
@@ -819,6 +833,24 @@ function draw() {
   }
   document.getElementById('collapse-all').addEventListener('click', () => setAll([]))
   document.getElementById('expand-all').addEventListener('click', () => setAll(groupIds(data)))
+  // The switch is the whole comparison: it names the state showing and the one
+  // a press would put in its place, and the press renders that one into the same
+  // svg. Nothing of the state being left survives - `render` empties the drawing
+  // before it draws, so there is never a second picture, hidden or beside it.
+  const swap = document.getElementById('switch-state')
+  if (swap && states.length > 1) {
+    const say = () => {
+      swap.textContent = 'showing ' + states[at].name + ' - show ' + states[1 - at].name
+    }
+    say()
+    swap.addEventListener('click', () => {
+      at = at === 0 ? 1 : 0
+      data = states[at].data
+      say()
+      panel.textContent = ''
+      render()
+    })
+  }
   function render() {
     const l = layoutTree(viewTree(data, Object.keys(open)))
     const M = l.metrics
@@ -991,7 +1023,7 @@ const PAGE_CSS = [
 // Self-contained on purpose: the data, the script and the style are in the file
 // and nothing is fetched at view time. What the page draws it computes from the
 // embedded description, through the functions the commands use.
-function html(graph, rules, expand, checkRules, baseline) {
+function html(graph, rules, expand, checkRules, baseline, plan) {
   const data = viewData(graph, rules, checkRules, baseline)
   const all = data.layers.map((l) => l.name)
   if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
@@ -1012,7 +1044,25 @@ function html(graph, rules, expand, checkRules, baseline) {
   // to JSON: the escape is the only thing between the data and a broken page.
   // `--expand <layer>` opens that layer's node, the one state the command can
   // name; every deeper node is opened by clicking it.
-  const embedded = JSON.stringify({ ...data, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
+  const embed = (d) => JSON.stringify({ ...d, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
+  const embedded = embed(data)
+  // The second description, where a plan was given: the same `viewData` over the
+  // graph the plan would leave, so the drawing functions read one shape out of
+  // either block. The rules, the baseline and `--expand` are the ones the first
+  // block got - a difference between the two pictures is a difference in the
+  // graph, never in how it was drawn.
+  const after = plan ? viewData(plan.after, rules, checkRules, baseline) : null
+  const planBlocks = plan
+    ? [
+      // `describe` is the phrasing `cast plan simulate` prints; the page calls it
+      // rather than writing the operations a second way.
+      '<h2>plan</h2>',
+      `<p id="plan-name">plan ${esc(plan.name)}</p>`,
+      `<ul id="plan">\n${plan.operations.map((o) => `<li>${esc(describe(o))}</li>`).join('\n')}\n</ul>`,
+      '<p id="plan-counts">The marks on both drawings apply the rules and .cast/baseline.json to the state being drawn; cast plan simulate applies no baseline and counts at layer altitude, so its numbers and these marks answer different questions.</p>',
+      `<script id="cast-plan-data" type="application/json">${embed(after)}</script>`,
+    ]
+    : []
   const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, edgesAt, edgeLines, draw]
   const script = fns.map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
   return [
@@ -1026,13 +1076,17 @@ function html(graph, rules, expand, checkRules, baseline) {
     '<body>',
     '<h1>cast</h1>',
     '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow points at the module being imported, in its own colour, and carries no number on the page. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
-    '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
+    `<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button>${plan ? '<button type="button" id="switch-state">showing the graph as it is</button>' : ''}</p>`,
     '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',
+    ...(plan
+      ? ['<p id="plan-legend">The page holds one drawing. Press the switch above to show the graph the plan would leave behind: the state you ask for replaces the one showing rather than joining it, so there is never a second picture beside this one and never a hidden copy of it. Neither state marks what the plan changed - no edge is drawn as added or removed, and an arrow’s colour, width and dash answer to the rules and the baseline alone in both. The groups you opened stay open across the switch; a node the plan removed is simply absent. The operations that produced the other state are listed under plan below.</p>']
+      : []),
     '<h2>counts</h2>',
     `<ul id="counts">\n${counts}\n</ul>`,
     '<h2>layers</h2>',
     `<ul id="layers">\n${layers}\n</ul>`,
+    ...planBlocks,
     '<h2>mermaid</h2>',
     `<pre id="mermaid">${esc(mermaid(graph, rules, expand, checkRules, baseline))}</pre>`,
     `<script id="cast-data" type="application/json">${embedded}</script>`,
@@ -1760,7 +1814,7 @@ const USAGE =
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
   '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
-  '       cast render --html <file> [--expand <layer>] [--root <dir>]'
+  '       cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]'
 
 function main(argv) {
   const cmd = argv[0]
@@ -1769,6 +1823,7 @@ function main(argv) {
   let to = null
   let expand = null
   let htmlOut = null
+  let planArg = null
   let asMermaid = false
   let update = false
   // `rules` and `plan` are the commands with a subcommand and a positional; both
@@ -1789,6 +1844,7 @@ function main(argv) {
     else if (cmd === 'render' && argv[i] === '--mermaid') asMermaid = true
     else if (cmd === 'render' && argv[i] === '--html' && argv[i + 1]) htmlOut = argv[++i]
     else if (cmd === 'render' && argv[i] === '--expand' && argv[i + 1]) expand = argv[++i]
+    else if (cmd === 'render' && argv[i] === '--plan' && argv[i + 1]) planArg = argv[++i]
     else die(USAGE)
   }
   const out = path.join(root, '.cast', 'graph.json')
@@ -1895,18 +1951,29 @@ function main(argv) {
   }
   if (cmd === 'render') {
     if (!asMermaid && !htmlOut) die(USAGE)
+    // A plan is a thing the page switches between two states of, and mermaid
+    // draws one diagram of one graph. Ignoring the flag would print a diagram of
+    // the graph as it is under a command that asked for a plan.
+    if (planArg && asMermaid) die('--plan draws nothing under --mermaid: use cast render --html <file> --plan <name>')
     const graph = readGraph(out)
     const rules = layerRules(root)
     // The render reads rules.json and the baseline the way `cast check` does, at
     // render time: a view that marked nothing would be a third answer about the
     // same graph.
-    const { names } = assign(graph, rules)
+    // The plan is read and applied by the reader and the simulator `cast plan
+    // simulate` uses, so an unknown plan or an operation cast cannot apply is
+    // the error it is there, before any page is written.
+    const plan = planArg ? readPlan(root, planArg) : null
+    const after = plan ? simulateGraph(graph, plan) : null
+    const names = plan
+      ? [...new Set([...assign(graph, rules).names, ...assign(after, rules).names])]
+      : assign(graph, rules).names
     const checkRules = readRules(root, names)
     const baseline = readBaseline(root)
     if (htmlOut) {
       const file = path.resolve(root, htmlOut)
       fs.mkdirSync(path.dirname(file), { recursive: true })
-      fs.writeFileSync(file, html(graph, rules, expand, checkRules, baseline))
+      fs.writeFileSync(file, html(graph, rules, expand, checkRules, baseline, plan ? { ...plan, after } : null))
       process.stdout.write(`${path.relative(root, file) || file}\n`)
       return 0
     }

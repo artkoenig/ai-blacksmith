@@ -17,7 +17,7 @@ cast baseline [--update] [--root <dir>]
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
 cast render --mermaid [--expand <layer>] [--root <dir>]
-cast render --html <file> [--expand <layer>] [--root <dir>]
+cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]
                              the graph at layer altitude, one layer resolved
 ```
 
@@ -204,6 +204,22 @@ group ends it; lifting the finger after a long press does not - the numbers stay
 press, because a phone has no pointer to leave with. Clicking an arrow still lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
 The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
+
+`--plan <name>` embeds a second state beside the first: the graph `<root>/.cast/plans/<name>.json`
+would leave behind, read and applied by the reader and the simulator `cast plan simulate` uses. The
+page still holds one drawing. A switch beside the other controls names the state showing and the
+state a press would put in its place, and pressing it renders that state into the same svg - the
+state you ask for replaces the one showing rather than joining it, so there is no second picture
+beside it, no hidden copy and no side-by-side. Neither state carries a mark of its own: nothing is
+drawn as added or removed, and an arrow's colour, width and dash answer to the rules and the
+baseline alone in both, so the two states are compared by switching between them. Both are drawn by
+the one procedure, at the altitude `--expand` names, and the groups you opened stay open across a
+switch - a node the plan removed is absent, one it created is closed like any other. The plan itself
+is on the page as text, its name and one line per operation in the wording `cast plan simulate`
+prints. Because the page applies the baseline to both states and `cast plan simulate` applies it to
+neither, the page's violation marks and that report's counts answer different questions, and the
+page says so. `--plan` with `--mermaid` is an error: a plan is a thing the page switches between,
+and there is no mermaid diagram of one.
 
 ## Adapters
 

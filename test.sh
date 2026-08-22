@@ -1060,6 +1060,18 @@ grep -qF 'The label sits beside the lane the curve' plugins/cast/README.md \
   && { fail "cast html" "README.md still places a count beside the lane"; S=1; }
 grep -qF 'is labelled with the number of' plugins/cast/README.md \
   && { fail "cast html" "README.md still says an arrow on the page is labelled with its count"; S=1; }
+# AC10 (of #49) the README describes the switch a plan brings, that the state
+# shown replaces the other rather than joining it, and that neither state carries
+# a mark of its own
+# break: shipping --plan and leaving the page's prose spec describing the page
+# before it, which is the only place a reader learns what the switch does
+for line in 'replaces the one showing rather than joining it' \
+            'Neither state carries a mark of its own' \
+            'one line per operation in the wording' \
+            '`--plan` with `--mermaid` is an error'; do
+  grep -qF "$line" plugins/cast/README.md \
+    || { fail "cast html" "README.md never says: $line"; S=1; }
+done
 [ "$S" = 0 ] && ok "cast html"
 
 
@@ -1526,6 +1538,215 @@ printf '%s\n' "$V_AFTER" | grep -q 'ui-owns-nothing' \
 printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
   || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
 [ "$S" = 0 ] && ok "cast plan rules"
+
+# --- cast: the plan drawn on the page ----------------------------------------
+# `cast render --html <file> --plan <name>` embeds the graph as it is and the
+# graph the plan would leave, and the page draws one of them at a time. The
+# fixture is the scanned one with .cast/plans/cut.json above, and rules.json as
+# the suite before left it, so both states are marked by the same rules.
+
+# AC1 AC2 AC9 the plan is read and applied by the reader and the simulator
+# `cast plan simulate` uses, the page without a plan is what it was, and --plan
+# under --mermaid is an error
+S=0
+CAST_PP="$(cd "$CASTFIX" && "$CAST_BIN" render --html plan.html --plan cut --expand ui 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan page" "cast render --html --plan exited $RC: $CAST_PP"; S=1; }
+CAST_PPAGE="$(cat "$CASTFIX/plan.html" 2>/dev/null)"
+# break: taking --plan and drawing the graph as it is anyway, with no second
+# description on the page at all
+printf '%s\n' "$CAST_PPAGE" | grep -qF '<script id="cast-plan-data"' \
+  || { fail "cast plan page" "the page carries no description of the graph the plan would leave"; S=1; }
+# an unknown plan is the error it is under plan simulate, never a page
+# break: catching the read and rendering the graph as it is instead
+rm -f "$CASTFIX/nope.html"
+CAST_PN="$(cd "$CASTFIX" && "$CAST_BIN" render --html nope.html --plan nope 2>&1)"; RC=$?
+CAST_SN="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate nope 2>&1)"
+[ "$RC" = 2 ] || { fail "cast plan page" "an unknown plan exited $RC, not 2: $CAST_PN"; S=1; }
+[ "$CAST_PN" = "$CAST_SN" ] \
+  || { fail "cast plan page" "the render says '$CAST_PN' where plan simulate says '$CAST_SN'"; S=1; }
+[ -f "$CASTFIX/nope.html" ] \
+  && { fail "cast plan page" "an unknown plan still wrote a page"; S=1; }
+# an operation cast cannot apply is the same error too - one reader, one
+# simulator, no second implementation of either
+# break: a second, more forgiving reader for the page, which draws a graph the
+# simulator would have refused to produce
+cat > "$CASTFIX/.cast/plans/ghost.json" <<'JSON'
+{ "operations": [ { "op": "move", "module": "src/nowhere.ts", "to": "src/here.ts" } ] }
+JSON
+rm -f "$CASTFIX/ghost.html"
+CAST_PG="$(cd "$CASTFIX" && "$CAST_BIN" render --html ghost.html --plan ghost 2>&1)"; RC=$?
+CAST_SG="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate ghost 2>&1)"
+[ "$RC" = 2 ] || { fail "cast plan page" "an unappliable operation exited $RC, not 2: $CAST_PG"; S=1; }
+[ "$CAST_PG" = "$CAST_SG" ] \
+  || { fail "cast plan page" "the render says '$CAST_PG' where plan simulate says '$CAST_SG'"; S=1; }
+[ -f "$CASTFIX/ghost.html" ] \
+  && { fail "cast plan page" "an operation cast cannot apply still wrote a page"; S=1; }
+# AC9 --plan under --mermaid names the flag and prints no diagram
+# break: ignoring --plan and printing the diagram of the graph as it is
+CAST_PM="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan cut 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast plan page" "--plan with --mermaid exited $RC, not 2: $CAST_PM"; S=1; }
+printf '%s\n' "$CAST_PM" | grep -qF -- '--plan' \
+  || { fail "cast plan page" "the error does not name the flag: $CAST_PM"; S=1; }
+printf '%s\n' "$CAST_PM" | grep -q '^flowchart' \
+  && { fail "cast plan page" "--plan with --mermaid still printed a diagram: $CAST_PM"; S=1; }
+# AC2 without --plan the page is what it is today: the same cast-data block, and
+# nothing of the plan around it
+# break: embedding the second description, the switch or the plan text always
+CAST_PLAIN="$(cd "$CASTFIX" && "$CAST_BIN" render --html plain.html --expand ui >/dev/null 2>&1; cat "$CASTFIX/plain.html")"
+printf '%s\n' "$CAST_PLAIN" | grep -qF '<script id="cast-data"' \
+  || { fail "cast plan page" "the page without a plan lost its cast-data block"; S=1; }
+for absent in '<script id="cast-plan-data"' 'id="switch-state"' '<h2>plan</h2>'; do
+  printf '%s\n' "$CAST_PLAIN" | grep -qF "$absent" \
+    && { fail "cast plan page" "the page without a plan carries $absent"; S=1; }
+done
+# and the block --plan leaves it is the same block: the graph as it is, before as
+# much as ever
+# break: making cast-data the simulated graph and the new block the current one,
+# which silently rewrites what every suite reading cast-data reads
+block() { printf '%s\n' "$1" | sed -n "s/.*<script id=\"$2\" type=\"application\/json\">\(.*\)<\/script>.*/\1/p"; }
+[ "$(block "$CAST_PLAIN" cast-data)" = "$(block "$CAST_PPAGE" cast-data)" ] \
+  || { fail "cast plan page" "--plan changed what the cast-data block holds"; S=1; }
+[ -n "$(block "$CAST_PPAGE" cast-plan-data)" ] \
+  || { fail "cast plan page" "the plan block holds nothing"; S=1; }
+[ "$(block "$CAST_PPAGE" cast-data)" != "$(block "$CAST_PPAGE" cast-plan-data)" ] \
+  || { fail "cast plan page" "the two blocks hold the same graph: the plan reached nothing"; S=1; }
+[ "$S" = 0 ] && ok "cast plan page"
+
+# AC3 AC4 AC5 AC8 one drawing, one procedure, and a switch that replaces it
+S=0
+# one svg, and the page never grows a second one
+# break: drawing the after state beside the before one, or into a hidden copy
+# counted with -o: two svg elements written on one line are one line, and a
+# count of lines would call them one drawing
+SVGS="$(printf '%s\n' "$CAST_PPAGE" | grep -o '<svg' | wc -l | tr -d ' ')"
+[ "$SVGS" = 1 ] || { fail "cast plan switch" "the page holds $SVGS svg elements, not one"; S=1; }
+printf '%s\n' "$CAST_PPAGE" | grep -qF "createElementNS(NS, 'svg')" \
+  && { fail "cast plan switch" "the page script creates a second svg"; S=1; }
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'display:none' \
+  && { fail "cast plan switch" "the page hides part of itself, so a drawing can survive out of sight"; S=1; }
+# the switch is a control like the others: a button in #controls, which is where
+# the 44px floor and the tap handling live
+# break: a hover-revealed span, or an element the shared button rule never meets
+printf '%s\n' "$CAST_PPAGE" | sed -n '/id="controls"/p' | grep -qF '<button type="button" id="switch-state"' \
+  || { fail "cast plan switch" "the switch is not a button beside the other controls"; S=1; }
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'button{font:inherit;min-height:44px;min-width:44px' \
+  || { fail "cast plan switch" "the buttons no longer meet the 44px tap floor"; S=1; }
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'touch-action:manipulation' \
+  || { fail "cast plan switch" "a tap on a control waits for a second one"; S=1; }
+# it says which state is showing, and which one a press would bring
+# break: a control labelled `switch` alone, which leaves the reader to guess
+# which of the two states is on the screen
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'showing the graph as it is' \
+  || { fail "cast plan switch" "the switch does not say which state is showing"; S=1; }
+SW="$(printf '%s\n' "$CAST_PPAGE" | sed -n "/const swap = document.getElementById('switch-state')/,/^  }$/p")"
+[ -n "$SW" ] || { fail "cast plan switch" "the page carries no switch handler"; S=1; }
+printf '%s\n' "$SW" | grep -qF "swap.addEventListener('click'" \
+  || { fail "cast plan switch" "the switch answers no press"; S=1; }
+# the press replaces the drawing: it moves to the other state and renders again,
+# and a render empties the svg before it draws
+# break: appending the other state's drawing to the svg instead of replacing it
+printf '%s\n' "$SW" | grep -qF 'data = states[at].data' \
+  || { fail "cast plan switch" "the switch does not move to the other state"; S=1; }
+printf '%s\n' "$SW" | grep -qF 'render()' \
+  || { fail "cast plan switch" "the switch never draws the state it moved to"; S=1; }
+printf '%s\n' "$CAST_PPAGE" | grep -qF "svg.textContent = ''" \
+  || { fail "cast plan switch" "a render leaves the drawing before it on the page"; S=1; }
+# AC8 the highlight belongs to the drawing being replaced, and a render clears it
+# break: leaving the faded arrows of the state that is gone
+printf '%s\n' "$CAST_PPAGE" | sed -n '/function render() {/,/laid = l/p' | grep -qF 'unhighlight()' \
+  || { fail "cast plan switch" "a render no longer clears the highlight"; S=1; }
+# AC5 one procedure draws both: there is one call to the layout in the page
+# break: a second drawing path for the after state, which would let the two
+# pictures differ by how they were drawn rather than by the graph
+LAYS="$(printf '%s\n' "$CAST_PPAGE" | grep -oF 'layoutTree(viewTree(data' | wc -l | tr -d ' ')"
+[ "$LAYS" = 1 ] || { fail "cast plan switch" "$LAYS drawing paths in the page, not one"; S=1; }
+# the same altitude: --expand seeds both blocks with the same open set
+# break: seeding the after block from nothing, so the plan page opens at a
+# different altitude than the graph page
+# AC3 the two blocks are the same shape, and AC8 an id the reader opened is read
+# by the drawing functions out of either one
+O="$(CAST_JS="$PWD/plugins/cast/scripts/cast.js" PAGE="$CASTFIX/plan.html" node -e '
+  const fs = require("fs"), cast = require(process.env.CAST_JS)
+  const src = fs.readFileSync(process.env.PAGE, "utf8")
+  const block = (id) => {
+    const m = src.match(new RegExp("<script id=\"" + id + "\" type=\"application/json\">(.*)</script>"))
+    return m ? JSON.parse(m[1].replace(/\\\\u003c/g, "<")) : null
+  }
+  const before = block("cast-data"), after = block("cast-plan-data")
+  const bad = []
+  const keys = (o) => Object.keys(o).sort().join(",")
+  if (keys(before) !== keys(after)) bad.push("the blocks are different shapes: " + keys(before) + " / " + keys(after))
+  if (keys(before.counts) !== keys(after.counts)) bad.push("the counts are different shapes")
+  const ek = (d) => [...new Set(d.edges.flatMap((e) => Object.keys(e)))].sort().join(",")
+  if (ek(before) !== ek(after)) bad.push("an edge of one state carries what an edge of the other does not: " + ek(before) + " / " + ek(after))
+  if (JSON.stringify(before.open) !== JSON.stringify(after.open))
+    bad.push("the two states open at different altitudes: " + JSON.stringify(before.open) + " / " + JSON.stringify(after.open))
+  // what the reader opened is read out of either block by the same functions
+  const opened = [...before.open, cast.treeId("logic")]
+  for (const [name, d] of [["before", before], ["after", after]]) {
+    const l = cast.layoutTree(cast.viewTree(d, opened))
+    const seen = []
+    const walk = (n) => { seen.push(n); for (const c of n.children) walk(c) }
+    for (const n of l.nodes) walk(n)
+    const ui = seen.find((n) => n.id === cast.treeId("ui"))
+    if (!ui) bad.push("the " + name + " state has no ui node to open")
+    else if (!ui.open) bad.push("the open ui group is closed in the " + name + " state")
+  }
+  console.log(bad.join("; "))
+' 2>&1)"
+[ -z "$O" ] || { fail "cast plan switch" "$O"; S=1; }
+# AC5 the page says its marks and the report’s counts answer different questions
+# break: leaving the reader to compare a baselined page with an unbaselined report
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'answer different questions' \
+  || { fail "cast plan switch" "the page never says its marks and the report's counts differ"; S=1; }
+[ "$S" = 0 ] && ok "cast plan switch"
+
+# AC6 AC7 AC10 the plan as text, and nothing marked as added or removed
+S=0
+# the name and one line per operation, in the wording plan simulate prints
+# break: phrasing the operations a second way on the page, which drifts from the
+# report the moment describe changes
+PLANLIST="$(printf '%s\n' "$CAST_PPAGE" | sed -n '/<ul id="plan">/,/<\/ul>/p')"
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'plan cut' \
+  || { fail "cast plan text" "the page does not name the plan"; S=1; }
+for o in 'move src/rel.ts -&gt; pkg/rel.ts' \
+         'merge src/b.ts, src/c.ts -&gt; src/bc.ts' \
+         'invert src/a.ts -&gt; src/bc.ts' \
+         'invert src/a.ts -&gt; src/t.ts' \
+         'split src/multi.ts -&gt; src/multi-core.ts, src/multi-shell.ts'; do
+  printf '%s\n' "$PLANLIST" | grep -qF "$o" \
+    || { fail "cast plan text" "the plan text is missing the operation $o"; S=1; }
+done
+LI="$(printf '%s\n' "$PLANLIST" | grep -c '<li>')"
+[ "$LI" = 5 ] || { fail "cast plan text" "the plan text holds $LI lines for 5 operations"; S=1; }
+# it stands whichever state is drawn: the script never rewrites it
+# break: filling the plan list from the state showing, which makes it one side
+printf '%s\n' "$CAST_PPAGE" | grep -qF "getElementById('plan" \
+  && { fail "cast plan text" "the drawing rewrites the plan text"; S=1; }
+# AC7 nothing is marked as added or removed, on either state
+# break: colouring or dashing an edge the plan created, a second language on top
+# of the severity colours
+CSSBLOCK="$(printf '%s\n' "$CAST_PPAGE" | sed -n '/<style>/,/<\/style>/p')"
+printf '%s\n' "$CSSBLOCK" | grep -qE '\.(added|removed|created|deleted|plan|changed)' \
+  && { fail "cast plan text" "the style sheet dresses an edge the plan touched: $CSSBLOCK"; S=1; }
+SCRIPTBLOCK="$(printf '%s\n' "$CAST_PPAGE" | sed -n '/^<script>$/,/^<\/script>$/p')"
+for tok in "'added'" "'removed'" "'created'" "'deleted'" "'plan-edge'" "'changed'"; do
+  printf '%s\n' "$SCRIPTBLOCK" | grep -qF "$tok" \
+    && { fail "cast plan text" "the drawing knows an edge as $tok"; S=1; }
+done
+# nothing on an arrow is decided by the state it is drawn in: the drawing reads
+# the colour, the width and the dash it always read
+# break: dashing an edge whose `state` the after description marks as created
+printf '%s\n' "$SCRIPTBLOCK" | grep -qF "'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none'" \
+  || { fail "cast plan text" "an arrow's dash answers to something other than the baseline"; S=1; }
+# AC10 the legend says the state replaces the other and that neither is marked
+# break: shipping the switch and leaving the page silent about what it does
+for line in 'replaces the one showing rather than joining it' \
+            'no edge is drawn as added or removed'; do
+  printf '%s\n' "$CAST_PPAGE" | grep -qF "$line" \
+    || { fail "cast plan text" "the legend never says: $line"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast plan text"
 
 # AC4 a count labelled edges counts the same thing everywhere: the report's is
 # every import met, and every narrower count says it counts module edges

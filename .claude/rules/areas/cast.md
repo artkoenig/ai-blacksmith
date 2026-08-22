@@ -5,8 +5,7 @@ paths:
 
 # cast
 
-The module graph of a project, and the rules it must obey. `bin/cast` and `bin/cast-check` are
-shims; all behaviour is `scripts/cast.js`, and every fact about a language is an adapter file.
+The module graph of a project, and the rules it must obey. `bin/cast`/`bin/cast-check` are shims.
 
 - The engine holds no language knowledge: extensions, import patterns, edge kinds and resolution
   come from an adapter, and anything language-specific in `scripts/cast.js` breaks `cast graph`.
@@ -14,10 +13,8 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   patterns, opaque?, ignore?, init?, resolve}`; `init`'s return is `ctx.state` on every `resolve`,
   which answers `{to}`, `{external: true}` or `null` - never a dropped edge, but `unresolved`.
 - An adapter's optional `opaque` patterns capture an import whose target is no literal string:
-  `resolution: "opaque"`, `resolve` never called, named by `cast report`; a second pattern list
-  through `imports()`, the capture excluding a leading quote.
-- A count labelled `edges` is every import met - `cast report`'s line, with its resolution
-  breakdown. Every narrower one says `module edges`: `cast edges`, the check summary, the page.
+  `resolution: "opaque"`, `resolve` never called, named by `cast report`, the capture excluding a
+  leading quote.
 - Patterns match in order, one `(line, specifier)` makes one edge and the first kind wins - the
   whole type/value classification: `import type` matches the value pattern too, so a type pattern
   below a value one silently reclassifies every type edge. One capture group, the specifier,
@@ -25,13 +22,13 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - Layers are read at report time from `<root>/.cast/layers.json`, never baked into `graph.json`:
   re-layering needs no rescan. Glob to layer name, first match wins, engine `globToRe` (`**` spans
   segments, `*`/`?` stay in one). No file means the first directory level is the layer, on `ENOENT`
-  alone: unreadable, invalid or not a layer name is exit 2.
-- A module no glob claims is `unassigned`: counted and named by `cast report`, never swept into a
-  declared layer; `assign()` keys placement by module id.
+  alone: unreadable, invalid or not a layer name is exit 2. A module no glob claims is `unassigned`,
+  counted and named by `cast report`, never swept into a declared layer; `assign()` keys placement
+  by module id.
 - `cast render` reads the layers at render time and never rewrites the graph: layer nodes
-  `L_<name>`, module nodes `M_<id>`, every character mermaid rejects escaped to `_<hex>_`
-  (`M_src_2f_b_2e_ts`), name only in the label - reversible, or `src/a-b.ts` and `src/a_b.ts`
-  collide. Mermaid opens at layers (`cast altitude`), an edge collapsing to one node is dropped.
+  `L_<name>`, module nodes `M_<id>`, every character mermaid rejects escaped to `_<hex>_`, name only
+  in the label - reversible, or `src/a-b.ts` and `src/a_b.ts` collide. Mermaid opens at layers
+  (`cast altitude`), an edge collapsing to one node is dropped.
 - One description, `viewData`: layers, module-edge sites, rule marks, the counts `report`/`check`
   print. Mermaid reads it at two altitudes via `viewAt(data, expand)`, the page as a tree: `treeId`
   -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`, with `marker`, `toggleOpen`, `groupIds`,
@@ -39,13 +36,12 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - The tree is layer / folder level / file, keyed by containment path (`logic/src/b.ts`), each node
   carrying `modules`, its whole subtree. `viewTree` ends an arrow on the deepest *closed* node
   holding it, drops one inside a node; `open` is ids, `--expand` seeds it.
-- `layoutTree` stacks vertically at every level, an open box `HEAD + PAD + Σ children + GAP*(k-1)`:
-  as tall as what it shows, never as its subtree (`cast compact layout`); `M` returns as `metrics`.
-  `M.TAP` (44) floors `H`, `HEAD`, `LANE`, `CHAN`: `place` gives a node a header band `hx/hy/hw/hh`
-  and only that band toggles - the ground of an open box answers no press. Transparent `hit`/`grab`
-  shapes widen what is too thin to press; `marker` is the glyph, on a node with children alone;
-  `toggleOpen` deletes one id and nothing below it, so reopening restores it. Phone: viewport meta,
-  a self-sized svg in `#graph-scroll`, `overflow-x:hidden`, no `svg{max-width:100%}`.
+- `layoutTree` stacks vertically, an open box `HEAD + PAD + Σ children + GAP*(k-1)`: as tall as
+  what it shows, never as its subtree (`cast compact layout`); `M` is `metrics`, `M.TAP` (44)
+  floors `H`, `HEAD`, `LANE`, `CHAN`. `place` gives a node a header band `hx/hy/hw/hh`, and only
+  that band toggles; transparent `hit`/`grab` shapes widen what is too thin. `toggleOpen` deletes
+  one id and nothing below it. Phone: viewport meta, a self-sized svg in `#graph-scroll`,
+  `overflow-x:hidden`, no `svg{max-width:100%}`.
 - An arrow is drawn alone: a curve down its lane, an arrowhead, a transparent `TAP`-wide grab. No
   label, no backing - `width`/`height` end at the last lane and the last box, while `weight`,
   `label`, `kinds`, `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on the edge as data,
@@ -60,23 +56,25 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - `test.sh` greps the page source with `grep -F` on substrings: `"g.addEventListener('click'"` hits
   any local ending in `g` (`bg`), failing an unrelated suite - name around it. A multi-line `-F`
   pattern is alternatives, not a block: cut the block out with `sed -n '/a/,/b/p'` first. `grep -c`
-  counts lines, and a comment naming the symbol counts too - match the call, not the word.
+  counts lines, not matches; a comment naming the symbol counts too - match the call, not the word.
 - `render` reads rules.json and baseline.json like `check`: severity colours and the rule label an
   arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, only a flagged one is
   styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node
   holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
 - `README.md`'s `--html` paragraph is the page's prose spec: a change to what a press hits, or to
   what an arrow or a node shows, leaves it false until that paragraph is edited in the same commit.
-- Control characters in `scripts/cast.js` are escapes (`'\0'`): a literal NUL reads as binary.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
   `forbidden` names an edge that must not exist, `allowed` drops it. A side is a layer name where
   `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise; layer wins a tie, so
   a rule inside one layer must name the files.
 - `cast check` reads every resolved module edge, never mermaid's aggregate (`cast check altitude`).
   The exit code comes from severity, not the count: `warn` is listed and leaves 0; the summary is
-  the last line, the only one on a clean project.
+  the last line, the only one on a clean project. A count labelled `edges` is every import met -
+  `cast report`'s line, with its resolution breakdown; every narrower one says `module edges` (`cast
+  edges`, the check summary, the page).
 - `die()` is exit 2 throughout: an unreadable or invalid `rules.json` is "could not run", not a
   violation or a pass; validation belongs in `readRules`, `soft(fn)` throws instead for preview.
+  Control characters in `scripts/cast.js` are escapes (`'\0'`): a literal NUL reads as binary.
 - An unknown rule attribute is `not evaluated: <rule>: <key>`: a new attribute means adding it to
   `RULE_KEYS` in the same change. `readRule` validates one rule for both readers, `group()` renders
   rule/edge/site for the check and the plan report alike, and `cast rules preview '<rule json>'`
@@ -93,7 +91,9 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - Plans are read at simulate time from `<root>/.cast/plans/<name>.json`, like the rules, applied in
   order to a deep copy - `cast plan simulate` writes no source file and no `graph.json` - each on
   the graph the one before left, so one may name a module an earlier one created; `apply()` dies on
-  a module it cannot find, `readPlan` on an unknown op or key.
+a module it cannot find, `readPlan` on an unknown op or key. `render --html --plan <name>` runs both
+  before it writes, so a bad plan is that exit 2 and no page; it embeds a second `viewData` block,
+  `cast-plan-data`, `cast-data` stays the graph as it is, and `--plan --mermaid` is refused.
 - An edge's `file` is the id of the module holding it after the operation too: `move`/`merge` go
   through `resite()`, `split` sites each edge on its part, `invert` the new edge at `line` 0. Plan
   metrics are at layer altitude, counting only edges crossing a layer boundary: `I = fan-out /
