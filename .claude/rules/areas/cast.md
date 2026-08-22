@@ -27,7 +27,15 @@ and every fact about a language is an adapter file.
   to avoid matching inside an identifier, and that prefix must not be part of the capture.
 - `cast report` names whole strongly connected components, computed by an iterative Tarjan. Never
   make it recursive: a real project's graph is deeper than the node stack.
-- Exercised by the six `cast *` suites in `test.sh`, all reading one scanned fixture. Assert
+- Layers are read at report time from `<root>/.cast/layers.json`, never baked into `graph.json`, so
+  re-layering a project needs no rescan. The file maps glob to layer name, first match wins, and
+  the glob engine is `globToRe` in `scripts/cast.js`: `**` spans segments, `*`/`?` stay inside one.
+  No `layers.json` means the first directory level is the layer (a root-level file lands in `.`).
+- A module no glob claims is `unassigned`, the same contract as an unresolved edge: counted and
+  named by `cast report`, never dropped, and never swept into a declared layer.
+- `assign()` keys placement by module id, which is what makes "exactly one layer" true by
+  construction; `cast edges --from <l> --to <l>` filters resolved module edges through that map.
+- Exercised by the nine `cast *` suites in `test.sh`, all reading one scanned fixture. Assert
   against the written `.cast/graph.json`, never an in-process call - the file is the contract.
 - `.cast` is in `ALWAYS_IGNORED`, so a project's own adapters are loaded but never scanned as
   modules. Walking also skips every dot directory.

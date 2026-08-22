@@ -5,6 +5,8 @@ The module graph of a project, and what is wrong with it.
 ```
 cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
+cast edges --from <layer> --to <layer> [--root <dir>]
+                             the module edges behind one layer edge
 ```
 
 `scan` writes one entry per source module with its outgoing edges. Every edge carries the
@@ -14,7 +16,32 @@ nothing at all.
 
 `report` counts the modules and the edges by kind, names every import that resolved to nothing,
 and names every module of every dependency cycle - the whole strongly connected component, not the
-module the walk entered it through.
+module the walk entered it through. It also places every module in exactly one layer and sizes each
+one.
+
+## Layers
+
+The altitude the graph is read at. `<root>/.cast/layers.json` maps globs to layer names:
+
+```json
+{ "src/ui/**": "ui", "src/**": "logic", "db/**": "data" }
+```
+
+First match wins, so the file's order is the priority. `**` spans whole path segments, `*` and `?`
+stay inside one. A module no glob claims is `unassigned`: `cast report` counts it and names it,
+never drops it. Without a `layers.json` the first directory level is the layer - enough to open a
+view on any project, and no wizard.
+
+`cast edges --from ui --to logic` lists the module edges behind that one layer edge, each with the
+file and the line of the import that made it:
+
+```
+edges ui -> logic 3
+  src/ui/app.ts:1 -> src/logic/load.ts (value)
+```
+
+Only edges that landed on a module have a far layer; an unresolved or external import is named by
+`cast report` instead.
 
 ## Adapters
 

@@ -658,6 +658,11 @@ module.exports = {
 JS
 printf 'use "two"\n' > "$CASTFIX/pkg/one.toy"
 printf 'nothing here\n' > "$CASTFIX/pkg/two.toy"
+# The layers the fixture is read at: one module in its own layer, the rest of src
+# below it, and pkg claimed by no glob at all.
+cat > "$CASTFIX/.cast/layers.json" <<'JSON'
+{ "src/a.ts": "ui", "src/**": "logic" }
+JSON
 
 CAST_BIN="$PWD/plugins/cast/bin/cast"
 S=0
@@ -796,5 +801,63 @@ printf '%s\n' "$CAST_REPORT" | grep '^  cycle:' \
 printf '%s\n' "$CAST_REPORT" | grep '^  cycle:' | grep -q 'src/t\.ts' \
   && { fail "cast cycles" "a module outside the cycle was named in it"; S=1; }
 [ "$S" = 0 ] && ok "cast cycles"
+
+# AC1 layers.json maps globs to layer names and every module lands in exactly one
+S=0
+# break: dropping the layers section from the report, or placing a module in
+# every layer whose glob matches it instead of the first
+printf '%s\n' "$CAST_REPORT" | grep -q '^layers 2$' \
+  || { fail "cast layers" "cast report did not count the layers: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q '^  ui 1$' \
+  || { fail "cast layers" "cast report did not size the ui layer: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q '^  logic 5$' \
+  || { fail "cast layers" "cast report did not size the logic layer: $CAST_REPORT"; S=1; }
+# exactly one: the layer counts and the unassigned count add up to the modules,
+# so a module placed twice or dropped shows here
+# break: letting a later glob place a module a earlier one already claimed
+SUM="$(printf '%s\n' "$CAST_REPORT" | awk '
+  /^layers /{inl=1;next} /^unassigned /{n+=$2;inl=0;next}
+  inl&&/^  /{n+=$2;next} {inl=0} END{print n+0}')"
+MODS="$(printf '%s\n' "$CAST_REPORT" | awk '/^modules /{print $2}')"
+[ "$SUM" = "$MODS" ] \
+  || { fail "cast layers" "$MODS modules were placed $SUM times: $CAST_REPORT"; S=1; }
+[ "$S" = 0 ] && ok "cast layers"
+
+# AC2 a module no glob claims is counted and named, never silently dropped
+S=0
+# break: skipping the unmatched modules instead of filing them as unassigned
+printf '%s\n' "$CAST_REPORT" | grep -q '^unassigned 2$' \
+  || { fail "cast unassigned" "cast report did not count the unassigned modules: $CAST_REPORT"; S=1; }
+# break: reporting a count without the names, which says nothing to go and place
+for m in pkg/one.toy pkg/two.toy; do
+  printf '%s\n' "$CAST_REPORT" | grep -q "^  $m\$" \
+    || { fail "cast unassigned" "cast report did not name the unassigned module $m: $CAST_REPORT"; S=1; }
+done
+# an unassigned module is not also counted inside a layer
+# break: defaulting an unmatched module into the first declared layer
+printf '%s\n' "$CAST_REPORT" | grep -q '^  ui 1$' \
+  || { fail "cast unassigned" "an unassigned module was swept into a layer: $CAST_REPORT"; S=1; }
+[ "$S" = 0 ] && ok "cast unassigned"
+
+# AC3 cast edges --from --to lists the module edges behind one layer edge
+S=0
+CAST_EDGES="$(cd "$CASTFIX" && "$CAST_BIN" edges --from ui --to logic 2>&1)" \
+  || { fail "cast edges" "cast edges did not run: $CAST_EDGES"; S=1; }
+# every module edge behind the layer edge, each with its file and its line
+# break: dropping the file or the line from the line, or listing only the first edge
+for e in 'src/a.ts:1 -> src/b.ts' 'src/a.ts:2 -> src/t.ts' 'src/a.ts:6 -> src/c.ts'; do
+  printf '%s\n' "$CAST_EDGES" | grep -q "^  $e " \
+    || { fail "cast edges" "cast edges did not list $e: $CAST_EDGES"; S=1; }
+done
+printf '%s\n' "$CAST_EDGES" | grep -q '^edges ui -> logic 3$' \
+  || { fail "cast edges" "cast edges did not count the module edges: $CAST_EDGES"; S=1; }
+# the direction is the layer edge asked for, not every edge that touches it
+# break: ignoring --from and --to and listing the whole graph
+CAST_BACK="$(cd "$CASTFIX" && "$CAST_BIN" edges --from logic --to ui 2>&1)"
+printf '%s\n' "$CAST_BACK" | grep -q '^  src/c.ts:1 -> src/a.ts ' \
+  || { fail "cast edges" "the reverse layer edge was not listed: $CAST_BACK"; S=1; }
+printf '%s\n' "$CAST_BACK" | grep -q 'src/b.ts' \
+  && { fail "cast edges" "an edge outside the layer edge was listed: $CAST_BACK"; S=1; }
+[ "$S" = 0 ] && ok "cast edges"
 
 exit "$FAILED"

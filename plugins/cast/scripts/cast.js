@@ -4,6 +4,8 @@
 //
 //   cast scan [--root <dir>]     writes <root>/.cast/graph.json
 //   cast report [--root <dir>]   reads it and says what is wrong
+//   cast edges --from <layer> --to <layer> [--root <dir>]
+//                                the module edges behind one layer edge
 //
 // The engine holds no language knowledge. Every fact about a language - which
 // files are modules, which text is an import, what kind of edge it makes, how a
@@ -123,6 +125,87 @@ function imports(text, adapter) {
   return [...seen.values()].sort((a, b) => a.line - b.line || (a.target < b.target ? -1 : 1))
 }
 
+
+// --- layers -----------------------------------------------------------------
+
+// A layer is the altitude the graph is read at. `<root>/.cast/layers.json` maps
+// globs to layer names, first match wins, so the file's order is the priority.
+// Without that file the first directory level is the layer - enough to open a
+// view on any project, and no wizard.
+const UNASSIGNED = 'unassigned'
+
+function globToRe(glob) {
+  let re = ''
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        i++
+        // `**/` spans whole path segments, including none at all, so `src/**/*.ts`
+        // still matches `src/a.ts`.
+        if (glob[i + 1] === '/') {
+          i++
+          re += '(?:[^/]+/)*'
+        } else re += '.*'
+      } else re += '[^/]*'
+    } else if (c === '?') re += '[^/]'
+    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp('^' + re + '$')
+}
+
+function layerRules(root) {
+  let raw
+  try {
+    raw = JSON.parse(fs.readFileSync(path.join(root, '.cast', 'layers.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    die(`${path.join(root, '.cast', 'layers.json')} is not an object mapping globs to layer names`)
+  return Object.entries(raw).map(([glob, name]) => ({ glob, name: String(name), re: globToRe(glob) }))
+}
+
+function layerOf(id, rules) {
+  if (!rules) {
+    const i = id.indexOf('/')
+    return i === -1 ? '.' : id.slice(0, i)
+  }
+  for (const r of rules) if (r.re.test(id)) return r.name
+  // A module no glob claims is never dropped: it is named, and the count says so.
+  return UNASSIGNED
+}
+
+// Every module lands in exactly one layer - the map is keyed by module id, so a
+// second matching glob cannot add a second placement.
+function assign(graph, rules) {
+  const of = new Map()
+  for (const m of graph.modules) of.set(m.id, layerOf(m.id, rules))
+  const names = []
+  if (rules) for (const r of rules) if (r.name !== UNASSIGNED && !names.includes(r.name)) names.push(r.name)
+  for (const m of graph.modules) {
+    const l = of.get(m.id)
+    if (l !== UNASSIGNED && !names.includes(l)) names.push(l)
+  }
+  return { of, names }
+}
+
+// The module edges behind one layer edge. Only edges that landed on a module
+// have a far layer at all; an unresolved or external one is reported by name in
+// `cast report`, not here.
+function layerEdges(graph, of, from, to) {
+  const out = []
+  for (const m of graph.modules) {
+    if (of.get(m.id) !== from) continue
+    for (const e of m.edges) {
+      if (e.resolution !== 'module') continue
+      if (of.get(e.to) !== to) continue
+      out.push(e)
+    }
+  }
+  return out.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
+}
+
 // --- scan -------------------------------------------------------------------
 
 function scan(root) {
@@ -238,7 +321,7 @@ function cycles(graph) {
   return found.sort((a, b) => (a[0] < b[0] ? -1 : 1))
 }
 
-function report(graph) {
+function report(graph, rules) {
   const out = []
   const edges = graph.modules.flatMap((m) => m.edges)
   const kinds = {}
@@ -249,6 +332,15 @@ function report(graph) {
     .join(', ')
   out.push(`modules ${graph.modules.length}`)
   out.push(`edges ${edges.length}${kindLine ? ` (${kindLine})` : ''}`)
+
+  const { of, names } = assign(graph, rules)
+  const count = (l) => graph.modules.filter((m) => of.get(m.id) === l).length
+  out.push(`layers ${names.length}`)
+  for (const n of names) out.push(`  ${n} ${count(n)}`)
+  const orphans = graph.modules.filter((m) => of.get(m.id) === UNASSIGNED)
+  out.push(`unassigned ${orphans.length}`)
+  // Named, not just counted: a module nobody placed is a layers.json to fix.
+  for (const m of orphans) out.push(`  ${m.id}`)
 
   const unresolved = edges.filter((e) => e.resolution === 'unresolved')
   out.push(`unresolved ${unresolved.length}`)
@@ -262,14 +354,30 @@ function report(graph) {
   return out.join('\n')
 }
 
+function readGraph(out) {
+  try {
+    return JSON.parse(fs.readFileSync(out, 'utf8'))
+  } catch {
+    die(`no graph at ${out}: run cast scan first`)
+  }
+}
+
 // --- cli --------------------------------------------------------------------
+
+const USAGE =
+  'usage: cast <scan|report> [--root <dir>]\n' +
+  '       cast edges --from <layer> --to <layer> [--root <dir>]'
 
 function main(argv) {
   const cmd = argv[0]
   let root = process.cwd()
+  let from = null
+  let to = null
   for (let i = 1; i < argv.length; i++) {
     if (argv[i] === '--root' && argv[i + 1]) root = path.resolve(argv[++i])
-    else die(`usage: cast <scan|report> [--root <dir>]`)
+    else if (cmd === 'edges' && argv[i] === '--from' && argv[i + 1]) from = argv[++i]
+    else if (cmd === 'edges' && argv[i] === '--to' && argv[i + 1]) to = argv[++i]
+    else die(USAGE)
   }
   const out = path.join(root, '.cast', 'graph.json')
 
@@ -281,17 +389,24 @@ function main(argv) {
     return 0
   }
   if (cmd === 'report') {
-    let graph
-    try {
-      graph = JSON.parse(fs.readFileSync(out, 'utf8'))
-    } catch {
-      die(`no graph at ${out}: run cast scan first`)
-    }
-    process.stdout.write(report(graph) + '\n')
+    const graph = readGraph(out)
+    process.stdout.write(report(graph, layerRules(root)) + '\n')
     return 0
   }
-  die('usage: cast <scan|report> [--root <dir>]')
+  if (cmd === 'edges') {
+    if (!from || !to) die(USAGE)
+    const graph = readGraph(out)
+    const { of } = assign(graph, layerRules(root))
+    const found = layerEdges(graph, of, from, to)
+    const lines = [`edges ${from} -> ${to} ${found.length}`]
+    // Each one with its file and its line: a layer edge is only actionable
+    // where the imports behind it can be opened.
+    for (const e of found) lines.push(`  ${e.file}:${e.line} -> ${e.to} (${e.kind})`)
+    process.stdout.write(lines.join('\n') + '\n')
+    return 0
+  }
+  die(USAGE)
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
-module.exports = { scan, report, cycles, imports }
+module.exports = { scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges }
