@@ -331,11 +331,11 @@ function viewData(graph, rules, checkRules, baseline) {
   }
 }
 
-// The expansion, once. `cast render --mermaid --expand` calls it here and the
-// page calls the very same source - `html` inlines `viewAt.toString()` - so the
-// picture a reader opens by clicking cannot drift from the one the command
-// prints. It closes over nothing but its arguments for that reason: a reference
-// to anything in this module would be undefined in the page.
+// The expansion mermaid draws: two altitudes, a layer or its modules, opened by
+// `cast render --mermaid --expand`. The page no longer calls it - it draws the
+// containment tree below, whose functions `html` inlines instead. Both read the
+// same `data`, so the two pictures answer for one graph at the altitude each of
+// them has.
 function viewAt(data, expand) {
   const esc = (p, n) => p + n.replace(/[^A-Za-z0-9]/g, (c) => '_' + c.charCodeAt(0).toString(16) + '_')
   const of = new Map()
