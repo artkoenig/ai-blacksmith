@@ -36,25 +36,22 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   (`M_src_2f_b_2e_ts`), the name only in the label - reversible, or `src/a-b.ts` and `src/a_b.ts`
   share one node. Mermaid's default altitude is layers: a module node without `--expand <layer>` is
   the bug `cast altitude` catches, and an edge collapsing to one node is dropped - no self-loop.
-- One description, `viewData` (layers, module-edge sites, rule marks, the counts `report`/`check`
-  print). Mermaid reads it at two altitudes through `viewAt(data, expand)`; the page reads it as a
-  tree, `treeId` -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`, with `marker`, `toggleOpen`
-  and `groupIds` beside them. `html` inlines all seven and `draw` by `toString()`: each closes over
-  nothing here and calls only the others, and one added goes in that list and in the exports too.
-- The tree is layer / each folder level / file, keyed by containment path (`logic/src/b.ts`), every
-  node carrying `modules`, its whole subtree. `viewTree` ends an arrow on the deepest *closed* node
-  holding it and drops one inside a node, so the arrows leaving it sum to the imports leaving its
-  subtree; `open` is ids, so any depth is nameable and `--expand` only seeds it, `hasChildren`
-  survives the closing.
+- One description, `viewData`: layers, module-edge sites, rule marks, the counts `report`/`check`
+  print. Mermaid reads it at two altitudes via `viewAt(data, expand)`, the page as a tree: `treeId`
+  -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`, with `marker`, `toggleOpen`, `groupIds`.
+  `html` inlines all seven and `draw` by `toString()`, each closing over nothing here.
+- The tree is layer / folder level / file, keyed by containment path (`logic/src/b.ts`), each node
+  carrying `modules`, its whole subtree. `viewTree` ends an arrow on the deepest *closed* node
+  holding it and drops one inside a node, so arrows leaving it sum to the imports leaving its
+  subtree; `open` is ids, so any depth is nameable and `--expand` only seeds it.
 - `layoutTree` stacks vertically at every level, an open box `HEAD + PAD + Σ children + GAP*(k-1)`:
   as tall as what it shows, never as its subtree (`cast compact layout`). `M` returns as `metrics`.
-- `M.TAP` (44) is the floor under `H`, `HEAD`, `LANE`, `CHAN`: `place` gives a node its header band
-  `hx/hy/hw/hh` and an edge a `TAP` box by its label, only the header toggles - the ground of an
-  open box answers no press - and transparent `hit`/`grab` shapes take what the drawn line is too
-  thin for. `marker` is the glyph, on a node with children alone; `toggleOpen` deletes one id and
-  nothing below it, so reopening shows what was open; `groupIds` is what open-all writes, close-all
-  `[]`, both buttons reached by id. For a phone: the viewport meta, `#graph-scroll` around an svg
-  keeping its own size, `overflow-x:hidden`, `touch-action`, never `svg{max-width:100%}`.
+- `M.TAP` (44) floors `H`, `HEAD`, `LANE`, `CHAN`: `place` gives a node a header band `hx/hy/hw/hh`,
+  an edge a `TAP` box at its label, and only that band toggles - the ground of an open box answers
+  no press. Transparent `hit`/`grab` shapes widen what is too thin to press; `marker` is the glyph,
+  on a node with children alone; `toggleOpen` deletes one id and nothing below it, so reopening
+  restores it. Phone: viewport meta, a self-sized svg in `#graph-scroll`, `overflow-x:hidden`,
+  `touch-action`, never `svg{max-width:100%}`.
 - `render` reads rules.json and baseline.json like `check`: severity colours and the rule labels an
   arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, only a flagged one is
   styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node
