@@ -188,16 +188,19 @@ two altitudes, the page carries a containment tree over the whole project - the 
 folder level, then the file - and any node with children opens at any depth. An open node keeps its
 outline and stacks its children inside it, so a box is only ever as tall as what it shows. A node's
 header is its control: pressing the header band across the top of a box opens it and closes it
-again, while the ground of an open box, where the children sit, answers no press. Every arrow runs between two closed nodes and is labelled with the number of
-module imports behind it: opening a node splits its arrows over the children that carry the imports,
+again, while the ground of an open box, where the children sit, answers no press. Every arrow runs
+between two closed nodes: opening a node splits its arrows over the children that carry the imports,
 and the arrows leaving a node always sum to the imports leaving its subtree. An arrow ends in a head
 on the module being imported, so which way the dependency runs is on the page rather than inferred,
 and the head takes the arrow's own colour and state: a breaking edge points in its severity's
-colour, one held by the baseline in the inherited grey. The label sits beside the lane the curve
-runs down, on a backing of its own, and is pushed clear of any label already there, so no count is
-read through a line or through another count. Under the count the arrow says which kinds of import
-it carries - `2 value, 1 type` - which is what tells an edge a rule's `kinds` deliberately spares
-from one no rule names. Clicking an arrow lists
+colour, one held by the baseline in the inherited grey. At rest the drawing carries boxes and
+pointed lines and nothing else - no arrow is labelled with the count behind it. A number is asked
+for: pointing at a node with a mouse, or pressing and holding it on a touch screen, keeps that
+node's own arrows at full strength, fades every other arrow, and lists one line per neighbour saying
+which way the dependency runs, how many module imports are behind it, which kinds it carries -
+`2 value, 1 type`, what tells an edge a rule's `kinds` deliberately spares from one no rule names -
+and the rule where one names it. Leaving the node, releasing the press, pressing elsewhere or
+opening a group ends it. Clicking an arrow still lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
 The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
 

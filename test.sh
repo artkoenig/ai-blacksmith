@@ -1047,6 +1047,19 @@ done
 # break: pulling mermaid off a cdn, which makes the page useless offline
 printf '%s\n' "$CAST_HTML" | grep -qE 'src="https?:|href="https?:' \
   && { fail "cast html" "the page loads an external asset: $CAST_HTML"; S=1; }
+# AC9 (of #47) the legend says how to ask for a number, and neither it nor the
+# README still claims an arrow carries its count on the page
+# break: taking the counts off the drawing and leaving the prose describing them
+printf '%s\n' "$CAST_HTML" | grep -qF 'press and hold it on a touch screen' \
+  || { fail "cast html" "the legend never says how to ask a node for its numbers"; S=1; }
+printf '%s\n' "$CAST_HTML" | grep -qF 'says under its count' \
+  && { fail "cast html" "the legend still says an arrow carries its count"; S=1; }
+grep -qF 'pressing and holding it on a touch screen' plugins/cast/README.md \
+  || { fail "cast html" "README.md never says how to ask a node for its numbers"; S=1; }
+grep -qF 'The label sits beside the lane the curve' plugins/cast/README.md \
+  && { fail "cast html" "README.md still places a count beside the lane"; S=1; }
+grep -qF 'is labelled with the number of' plugins/cast/README.md \
+  && { fail "cast html" "README.md still says an arrow on the page is labelled with its count"; S=1; }
 [ "$S" = 0 ] && ok "cast html"
 
 
@@ -1576,7 +1589,7 @@ CAST_DATA="$(page_data)"
 pagejs() { CAST_JS="$PWD/plugins/cast/scripts/cast.js" DATA="$CAST_DATA" PAGE="$CAST_PAGE" node -e '
   const bad=(s)=>{console.log(s);process.exit(1)}
   const cast=require(process.env.CAST_JS)
-  const {treeId,treeOf,viewTree,layoutTree,marker,toggleOpen,groupIds}=cast
+  const {treeId,treeOf,viewTree,layoutTree,marker,toggleOpen,groupIds,edgesAt,edgeLines}=cast
   const fs=require("fs")
   const page=fs.readFileSync(process.env.PAGE,"utf8")
   let data
@@ -1983,46 +1996,208 @@ grep -qF "fill: m.color" "$CAST_PAGE" \
   || { fail "cast arrow direction" "the arrowhead is not filled in its arrow's colour"; S=1; }
 [ "$S" = 0 ] && ok "cast arrow direction"
 
-# AC2 (of #46) the count is readable where the arrow is drawn: the curve runs
-# down its lane and the digits sit clear of it, on a backing of their own, and no
-# two labels stack.
+# AC1 (of #47) the drawing at rest carries boxes and pointed lines and nothing
+# else: no label box in the layout, no count on the page, and no extent a label
+# sized. The suite `cast weight legible` tested where that label sat, and #47
+# takes the label off the page, so it is replaced by this one and not dropped.
+# AC2 (of #47) the edge still knows what it carries, as data
 S=0
-# break: placing the label on the lane midpoint, where its own curve crosses it,
-# or letting two neighbouring lanes drop their counts on one another
+# break: keeping the label pass in layoutTree, which puts every box back
 O="$(pagejs '
   const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
   const M=l.metrics
-  if (l.edges.length<2) bad("the fixture has too few arrows to crowd")
-  let wide=0
+  if (l.edges.length<2) bad("the fixture has too few arrows to say anything about crowding")
   for (const e of l.edges) {
-    if (e.bx<e.mx+M.PAD) bad("the label box starts at "+e.bx+", on the lane the curve runs down at "+e.mx)
-    if (e.bw<M.TAP||e.bh<M.TAP) bad("the label box is "+e.bw+"x"+e.bh+", under the tap floor "+M.TAP)
-    if (e.hx!==e.bx||e.hy!==e.by||e.hw!==e.bw||e.hh!==e.bh) bad("the label is not its own press target")
-    if (e.lx<e.bx||e.lx>e.bx+e.bw) bad("the count is drawn outside its backing")
-    if (e.ly<e.by||e.ly>e.by+e.bh) bad("the count is drawn above or below its backing")
-    if (e.kindLabel&&(e.ky<e.by||e.ky>e.by+e.bh)) bad("the kinds line runs out of the backing")
-    if (e.by+e.bh>l.height) bad("the label is drawn below the drawing, at "+(e.by+e.bh)+" of "+l.height)
-    if (e.bw>M.LANE) wide++
+    for (const k of ["bx","by","bw","bh","hx","hy","hw","hh","lx","ly","ky"])
+      if (e[k]!==undefined) bad("the arrow still carries the label geometry "+k+"="+e[k])
+    // break: taking the data off the edge along with the drawing of it
+    for (const k of ["weight","label","kinds","kindCounts","kindLabel","state","sites"])
+      if (e[k]===undefined) bad("the arrow no longer carries "+k)
+    if (!("rule" in e)) bad("the arrow no longer carries rule")
+    if (e.weight!==e.sites.length) bad("the arrow is weighted "+e.weight+" and carries "+e.sites.length+" imports")
   }
-  if (!wide) bad("no label is wider than a lane: the fixture cannot crowd two counts")
-  for (let i=0;i<l.edges.length;i++) for (let j=i+1;j<l.edges.length;j++) {
-    const a=l.edges[i], b=l.edges[j]
-    if (a.bx<b.bx+b.bw&&b.bx<a.bx+a.bw&&a.by<b.by+b.bh&&b.by<a.by+a.bh)
-      bad("two counts stack on one another: \""+a.label+"\" and \""+b.label+"\"")
-  }
-')" || { fail "cast weight legible" "$O"; S=1; }
-# break: drawing the digits straight onto the curves with nothing behind them
+  // break: sizing the drawing by a label box, which leaves the page wider and
+  // taller than the lanes and the boxes on it
+  const right=Math.max(...l.flat.map(n=>n.x+n.w))
+  const lane=Math.max(...l.edges.map(e=>e.mx))
+  const low=Math.max(...l.flat.map(n=>n.y+n.h))
+  if (l.width!==Math.max(right,lane)+M.PAD*2)
+    bad("the drawing is "+l.width+" wide, not the last lane ("+lane+") plus padding")
+  if (l.height!==low+M.PAD)
+    bad("the drawing is "+l.height+" tall, not the last box ("+low+") plus padding")
+')" || { fail "cast arrows alone" "$O"; S=1; }
+# break: leaving the second pass that draws the count over the lanes
+grep -qF "class: 'weight'" "$CAST_PAGE" \
+  && { fail "cast arrows alone" "the page still draws a count beside an arrow"; S=1; }
 grep -qF "class: 'weight-bg'" "$CAST_PAGE" \
-  || { fail "cast weight legible" "the count is drawn with no backing under it"; S=1; }
-grep -q '\.weight-bg{fill:#fff' "$CAST_PAGE" \
-  || { fail "cast weight legible" "the backing of the count is not opaque"; S=1; }
-# break: drawing each arrow and its label together, so the next curve crosses the
-# label before it
-grep -qF "for (const e of l.edges) {" "$CAST_PAGE" \
-  || { fail "cast weight legible" "the page does not loop over the arrows"; S=1; }
-[ "$(grep -cF 'for (const e of l.edges) {' "$CAST_PAGE")" = 2 ] \
-  || { fail "cast weight legible" "the curves and the labels are not drawn in two passes"; S=1; }
-[ "$S" = 0 ] && ok "cast weight legible"
+  && { fail "cast arrows alone" "the page still draws a backing for a count"; S=1; }
+grep -qF "class: 'kinds'" "$CAST_PAGE" \
+  && { fail "cast arrows alone" "the page still draws the kinds beside an arrow"; S=1; }
+[ "$(grep -cF 'for (const e of l.edges) {' "$CAST_PAGE")" = 1 ] \
+  || { fail "cast arrows alone" "the page still passes over the arrows twice, once for the labels"; S=1; }
+# what the arrow carries is still there to be asked for
+# break: dropping the press that lists the imports along with the label
+grep -qF "line.addEventListener('click', () => sites(e))" "$CAST_PAGE" \
+  || { fail "cast arrows alone" "a press on an arrow no longer lists its imports"; S=1; }
+grep -qF "e.weight + ' module edges'" "$CAST_PAGE" \
+  || { fail "cast arrows alone" "the list of imports is no longer headed by the count behind the arrow"; S=1; }
+[ "$S" = 0 ] && ok "cast arrows alone"
+
+# AC3 (of #47) the set of arrows a node answers for is computed from the laid-out
+# edges, holds every arrow that starts or ends at the node and nothing else, and
+# is empty for a node no arrow touches
+S=0
+# break: returning the outgoing arrows alone, or every arrow on the drawing
+O="$(pagejs '
+  const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
+  const id=treeId("ui/src/a.ts")
+  const mine=edgesAt(l.edges,id)
+  if (mine.length===0) bad("the node answers for no arrow at all")
+  if (mine.length===l.edges.length) bad("the node answers for every arrow on the drawing")
+  if (!mine.some(e=>e.from===id)) bad("no arrow leaving the node is in its set")
+  if (!mine.some(e=>e.to===id)) bad("no arrow arriving at the node is in its set")
+  for (const e of mine) if (e.from!==id&&e.to!==id) bad("an arrow that misses the node is in its set")
+  for (const e of l.edges)
+    if ((e.from===id||e.to===id)&&mine.indexOf(e)<0) bad("an arrow touching the node is missing from its set")
+  // break: answering a node no arrow touches with something
+  const top=layoutTree(view())
+  const lone=top.flat.find(n=>!top.edges.some(e=>e.from===n.id||e.to===n.id))
+  if (!lone) bad("the fixture has no node without arrows")
+  if (edgesAt(top.edges,lone.id).length!==0)
+    bad("the node "+lone.label+" is touched by no arrow and answers for "+edgesAt(top.edges,lone.id).length)
+  // computed, not read off a drawing: it answers before anything is drawn, and
+  // the same twice - break: caching the last answer, or reaching for the DOM
+  if (edgesAt(l.edges,id).length!==mine.length) bad("the set is not the same the second time it is asked for")
+')" || { fail "cast highlight set" "$O"; S=1; }
+# break: computing the set in the page from the svg it just drew
+grep -qF 'function edgesAt(edges, id)' "$CAST_PAGE" \
+  || { fail "cast highlight set" "the page does not carry the function that computes the set"; S=1; }
+grep -qF 'edgesAt(laid.edges, id)' "$CAST_PAGE" \
+  || { fail "cast highlight set" "the page does not highlight from the laid-out edges"; S=1; }
+[ "$S" = 0 ] && ok "cast highlight set"
+
+# AC4 (of #47) the panel names count, kinds, direction and rule per neighbour,
+# one line each, and says so in one line where there is nothing to name
+S=0
+# break: printing the neighbours and dropping the count, the kinds or the way the
+# dependency runs
+O="$(pagejs '
+  const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
+  const id=treeId("ui/src/a.ts")
+  const lines=edgeLines(l.edges,id)
+  const mine=edgesAt(l.edges,id)
+  if (lines.length!==mine.length) bad(lines.length+" lines for "+mine.length+" arrows")
+  const out=lines.filter(s=>s.indexOf("imports ")===0)
+  const back=lines.filter(s=>s.indexOf("imported by ")===0)
+  if (out.length!==3||back.length!==1) bad("the directions read "+out.length+" out and "+back.length+" in, not 3 and 1")
+  const t=lines.find(s=>s.indexOf("imports t.ts")===0)
+  if (!t) bad("the type import neighbour is not named: "+lines.join(" | "))
+  if (t.indexOf("1 module edges")<0) bad("the line does not say how many imports: "+t)
+  if (t.indexOf("(1 type)")<0) bad("the line does not say which kinds and how many: "+t)
+  const flagged=lines.find(s=>s.indexOf("imports b.ts")===0)
+  if (flagged.indexOf("ui-owns-nothing")<0) bad("the line does not name the rule the edge holds: "+flagged)
+  if (flagged.indexOf("(inherited)")<0) bad("the line does not say the rule is held by the baseline: "+flagged)
+  const broken=lines.find(s=>s.indexOf("imported by c.ts")===0)
+  if (broken.indexOf("no-back-edge")<0) bad("the line does not name the rule the edge breaks: "+broken)
+  const plain=lines.find(s=>s.indexOf("imports c.ts")===0)
+  if (/no-back-edge|ui-owns-nothing|logic-internal/.test(plain)) bad("an edge no rule names was given one: "+plain)
+  // the kinds are counted, not listed - break: dropping the count of each kind
+  const top=layoutTree(view())
+  const ui=edgeLines(top.edges,treeId("ui")).find(s=>s.indexOf("imports logic")===0)
+  if (ui.indexOf("3 module edges")<0) bad("the aggregated arrow does not carry its weight: "+ui)
+  if (ui.indexOf("(1 value, 1 type, 1 dynamic)")<0) bad("the aggregated arrow does not count each kind: "+ui)
+  // break: leaving a node no arrow touches with an empty panel
+  const lone=top.flat.find(n=>!top.edges.some(e=>e.from===n.id||e.to===n.id))
+  const none=edgeLines(top.edges,lone.id)
+  if (none.length!==1) bad("a node with no arrows says it in "+none.length+" lines")
+  if (!/no arrows/.test(none[0])) bad("a node with no arrows says: "+none[0])
+')" || { fail "cast highlight info" "$O"; S=1; }
+# break: keeping the lines out of the page, or building them in the drawing code
+grep -qF 'function edgeLines(edges, id)' "$CAST_PAGE" \
+  || { fail "cast highlight info" "the page does not carry the function that writes the lines"; S=1; }
+grep -qF 'for (const line of edgeLines(laid.edges, id))' "$CAST_PAGE" \
+  || { fail "cast highlight info" "the panel is not filled from those lines"; S=1; }
+[ "$S" = 0 ] && ok "cast highlight info"
+
+# AC5 (of #47) the highlight subtracts: every arrow outside the set is faded and
+# every arrow inside it is left exactly as it is drawn at rest
+S=0
+# break: painting the highlighted arrows in a highlight colour, or thickening
+# them, which restyles what it names instead of fading what it does not
+HL="$(sed -n '/const highlight = (id, label) => {/,/^  const unhighlight/p' "$CAST_PAGE")"
+[ -n "$HL" ] \
+  || { fail "cast highlight dims" "the page carries no highlight"; S=1; }
+printf '%s\n' "$HL" | grep -qF "toggle('dim', !mine.has(a.e))" \
+  || { fail "cast highlight dims" "the highlight does not fade the arrows outside the set"; S=1; }
+printf '%s\n' "$HL" | grep -qE "stroke|marker-end|fill|setAttribute" \
+  && { fail "cast highlight dims" "the highlight restyles an arrow instead of only fading the others"; S=1; }
+# break: fading with a rule that catches the boxes and the labels too
+grep -qF '.edge.dim{opacity:' "$CAST_PAGE" \
+  || { fail "cast highlight dims" "nothing on the page fades a dimmed arrow"; S=1; }
+[ "$(grep -o '\.dim{' "$CAST_PAGE" | wc -l | tr -d ' ')" = 1 ] \
+  || { fail "cast highlight dims" "more than the arrows is faded by the highlight"; S=1; }
+grep -qE '\.node[^{]*\.dim|\.dim[^{]*\.node' "$CAST_PAGE" \
+  && { fail "cast highlight dims" "a node is faded by the highlight"; S=1; }
+[ "$S" = 0 ] && ok "cast highlight dims"
+
+# AC6 (of #47) a mouse enters and leaves, and the binding is a mouse's alone: a
+# touch screen fires pointerenter on first contact, so an unguarded binding
+# highlights on every tap a phone makes
+S=0
+# break: binding pointerenter with no pointerType guard
+grep -qF "head.addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse') highlight(n.id, n.label) })" "$CAST_PAGE" \
+  || { fail "cast highlight mouse" "pointing at a node with a mouse does not highlight it, or is not bound for a mouse alone"; S=1; }
+grep -qF "head.addEventListener('pointerleave', (ev) => { if (ev.pointerType === 'mouse') unhighlight() })" "$CAST_PAGE" \
+  || { fail "cast highlight mouse" "leaving a node with a mouse does not clear the highlight, or is not bound for a mouse alone"; S=1; }
+[ "$(grep -cF "addEventListener('pointerenter'" "$CAST_PAGE")" = 1 ] \
+  || { fail "cast highlight mouse" "pointerenter is bound more than once, and one of them is unguarded"; S=1; }
+[ "$S" = 0 ] && ok "cast highlight mouse"
+
+# AC7 (of #47) a long press highlights on a touch screen and the click the
+# release brings is eaten, so a press that highlights never also opens the group
+S=0
+# break: highlighting on pointerdown, which makes every tap highlight
+grep -qF "if (ev.pointerType === 'mouse') return" "$CAST_PAGE" \
+  || { fail "cast highlight touch" "the press is not held back from a mouse"; S=1; }
+grep -qF "timer: setTimeout(() => { press = null; suppress = true; highlight(n.id, n.label) }, HOLD)" "$CAST_PAGE" \
+  || { fail "cast highlight touch" "no timer turns a press into a highlight"; S=1; }
+# break: leaving the click through, so the press that highlights also toggles
+grep -qF "if (suppress) { suppress = false; ev.stopPropagation(); return }" "$CAST_PAGE" \
+  || { fail "cast highlight touch" "the click after a press that highlighted still opens the group"; S=1; }
+# break: letting a scroll or a release count as a press
+grep -qF "if (press && (Math.abs(ev.clientX - press.x) > SLOP || Math.abs(ev.clientY - press.y) > SLOP)) cancelPress()" "$CAST_PAGE" \
+  || { fail "cast highlight touch" "a move beyond the slop does not cancel the press"; S=1; }
+grep -qF "head.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })" "$CAST_PAGE" \
+  || { fail "cast highlight touch" "a release does not cancel the press"; S=1; }
+grep -qF "head.addEventListener('pointercancel', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })" "$CAST_PAGE" \
+  || { fail "cast highlight touch" "a cancelled press is left running"; S=1; }
+[ "$S" = 0 ] && ok "cast highlight touch"
+
+# AC8 (of #47) the highlight ends: on leaving, on releasing, on a press
+# elsewhere, and on the render that opening or closing a group brings
+S=0
+# break: fading the arrows and never restoring them, or leaving the panel full
+O="$(pagejs '
+  const un=page.slice(page.indexOf("const unhighlight = () => {"))
+  const body=un.slice(0,un.indexOf("\n  }")+4)
+  if (!body) bad("the page carries no way back from a highlight")
+  if (body.indexOf("classList.remove(\x27dim\x27)")<0) bad("clearing the highlight does not restore the faded arrows")
+  if (body.indexOf("panel.textContent = \x27\x27")<0) bad("clearing the highlight does not empty the panel")
+  if (body.indexOf("held = null")<0) bad("clearing the highlight leaves the node held")
+')" || { fail "cast highlight ends" "$O"; S=1; }
+# break: pressing elsewhere on a phone, where no pointer leaves, leaves the
+# drawing faded with no way back
+grep -qF "document.addEventListener('pointerdown', (ev) => {" "$CAST_PAGE" \
+  || { fail "cast highlight ends" "a press away from the highlighted node never clears it"; S=1; }
+grep -qF "if (!g || g.id !== held) unhighlight()" "$CAST_PAGE" \
+  || { fail "cast highlight ends" "a press away from the highlighted node does not clear it"; S=1; }
+# break: rebuilding the drawing and leaving the old highlight state behind
+RB="$(sed -n '/^  function render() {/,/^    svg.textContent/p' "$CAST_PAGE")"
+printf '%s\n' "$RB" | grep -qF 'unhighlight()' \
+  || { fail "cast highlight ends" "a render does not clear the highlight it started with"; S=1; }
+printf '%s\n' "$RB" | grep -qF 'arrows = []' \
+  || { fail "cast highlight ends" "a render does not start the set of arrows again"; S=1; }
+[ "$S" = 0 ] && ok "cast highlight ends"
 
 # AC3 (of #46) an arrow carries the kinds of the imports behind it, so an edge a
 # rule's `kinds` spares reads differently from one no rule names.
@@ -2047,9 +2222,11 @@ O="$(pagejs '
   if (other.kindLabel===spared.kindLabel)
     bad("an import the rule spares reads the same as one it does not name: "+other.kindLabel)
 ')" || { fail "cast arrow kinds" "$O"; S=1; }
-# break: keeping the kinds in the data and never drawing them
-grep -qF "class: 'kinds' }, e.kindLabel" "$CAST_PAGE" \
-  || { fail "cast arrow kinds" "the page never draws the kinds of an arrow"; S=1; }
+# break: keeping the kinds in the data and never showing them. #47 took the
+# kinds off the drawing, so the panel is where they are read now: the press on an
+# arrow heads its imports with them, and the highlight names them per neighbour.
+grep -qF "(e.kindLabel ? ' (' + e.kindLabel + ')' : '')" "$CAST_PAGE" \
+  || { fail "cast arrow kinds" "the page never shows the kinds of an arrow"; S=1; }
 grep -qF "e.kindLabel ? ' (' + e.kindLabel + ')' : ''" "$CAST_PAGE" \
   || { fail "cast arrow kinds" "the list of imports is not headed by the kinds behind the arrow"; S=1; }
 printf '%s\n' "$CAST_DATA" | grep -q '"kind":"type"' \
@@ -2207,10 +2384,6 @@ O="$(pagejs '
   for (const n of l.flat) {
     if (n.hh<TAP) bad("the header of "+n.key+" is "+n.hh+" high, below "+TAP)
     if (n.hw<TAP) bad("the header of "+n.key+" is "+n.hw+" wide, below "+TAP)
-  }
-  for (const e of l.edges) {
-    if (e.hw<TAP||e.hh<TAP) bad("an arrow label offers "+e.hw+"x"+e.hh+", below "+TAP)
-    if (e.hx+e.hw>l.width) bad("an arrow label target runs off the drawing")
   }
   // two arrows never share one press
   const lanes=l.edges.map(e=>e.mx).sort((a,b)=>a-b)

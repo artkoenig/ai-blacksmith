@@ -581,11 +581,11 @@ function viewTree(data, open) {
 // open one is a header and its children stacked inside it, so a box is only ever
 // as tall as what it shows. The arrows run in lanes down the right of the stack.
 // Every number a finger has to hit is `TAP`: the header of a node, the height of
-// a closed box, the lane an arrow runs down and the box around its label. 44 css
+// a closed box and the lane an arrow runs down. 44 css
 // pixels is the smallest target a press lands on reliably, so it is the floor for
 // `H`, `HEAD`, `LANE` and `CHAN` rather than a value the page adds on top.
 function layoutTree(view) {
-  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CHAN: 44, LANE: 44, TAP: 44, CHAR: 7, LINE: 16 }
+  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CHAN: 44, LANE: 44, TAP: 44 }
   const clone = (n) => ({ ...n, children: n.children.map(clone) })
   const size = (n) => {
     if (!n.open) {
@@ -629,37 +629,20 @@ function layoutTree(view) {
   roots.forEach(collect)
   const at = new Map(flat.map((n) => [n.id, n]))
   const right = Math.max(...flat.map((n) => n.x + n.w), 0)
-  // The label sits beside the lane its arrow runs down, never on it: the curve
-  // is vertical at `mx`, so a box starting a padding to the right of `mx` leaves
-  // the digits clear of the line. Where two labels would land on one another -
-  // neighbouring lanes are `LANE` apart and a rule name is wider than that - the
-  // later one is pushed below the ones already placed, so no count is read
-  // through another. The box is the label's target too, never under `TAP`.
-  const placed = []
+  // An arrow is a curve down a lane of its own and nothing else: no box, no
+  // digits, no backing. What it carries travels with it as data - `weight`,
+  // `label`, `kinds`, `rule`, `sites` - and is read out on demand, by pressing
+  // the arrow or by pointing at one of the nodes it joins. The labels of both
+  // ends come along so the panel can name a neighbour without the drawing.
   const edges = view.edges.map((e, i) => {
     const a = at.get(e.from)
     const b = at.get(e.to)
-    const y1 = a.y + a.h / 2
-    const y2 = b.y + b.h / 2
-    const mx = right + M.CHAN + i * M.LANE
-    const lines = e.kindLabel ? [e.label, e.kindLabel] : [e.label]
-    const bw = Math.max(M.TAP, ...lines.map((s) => s.length * M.CHAR + 12))
-    const bh = Math.max(M.TAP, lines.length * M.LINE + 10)
-    const bx = mx + M.PAD
-    let by = (y1 + y2) / 2 - bh / 2
-    const over = (o) => bx < o.bx + o.bw && o.bx < bx + bw && by < o.by + o.bh && o.by < by + bh
-    for (let guard = 0; guard < placed.length + 1; guard++) {
-      const clash = placed.filter(over)
-      if (clash.length === 0) break
-      by = Math.max(...clash.map((o) => o.by + o.bh)) + M.GAP
-    }
-    const box = { bx, by, bw, bh }
-    placed.push(box)
-    const ly = by + (bh - lines.length * M.LINE) / 2 + M.LINE - 4
     return {
-      ...e, x1: a.x + a.w, y1, x2: b.x + b.w, y2, mx, my: by + bh / 2,
-      ...box, lx: bx + 6, ly, ky: ly + M.LINE,
-      hx: bx, hy: by, hw: bw, hh: bh,
+      ...e,
+      x1: a.x + a.w, y1: a.y + a.h / 2,
+      x2: b.x + b.w, y2: b.y + b.h / 2,
+      mx: right + M.CHAN + i * M.LANE,
+      fromLabel: a.label, toLabel: b.label,
     }
   })
   // One marker definition per colour and state, referenced by every arrow that
@@ -676,8 +659,10 @@ function layoutTree(view) {
     open: view.open,
     counts: view.counts,
     metrics: M,
-    width: Math.max(right, ...edges.map((e) => e.hx + e.hw)) + M.PAD * 2,
-    height: Math.max(...flat.map((n) => n.y + n.h), 0, ...edges.map((e) => e.by + e.bh)) + M.PAD,
+    // The drawing ends at the last lane and at the last box: nothing beside an
+    // arrow widens it and nothing under one makes it taller.
+    width: Math.max(right, ...edges.map((e) => e.mx)) + M.PAD * 2,
+    height: Math.max(...flat.map((n) => n.y + n.h), 0) + M.PAD,
   }
 }
 
@@ -711,6 +696,34 @@ function groupIds(data) {
   return out
 }
 
+// The arrows one node answers for: the ones that leave it and the ones that
+// arrive at it. It is computed from the laid-out edges rather than read off the
+// drawing, so the set is the same whether anything has been drawn yet or not. A
+// node no arrow touches answers with the empty set, which is a fact about the
+// module - it depends on nothing outside itself and nothing outside it depends
+// on it - rather than a failure to find anything.
+function edgesAt(edges, id) {
+  return edges.filter((e) => e.from === id || e.to === id)
+}
+
+// What the panel says while a node is highlighted: one line per arrow, naming
+// which way the dependency runs, how many module imports are behind it, which
+// kinds they are and how many of each, and the rule where one names the edge.
+// This is the count that used to sit beside the lane, asked for instead of
+// permanent. A node with no arrows says so in a line of its own: an empty panel
+// reads as a page that failed rather than as an answer.
+function edgeLines(edges, id) {
+  const mine = edgesAt(edges, id)
+  if (mine.length === 0) return ['no arrows: nothing here imports across a boundary, and nothing imports it']
+  return mine.map((e) => {
+    const out = e.from === id
+    const way = out ? 'imports ' : 'imported by '
+    const rule = e.rule ? ' - ' + e.rule + (e.state === 'inherited' ? ' (inherited)' : '') : ''
+    return way + (out ? e.toLabel : e.fromLabel) + ': ' + e.weight + ' module edges' +
+      (e.kindLabel ? ' (' + e.kindLabel + ')' : '') + rule
+  })
+}
+
 // The page's own script, written here and inlined by `html` through
 // `toString()`. It is never called in node: it exists to be read as source, and
 // it may touch nothing this module holds beyond the functions `fns` inlines
@@ -741,6 +754,56 @@ function draw() {
     }
     panel.appendChild(ul)
   }
+  // The highlight is state of the drawing, never of the data: the node being
+  // pointed at, the arrows it answers for left exactly as they are drawn at
+  // rest, and every other arrow faded. Fading is all it does - it subtracts from
+  // the others rather than restyling the ones it names, so an arrow's colour,
+  // width, dash and head still say what they said before.
+  let laid = null
+  let arrows = []
+  let held = null
+  const highlight = (id, label) => {
+    held = id
+    const mine = new Set(edgesAt(laid.edges, id))
+    for (const a of arrows) a.line.classList.toggle('dim', !mine.has(a.e))
+    panel.textContent = ''
+    const h = document.createElement('h3')
+    h.textContent = label
+    panel.appendChild(h)
+    const ul = document.createElement('ul')
+    for (const line of edgeLines(laid.edges, id)) {
+      const li = document.createElement('li')
+      li.textContent = line
+      ul.appendChild(li)
+    }
+    panel.appendChild(ul)
+  }
+  // Nothing highlighted is not something to undo: leaving a node the reader
+  // never highlighted would otherwise wipe the list of imports they pressed an
+  // arrow for.
+  const unhighlight = () => {
+    if (held === null) return
+    held = null
+    for (const a of arrows) a.line.classList.remove('dim')
+    panel.textContent = ''
+  }
+  // A finger has no hover, so the press itself is timed: `HOLD` elapsed on one
+  // spot is the question, anything shorter or further is the tap it always was.
+  const HOLD = 450
+  const SLOP = 10
+  let press = null
+  let suppress = false
+  const cancelPress = () => {
+    if (press) clearTimeout(press.timer)
+    press = null
+  }
+  // Pressing anything that is not the highlighted node ends the highlight: on a
+  // phone there is no pointer to move away, so this is the way back.
+  document.addEventListener('pointerdown', (ev) => {
+    if (held === null) return
+    const g = ev.target && ev.target.closest ? ev.target.closest('.node') : null
+    if (!g || g.id !== held) unhighlight()
+  })
   const toggle = (id) => {
     toggleOpen(open, id)
     panel.textContent = ''
@@ -759,6 +822,12 @@ function draw() {
   function render() {
     const l = layoutTree(viewTree(data, Object.keys(open)))
     const M = l.metrics
+    // Every arrow is drawn again from nothing, so no faded one survives a
+    // render: the highlight ends when the drawing it described does.
+    unhighlight()
+    cancelPress()
+    laid = l
+    arrows = []
     svg.textContent = ''
     svg.setAttribute('viewBox', '0 0 ' + l.width + ' ' + l.height)
     // The drawing keeps its own size in css pixels and the container around it
@@ -781,11 +850,40 @@ function draw() {
       const ty = n.hy + n.hh / 2 + 5
       if (m) head.appendChild(el('text', { x: n.hx + 10, y: ty, class: 'marker' }, m))
       head.appendChild(el('text', { x: n.hx + (m ? 28 : 10), y: ty }, n.label))
+      // A mouse points and the node answers. `pointerenter` is bound for a mouse
+      // alone: a touch screen fires it on the first contact, so an unguarded
+      // binding highlights on every tap a phone makes.
+      head.addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse') highlight(n.id, n.label) })
+      head.addEventListener('pointerleave', (ev) => { if (ev.pointerType === 'mouse') unhighlight() })
+      // A finger asks by holding. The timer elapses and the node highlights and
+      // the click the release brings is eaten, so a press that highlights never
+      // also opens the group; a release, a cancel or a move beyond the slop
+      // before it elapses leaves the tap a tap.
+      head.addEventListener('pointerdown', (ev) => {
+        if (ev.pointerType === 'mouse') return
+        suppress = false
+        cancelPress()
+        press = {
+          x: ev.clientX,
+          y: ev.clientY,
+          timer: setTimeout(() => { press = null; suppress = true; highlight(n.id, n.label) }, HOLD),
+        }
+      })
+      head.addEventListener('pointermove', (ev) => {
+        if (press && (Math.abs(ev.clientX - press.x) > SLOP || Math.abs(ev.clientY - press.y) > SLOP)) cancelPress()
+      })
+      head.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })
+      head.addEventListener('pointercancel', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })
       if (n.hasChildren) {
         head.setAttribute('role', 'button')
         head.setAttribute('tabindex', '0')
         head.setAttribute('aria-expanded', n.open === true ? 'true' : 'false')
-        head.addEventListener('click', (ev) => { ev.stopPropagation(); toggle(n.id) })
+        head.addEventListener('click', (ev) => {
+          // The click a release brings after a press that highlighted is eaten
+          // once: what asked for the numbers never also opens the group.
+          if (suppress) { suppress = false; ev.stopPropagation(); return }
+          ev.stopPropagation(); toggle(n.id)
+        })
       }
       g.appendChild(head)
       svg.appendChild(g)
@@ -805,8 +903,9 @@ function draw() {
       defs.appendChild(mk)
     }
     svg.appendChild(defs)
-    // Every curve first, every label after: a label drawn before the next arrow
-    // would be crossed by it, whatever backing it carries.
+    // Boxes and pointed lines, and nothing else. What an arrow carries is read
+    // by pressing it or by pointing at a node it joins, so no digits are drawn
+    // over the lanes and no arrow needs a backing to stay legible.
     for (const e of l.edges) {
       const d = 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2
       const line = el('path', {
@@ -823,21 +922,7 @@ function draw() {
       const grab = el('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': M.TAP, class: 'edge grab' })
       grab.addEventListener('click', () => sites(e))
       svg.appendChild(grab)
-    }
-    for (const e of l.edges) {
-      // The backing is what keeps the count readable where the arrows run: it
-      // covers the curves behind the digits, and it is the label's target.
-      const back = el('rect', { x: e.hx, y: e.hy, width: e.hw, height: e.hh, rx: 4, class: 'weight-bg' })
-      back.addEventListener('click', () => sites(e))
-      svg.appendChild(back)
-      const t = el('text', { x: e.lx, y: e.ly, fill: e.color, class: 'weight' }, e.label)
-      t.addEventListener('click', () => sites(e))
-      svg.appendChild(t)
-      if (e.kindLabel) {
-        const k = el('text', { x: e.lx, y: e.ky, fill: e.color, class: 'kinds' }, e.kindLabel)
-        k.addEventListener('click', () => sites(e))
-        svg.appendChild(k)
-      }
+      arrows.push({ e, line })
     }
   }
   render()
@@ -892,11 +977,10 @@ const PAGE_CSS = [
   '.hit,.node .hit{fill:transparent;pointer-events:all}',
   '.edge{cursor:pointer}',
   '.edge.grab{pointer-events:stroke}',
-  // The count reads off a backing of its own, so the curves behind it do not run
-  // through the digits. Both lines are anchored at the start, beside the lane.
-  '.weight-bg{fill:#fff;fill-opacity:.92;stroke:#ddd;pointer-events:all;cursor:pointer}',
-  '.weight{font-size:13px;text-anchor:start;cursor:pointer}',
-  '.kinds{font-size:11px;text-anchor:start;cursor:pointer;opacity:.8}',
+  // The one thing a highlight does to an arrow it did not name: fade it. The
+  // arrows it does name are left alone, so their colour, width, dash and head
+  // are the ones they carry at rest.
+  '.edge.dim{opacity:.12}',
   '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
   '#mermaid{overflow-x:auto}',
 ].join('')
@@ -926,7 +1010,7 @@ function html(graph, rules, expand, checkRules, baseline) {
   // `--expand <layer>` opens that layer's node, the one state the command can
   // name; every deeper node is opened by clicking it.
   const embedded = JSON.stringify({ ...data, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
-  const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, draw]
+  const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, edgesAt, edgeLines, draw]
   const script = fns.map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
   return [
     '<!doctype html>',
@@ -938,7 +1022,7 @@ function html(graph, rules, expand, checkRules, baseline) {
     '</head>',
     '<body>',
     '<h1>cast</h1>',
-    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow points at the module being imported, in its own colour, and says under its count which kinds of import it carries - value, type or dynamic.</p>',
+    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow points at the module being imported, in its own colour, and carries no number on the page. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
     '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
     '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',
@@ -1833,6 +1917,7 @@ if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
   viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
+  edgesAt, edgeLines,
   readRules, violations, check, preview, readBaseline, ratchet,
   readPlan, simulateGraph, simulate, layerMetrics,
 }
