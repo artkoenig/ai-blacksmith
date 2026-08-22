@@ -11,8 +11,11 @@ paths:
   contract against a fixture project, every hook decision, the startup measurement against a
   fixture agent and a synthetic transcript, that the project rules are tracked, that every area
   note parses and still globs something, and the workflow control flow against stubbed agents -
-  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id, and twenty-three
-  `cast *` suites over one scanned fixture project. The cast fixture ships its own
+  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id, and the
+  `cast *` suites over one scanned fixture project (44 of them; count with
+  `bash test.sh | grep -c '^ok   cast'` rather than trusting a number written here). The page suites
+  read `page.html`, its embedded data block and the tree functions `cast.js` exports - never a
+  browser. The cast fixture ships its own
   `.cast/layers.json`, so every `cast report` assertion sees the layer sections too, and the
   `cast check` suites rewrite its `.cast/rules.json` per case - rules are read at check time, so
   none of them rescans. The `cast baseline` and `cast ratchet` suites also write and remove its

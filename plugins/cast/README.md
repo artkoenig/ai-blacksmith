@@ -176,9 +176,22 @@ graph LR
 ```
 
 `--expand <layer>` resolves that one layer to its modules, in a subgraph, and leaves every other
-layer a single node; an edge into it lands on the module, not on the layer. `--html <file>` writes
-the same view as one self-contained page - it carries the layer names and fetches nothing. How the
-page looks is not a claim it makes.
+layer a single node; an edge into it lands on the module, not on the layer.
+
+An edge that breaks a rule in `.cast/rules.json` is drawn in the colour of its severity and
+labelled with the rule name; one held by `.cast/baseline.json` is labelled `(inherited)` and drawn
+in grey. The render reads both files at render time, exactly as `cast check` does.
+
+`--html <file>` writes one self-contained page. The page draws the graph itself, in svg, from a
+description embedded in the file, and fetches nothing at view time. Where the mermaid output knows
+two altitudes, the page carries a containment tree over the whole project - the layer, then each
+folder level, then the file - and any node with children opens at any depth. An open node keeps its
+outline and stacks its children inside it, so a box is only ever as tall as what it shows; clicking
+it again closes it. Every arrow runs between two closed nodes and is labelled with the number of
+module imports behind it: opening a node splits its arrows over the children that carry the imports,
+and the arrows leaving a node always sum to the imports leaving its subtree. Clicking an arrow lists
+those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
+The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
 
 ## Adapters
 

@@ -1550,6 +1550,399 @@ printf '%s\n' "$CAST_EC" | grep -q 'module edges against' \
   || { fail "cast edge counts" "the check summary does not say which edges it read: $CAST_EC"; S=1; }
 [ "$S" = 0 ] && ok "cast edge counts"
 
+# --- cast: the page ----------------------------------------------------------
+# The same scanned fixture, rendered to html with a rules file and a baseline in
+# place. The suite runs on node alone, so what is asserted is the page's data,
+# its tree, its layout numbers and its markup - never a browser.
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [
+  { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui", "kinds": ["value"] },
+  { "name": "ui-owns-nothing", "severity": "warn", "from": "ui", "to": "logic", "kinds": ["value"] },
+  { "name": "logic-internal", "severity": "warn", "from": "src/b.ts", "to": "src/c.ts" }
+] }
+JSON
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "ui-owns-nothing", "file": "src/a.ts", "to": "src/b.ts", "kind": "value" } ] }
+JSON
+(cd "$CASTFIX" && "$CAST_BIN" render --html page.html >/dev/null 2>&1) \
+  || { fail "cast html graph" "cast render --html did not run with rules in place"; }
+CAST_PAGE="$CASTFIX/page.html"
+# the embedded description, read out of the page and run through the very
+# functions the page runs it through
+page_data() { sed -n 's|^<script id="cast-data" type="application/json">\(.*\)</script>$|\1|p' "$CAST_PAGE"; }
+CAST_DATA="$(page_data)"
+# The keys are the containment path - the layer, then each folder level, then the
+# file - and `treeId` is the only thing that turns one into a node id.
+pagejs() { CAST_JS="$PWD/plugins/cast/scripts/cast.js" DATA="$CAST_DATA" PAGE="$CAST_PAGE" node -e '
+  const bad=(s)=>{console.log(s);process.exit(1)}
+  const cast=require(process.env.CAST_JS)
+  const {treeId,treeOf,viewTree,layoutTree}=cast
+  const fs=require("fs")
+  const page=fs.readFileSync(process.env.PAGE,"utf8")
+  let data
+  try { data=JSON.parse(process.env.DATA) } catch(e) { bad("the page carries no readable data block: "+e.message) }
+  const view=(...open)=>viewTree(data,open.map(treeId))
+  const at=(v,k)=>v.flat.find(n=>n.id===treeId(k))
+  const edge=(v,f,t)=>v.edges.find(e=>e.from===treeId(f)&&e.to===treeId(t))
+  const kids=(n)=>n.children.map(c=>c.label)
+  '"$1"'
+'; }
+
+# AC6 (of #42) the page draws the graph itself - nodes, arrows and their weights -
+# from the data in the file, and fetches nothing
+S=0
+[ -n "$CAST_DATA" ] \
+  || { fail "cast html graph" "the page carries no embedded graph data"; S=1; }
+# break: writing a page with the mermaid source and no canvas to draw on
+grep -q '<svg id="graph"' "$CAST_PAGE" \
+  || { fail "cast html graph" "the page has no svg to draw the graph in"; S=1; }
+# break: embedding the layer names only, which leaves nothing to draw an arrow from
+O="$(pagejs '
+  const v=view()
+  for (const n of ["ui (1)","logic (5)","unassigned (2)"])
+    if (!v.nodes.map(x=>x.label).includes(n)) bad("the page data draws no node "+n)
+  const e=edge(v,"ui","logic")
+  if (!e) bad("the page data carries no ui -> logic arrow")
+  if (e.weight!==3) bad("the ui -> logic arrow is weighted "+e.weight+", not 3")
+  if (!edge(v,"logic","ui")) bad("the page data carries no logic -> ui arrow")
+  const l=layoutTree(v)
+  if (!(l.width>0&&l.height>0)) bad("the drawing has no extent: "+l.width+"x"+l.height)
+  for (const n of l.flat) if (!Number.isFinite(n.x)||!Number.isFinite(n.y)) bad("the node "+n.label+" has no place")
+  for (const e2 of l.edges) if (!Number.isFinite(e2.x1)||!Number.isFinite(e2.y2)) bad("an arrow has no endpoints")
+')" || { fail "cast html graph" "$O"; S=1; }
+# the page carries the code that draws it, and calls it
+# break: embedding the data and no drawing code, which renders an empty svg
+grep -q 'createElementNS' "$CAST_PAGE" \
+  || { fail "cast html graph" "the page carries no code that draws svg"; S=1; }
+grep -q '^draw()$' "$CAST_PAGE" \
+  || { fail "cast html graph" "the page never calls its drawing code"; S=1; }
+# the tree, the view and the layout in the page are the functions this suite
+# tested, not a second set - break: writing the page's own copy, which drifts
+O="$(pagejs '
+  for (const f of [treeId,treeOf,viewTree,layoutTree])
+    if (!page.includes(f.toString())) bad("the page does not carry the source of "+f.name)
+')" || { fail "cast html graph" "$O"; S=1; }
+# self-contained: it fetches nothing at view time
+# break: pulling a layout or mermaid library off a cdn
+grep -qE 'src="https?:|href="https?:|<script[^>]*src=|@import|url\(https?:' "$CAST_PAGE" \
+  && { fail "cast html graph" "the page loads an asset over the network"; S=1; }
+[ "$S" = 0 ] && ok "cast html graph"
+
+# AC1 the graph carries a containment tree - layer, each folder level, then the
+# file - and a node with children opens and closes at any depth
+S=0
+# break: keeping the two altitudes, a layer holding its modules with no folder
+# between them
+O="$(pagejs '
+  const root=treeOf(data)
+  if (root.children.map(n=>n.key).join(",")!=="ui,logic,unassigned")
+    bad("the root does not hold one node per layer: "+root.children.map(n=>n.key))
+  const ui=root.children[0]
+  if (kids(ui).join(",")!=="src (1)") bad("the layer ui does not hold the folder src: "+kids(ui))
+  if (ui.children[0].kind!=="folder") bad("a folder level is kind "+ui.children[0].kind)
+  const f=ui.children[0].children[0]
+  if (f.kind!=="file"||f.module!=="src/a.ts") bad("the leaf is not the file src/a.ts: "+f.kind+" "+f.module)
+  if (f.label!=="a.ts") bad("the file node is labelled "+f.label)
+  const logic=root.children[1]
+  if (logic.children[0].children.length!==5) bad("the folder src of logic holds "+logic.children[0].children.length+" files, not 5")
+  // every node knows the modules of its whole subtree - what an arrow and a
+  // label are computed from
+  if (logic.modules.length!==5) bad("the layer logic carries "+logic.modules.length+" modules in its subtree")
+  if (root.children[2].children[0].key!=="unassigned/pkg") bad("the unassigned layer does not hold pkg")
+')" || { fail "cast tree" "$O"; S=1; }
+# a folder level below the first is a node too
+# break: splitting the module id once and hanging the rest off the layer, which
+# is a tree that stops at depth two whatever the project looks like
+O="$(pagejs '
+  const deep={layers:[{name:"core",modules:["src/x/y/z.ts","src/x/w.ts"]}],edges:[],counts:{}}
+  const r=treeOf(deep)
+  const path=[]
+  let n=r.children[0]
+  while (n) { path.push(n.key); n=n.children[0] }
+  if (path.join(" > ")!=="core > core/src > core/src/x > core/src/x/y > core/src/x/y/z.ts")
+    bad("the tree does not carry every folder level: "+path.join(" > "))
+  const x=r.children[0].children[0].children[0]
+  if (x.children.length!==2) bad("a folder holding a folder and a file holds "+x.children.length+" children")
+')" || { fail "cast tree" "$O"; S=1; }
+# opened and closed at any depth, through the ids the tree hands out
+# break: an open state that is one layer name, which cannot name a folder
+O="$(pagejs '
+  const shut=view()
+  if (shut.flat.length!==3) bad("with nothing open the page draws "+shut.flat.length+" nodes, not 3")
+  const one=view("logic")
+  if (!at(one,"logic").open) bad("opening the layer logic left it closed")
+  if (!at(one,"logic/src")) bad("opening logic did not draw its folder src")
+  if (at(one,"logic/src").open) bad("opening a layer opened the folder below it too")
+  if (at(one,"logic/src/b.ts")) bad("a closed folder drew the files inside it")
+  const two=view("logic","logic/src")
+  if (!at(two,"logic/src").open) bad("the folder did not open at depth two")
+  for (const m of ["b.ts","c.ts","t.ts","rel.ts","multi.ts"])
+    if (!at(two,"logic/src/"+m)) bad("opening the folder did not draw its file "+m)
+  if (at(two,"ui").open) bad("opening a node at depth opened another layer")
+  const back=view("logic")
+  if (at(back,"logic/src/b.ts")) bad("closing the folder left its files drawn")
+  if (view().flat.length!==3) bad("closing the layer again did not restore the one box")
+')" || { fail "cast tree" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast tree"
+
+# AC2 an open node keeps its own outline and holds its children stacked inside
+# it; a closed node is one box
+S=0
+# break: replacing an opened node with its children, the way --expand does, which
+# loses the outline the reader opened
+O="$(pagejs '
+  const l=layoutTree(view("logic","logic/src"))
+  const logic=at(l,"logic"), src=at(l,"logic/src"), b=at(l,"logic/src/b.ts")
+  for (const n of [logic,src]) if (!n.open) bad("the opened node "+n.label+" is not drawn open")
+  if (b.open) bad("a file node is drawn open")
+  if (b.children.length) bad("a closed node holds children")
+  if (at(l,"ui").h!==l.metrics.H) bad("a closed node is "+at(l,"ui").h+" tall, not the one box height")
+  // the children sit inside the outline, at every depth
+  const inside=(p,c)=>c.x>=p.x&&c.y>=p.y&&c.x+c.w<=p.x+p.w&&c.y+c.h<=p.y+p.h
+  if (!inside(logic,src)) bad("the folder is not inside the layer that holds it")
+  for (const c of src.children) if (!inside(src,c)) bad("the file "+c.label+" is not inside its folder")
+  // stacked vertically inside it: one column, top to bottom, no overlap
+  const col=src.children
+  for (let i=1;i<col.length;i++) {
+    if (col[i].x!==col[0].x) bad("the children are not one column: "+col[i].label+" is at x "+col[i].x)
+    if (col[i].y<=col[i-1].y) bad("the children are not stacked top to bottom")
+    if (col[i].y<col[i-1].y+col[i-1].h) bad("the child "+col[i].label+" overlaps the one above it")
+  }
+')" || { fail "cast nested layout" "$O"; S=1; }
+# the page draws a node inside its parent and lets the inner one close itself
+# break: handing every click to the outermost box, which makes a nested node
+# unclickable
+grep -q 'for (const c of n.children) box(c)' "$CAST_PAGE" \
+  || { fail "cast nested layout" "the page does not draw the children of an open node"; S=1; }
+grep -qF 'ev.stopPropagation(); toggle(n.id)' "$CAST_PAGE" \
+  || { fail "cast nested layout" "a click on a nested node does not reach that node"; S=1; }
+[ "$S" = 0 ] && ok "cast nested layout"
+
+# AC3 an arrow runs between two closed nodes: where an endpoint is open, it is
+# drawn from or to the closed descendant that carries the import
+S=0
+# break: aggregating an arrow onto the node the reader opened, which draws an
+# arrow into a box and says nothing about which file inside it imports
+O="$(pagejs '
+  const open=["ui","ui/src","logic","logic/src"]
+  const v=view(...open)
+  const ids=new Set(v.flat.filter(n=>n.open).map(n=>n.id))
+  for (const e of v.edges) {
+    if (ids.has(e.from)) bad("an arrow leaves the open node "+e.from)
+    if (ids.has(e.to)) bad("an arrow lands on the open node "+e.to)
+  }
+  for (const t of ["b.ts","t.ts","c.ts"]) {
+    const e=edge(v,"ui/src/a.ts","logic/src/"+t)
+    if (!e) bad("no arrow from the file that imports to the file src/"+t)
+    if (e.weight!==1) bad("the arrow to src/"+t+" is weighted "+e.weight)
+  }
+  // an import inside one closed node has no arrow; opening that node draws it
+  if (edge(view(),"logic","logic")) bad("a closed node was given an arrow to itself")
+  const inner=edge(v,"logic/src/b.ts","logic/src/c.ts")
+  if (!inner) bad("opening the folder did not draw the import inside it")
+  // half open: the endpoint is the deepest closed node holding the import
+  const half=view("logic")
+  if (!edge(half,"ui","logic/src")) bad("with only the layer open the arrow does not reach the folder")
+  if (edge(half,"ui","logic")) bad("an arrow still lands on the opened layer")
+  if (edge(half,"ui","logic/src/b.ts")) bad("an arrow reaches into a closed folder")
+')" || { fail "cast arrow endpoints" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast arrow endpoints"
+
+# AC4 every arrow is labelled with the number of module imports behind it, and
+# the arrows leaving a node sum to the imports leaving its subtree
+S=0
+# break: labelling an arrow 1, or dropping the sites it aggregates, which makes
+# the number and what a click lists disagree
+O="$(pagejs '
+  const states=[[],["logic"],["logic","logic/src"],["ui","ui/src","logic","logic/src"],["unassigned","unassigned/pkg"]]
+  for (const st of states) {
+    const v=viewTree(data,st.map(treeId))
+    const inside=new Map(v.flat.filter(n=>!n.open).flatMap(n=>n.modules.map(m=>[m,n.id])))
+    for (const e of v.edges) {
+      if (e.weight!==e.sites.length) bad("an arrow is weighted "+e.weight+" and carries "+e.sites.length+" imports")
+      if (!e.label.startsWith(String(e.weight))) bad("the arrow is labelled "+e.label+", not by its weight "+e.weight)
+    }
+    for (const n of v.flat) {
+      if (n.open) continue
+      const out=v.edges.filter(e=>e.from===n.id).reduce((s,e)=>s+e.weight,0)
+      const want=data.edges.filter(e=>inside.get(e.from)===n.id&&inside.get(e.to)!==n.id).length
+      if (out!==want) bad("the arrows leaving "+n.key+" sum to "+out+", the imports leaving its subtree are "+want+" (open: "+st.join(",")+")")
+    }
+  }
+')" || { fail "cast arrow counts" "$O"; S=1; }
+# the count is of module imports, the number cast edges lists
+# break: counting the modules that import instead of the imports
+O="$(pagejs '
+  const v=view()
+  const e=edge(v,"ui","logic")
+  const files=new Set(e.sites.map(s=>s.file))
+  if (files.size===e.weight) bad("the fixture cannot tell an import count from a module count")
+  if (e.weight!==3) bad("the ui -> logic arrow counts "+e.weight+" imports, not 3")
+')" || { fail "cast arrow counts" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast arrow counts"
+
+# AC5 the layout is vertical and stays compact: nodes stacked top to bottom, and
+# a box only as tall as the children it shows
+S=0
+# break: sizing a box for the whole subtree, so a closed node is as tall as
+# everything it hides and the page cannot be read
+O="$(pagejs '
+  const shut=layoutTree(view())
+  const h=shut.flat.map(n=>n.h)
+  if (new Set(h).size!==1) bad("closed nodes differ in height: "+h.join(","))
+  if (h[0]!==shut.metrics.H) bad("a closed node is not one box high")
+  // the top level is a column, top to bottom
+  const top=shut.nodes
+  for (let i=1;i<top.length;i++) {
+    if (top[i].x!==top[0].x) bad("the top level is not one column")
+    if (top[i].y<top[i-1].y+top[i-1].h) bad("the node "+top[i].label+" is not below the one before it")
+  }
+  // an open box is its header, its children and the padding - nothing for what
+  // it does not show
+  const M=shut.metrics
+  const l=layoutTree(view("logic","logic/src","ui"))
+  for (const n of l.flat) {
+    if (!n.open) continue
+    const want=M.HEAD+M.PAD+n.children.reduce((s,c)=>s+c.h,0)+M.GAP*(n.children.length-1)
+    if (n.h!==want) bad("the open node "+n.key+" is "+n.h+" tall, the children it shows need "+want)
+  }
+  // opening a node grows the drawing by that node alone
+  const one=layoutTree(view("ui"))
+  const grew=one.height-shut.height
+  if (grew<=0) bad("opening a node did not grow the drawing")
+  const two=layoutTree(view("ui","ui/src"))
+  if (two.height-one.height!==grew) bad("opening one file cost "+(two.height-one.height)+", opening one folder cost "+grew)
+')" || { fail "cast compact layout" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast compact layout"
+
+# AC6 an edge that breaks a rule is drawn in the colour of its severity and
+# labelled with the rule, in the mermaid output and in the page alike; one held
+# by the baseline is drawn as inherited. The mermaid view keeps its two levels.
+S=0
+CAST_MARK="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"
+# break: rendering without reading rules.json, which leaves every arrow the same
+printf '%s\n' "$CAST_MARK" | grep -q '^  L_logic -->|1 no-back-edge| L_ui$' \
+  || { fail "cast violation marks" "the breaking edge is not labelled with its rule: $CAST_MARK"; S=1; }
+# break: labelling the rule but drawing every arrow in one colour
+printf '%s\n' "$CAST_MARK" | grep -q '^  linkStyle 0 stroke:#d32f2f' \
+  || { fail "cast violation marks" "the error edge is not drawn in the error colour: $CAST_MARK"; S=1; }
+# break: reading the baseline nowhere but check, which draws inherited debt as new
+printf '%s\n' "$CAST_MARK" | grep -q 'ui-owns-nothing (inherited)' \
+  || { fail "cast violation marks" "a baselined edge is not drawn as inherited: $CAST_MARK"; S=1; }
+printf '%s\n' "$CAST_MARK" | grep -q '^  linkStyle 1 stroke:#888' \
+  || { fail "cast violation marks" "the inherited edge is not drawn as inherited: $CAST_MARK"; S=1; }
+# the page says the same thing, off the same data
+O="$(pagejs '
+  const v=view()
+  const bad1=edge(v,"logic","ui")
+  if (bad1.state!=="breaking") bad("the page draws the breaking arrow as "+bad1.state)
+  if (bad1.color!=="#d32f2f") bad("the breaking arrow is coloured "+bad1.color)
+  if (bad1.label!=="1 no-back-edge") bad("the breaking arrow is labelled "+bad1.label)
+  const held=edge(v,"ui","logic")
+  if (held.state!=="inherited") bad("the page draws a baselined arrow as "+held.state)
+  if (held.color!=="#888") bad("the inherited arrow is coloured "+held.color)
+')" || { fail "cast violation marks" "$O"; S=1; }
+printf '%s\n' "$CAST_DATA" | grep -q '"state":"inherited"' \
+  || { fail "cast violation marks" "the page data marks no edge as inherited"; S=1; }
+# drop the baseline and the same edge is breaking, at its own severity: the mark
+# comes from the baseline, not from the rule
+# break: hardcoding inherited, or colouring a warn the colour of an error
+rm -f "$CAST_BASE"
+CAST_MARK2="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"
+printf '%s\n' "$CAST_MARK2" | grep -q '(inherited)' \
+  && { fail "cast violation marks" "an edge is inherited with no baseline: $CAST_MARK2"; S=1; }
+printf '%s\n' "$CAST_MARK2" | grep -q '^  linkStyle 1 stroke:#e08b00' \
+  || { fail "cast violation marks" "the warn edge is not drawn in the warn colour: $CAST_MARK2"; S=1; }
+# break: giving the page the tree and letting the mermaid output follow it, which
+# is the one view this change leaves alone
+printf '%s\n' "$CAST_MARK2" | grep -q '^  L_ui\["ui (1)"\]$' \
+  || { fail "cast violation marks" "the mermaid output no longer opens at layer altitude: $CAST_MARK2"; S=1; }
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "ui-owns-nothing", "file": "src/a.ts", "to": "src/b.ts", "kind": "value" } ] }
+JSON
+[ "$S" = 0 ] && ok "cast violation marks"
+
+# AC6 what #42 established holds at every depth: a click opens and closes, a
+# click on an arrow lists the imports with file and line, a rule-breaking arrow
+# keeps its mark and a baselined one reads as inherited, and every count the page
+# shows equals what cast report and cast check print
+S=0
+# break: aggregating an arrow to a weight and dropping the imports behind it
+O="$(pagejs '
+  const e=edge(view(),"ui","logic")
+  const want=["src/a.ts:1 -> src/b.ts (value)","src/a.ts:2 -> src/t.ts (type)","src/a.ts:6 -> src/c.ts (dynamic)"]
+  const got=e.sites.map(s=>s.file+":"+s.line+" -> "+s.to+" ("+s.kind+")")
+  for (const w of want) if (!got.includes(w)) bad("the arrow does not carry the site "+w+", only "+got.join(", "))
+  if (got.length!==e.weight) bad("the arrow is weighted "+e.weight+" but carries "+got.length+" sites")
+')" || { fail "cast html agrees" "$O"; S=1; }
+# the same three, one level down - break: marking and siting an arrow at layer
+# altitude only, which leaves an opened node drawing bare arrows
+O="$(pagejs '
+  const v=view("ui","ui/src","logic","logic/src")
+  const held=edge(v,"ui/src/a.ts","logic/src/b.ts")
+  if (!held) bad("no arrow between the two files at depth")
+  if (held.state!=="inherited") bad("the baselined import reads as "+held.state+" at depth")
+  const brk=edge(v,"logic/src/c.ts","ui/src/a.ts")
+  if (brk.state!=="breaking"||brk.color!=="#d32f2f") bad("the breaking import is "+brk.state+" "+brk.color+" at depth")
+  if (brk.sites[0].file!=="src/c.ts"||!Number.isFinite(brk.sites[0].line))
+    bad("the arrow at depth carries no file and line: "+JSON.stringify(brk.sites[0]))
+  // a violation inside one layer has no arrow until the layer is opened, and it
+  // keeps its own severity when it appears
+  const inner=edge(v,"logic/src/b.ts","logic/src/c.ts")
+  if (inner.state!=="breaking"||inner.color!=="#e08b00") bad("the intra-layer violation is "+inner.state+" "+inner.color)
+  if (inner.label!=="1 logic-internal") bad("the intra-layer arrow is labelled "+inner.label)
+')" || { fail "cast html agrees" "$O"; S=1; }
+# the sites are shown in the page itself, and a node and an arrow are clickable
+# break: linking out to cast edges instead of listing them where the reader is
+grep -q '<div id="sites">' "$CAST_PAGE" \
+  || { fail "cast html agrees" "the page has nowhere to list the sites"; S=1; }
+grep -qF "s.file + ':' + s.line" "$CAST_PAGE" \
+  || { fail "cast html agrees" "the page does not render a site with its file and line"; S=1; }
+grep -q "addEventListener('click', () => sites(e))" "$CAST_PAGE" \
+  || { fail "cast html agrees" "an arrow in the page is not clickable"; S=1; }
+# break: opening a node with no way back, which is a page with one state
+grep -qF 'if (open[id] === true) delete open[id]' "$CAST_PAGE" \
+  || { fail "cast html agrees" "a click on an open node does not close it again"; S=1; }
+CAST_CHK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)" || true
+C_SUM="$(printf '%s\n' "$CAST_CHK" | tail -1)"
+n_of() { printf '%s\n' "$2" | sed -n "s/$1/\1/p" | head -1; }
+li_of() { sed -n "s|^<li>$1 \([0-9]*\)</li>\$|\1|p" "$CAST_PAGE" | head -1; }
+same() {
+  [ -n "$2" ] || { fail "cast html agrees" "the command printed no $1 to compare"; S=1; return; }
+  [ -n "$3" ] || { fail "cast html agrees" "the page shows no count for $1"; S=1; return; }
+  [ "$2" = "$3" ] || { fail "cast html agrees" "the page says $1 $3, the commands say $2"; S=1; }
+}
+# break: counting the page's numbers off the drawn view, which drops the edges
+# no arrow stands for, or hardcoding one of them
+same modules "$(n_of '^modules \([0-9]*\)$' "$CAST_REPORT")" "$(li_of modules)"
+same edges "$(n_of '^edges \([0-9]*\).*$' "$CAST_REPORT")" "$(li_of edges)"
+same layers "$(n_of '^layers \([0-9]*\)$' "$CAST_REPORT")" "$(li_of layers)"
+same unassigned "$(n_of '^unassigned \([0-9]*\)$' "$CAST_REPORT")" "$(li_of unassigned)"
+same unresolved "$(n_of '^unresolved \([0-9]*\)$' "$CAST_REPORT")" "$(li_of unresolved)"
+same opaque "$(n_of '^opaque \([0-9]*\)$' "$CAST_REPORT")" "$(li_of opaque)"
+same cycles "$(n_of '^cycles \([0-9]*\)$' "$CAST_REPORT")" "$(li_of cycles)"
+same violations "$(n_of '^\([0-9]*\) violation.*$' "$C_SUM")" "$(li_of violations)"
+same errors "$(n_of '^.*(\([0-9]*\) error.*$' "$C_SUM")" "$(li_of errors)"
+same 'module edges' "$(n_of '^.*in \([0-9]*\) module edge.*$' "$C_SUM")" "$(li_of 'module edges')"
+same rules "$(n_of '^.*against \([0-9]*\) rule.*$' "$C_SUM")" "$(li_of rules)"
+same baselined "$(n_of '^.*, \([0-9]*\) baselined$' "$C_SUM")" "$(li_of baselined)"
+# every import the page draws an arrow for is one the commands counted
+O="$(MODEDGES="$(li_of 'module edges')" pagejs '
+  const drawn=view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg").edges
+    .reduce((s,e)=>s+e.weight,0)
+  if (drawn!==Number(process.env.MODEDGES))
+    bad("the fully opened page draws "+drawn+" imports, the commands count "+process.env.MODEDGES)
+')" || { fail "cast html agrees" "$O"; S=1; }
+# the fixture has to be able to tell the two edge counts apart, or the suite
+# would pass on a page that confused them
+[ "$(li_of edges)" != "$(li_of 'module edges')" ] \
+  || { fail "cast html agrees" "the fixture cannot tell edges from module edges"; S=1; }
+[ "$(li_of violations)" != "$(li_of baselined)" ] || [ "$(li_of baselined)" = 0 ] \
+  || { fail "cast html agrees" "the fixture cannot tell a live violation from a held one"; S=1; }
+[ "$S" = 0 ] && ok "cast html agrees"
+rm -f "$CAST_BASE"
+
+
 # --- cast skills ------------------------------------------------------------
 # The three skills a session reaches cast through. Each one runs its wrapper in
 # the prompt, so the model never has to know the flags - a skill that only
