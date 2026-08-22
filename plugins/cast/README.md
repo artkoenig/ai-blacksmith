@@ -190,7 +190,14 @@ outline and stacks its children inside it, so a box is only ever as tall as what
 header is its control: pressing the header band across the top of a box opens it and closes it
 again, while the ground of an open box, where the children sit, answers no press. Every arrow runs between two closed nodes and is labelled with the number of
 module imports behind it: opening a node splits its arrows over the children that carry the imports,
-and the arrows leaving a node always sum to the imports leaving its subtree. Clicking an arrow lists
+and the arrows leaving a node always sum to the imports leaving its subtree. An arrow ends in a head
+on the module being imported, so which way the dependency runs is on the page rather than inferred,
+and the head takes the arrow's own colour and state: a breaking edge points in its severity's
+colour, one held by the baseline in the inherited grey. The label sits beside the lane the curve
+runs down, on a backing of its own, and is pushed clear of any label already there, so no count is
+read through a line or through another count. Under the count the arrow says which kinds of import
+it carries - `2 value, 1 type` - which is what tells an edge a rule's `kinds` deliberately spares
+from one no rule names. Clicking an arrow lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
 The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
 

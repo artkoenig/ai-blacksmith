@@ -1942,6 +1942,121 @@ O="$(MODEDGES="$(li_of 'module edges')" pagejs '
 [ "$S" = 0 ] && ok "cast html agrees"
 rm -f "$CAST_BASE"
 
+# --- cast: an arrow a reader can follow --------------------------------------
+# AC1/AC4 (of #46) every arrow shows which way the dependency runs, at every
+# altitude, and the head is the arrow's own: the severity colour of a breaking
+# edge, the inherited grey of a held one, the plain grey of one no rule names.
+S=0
+# break: drawing a bare curve with no marker-end, which shows no direction at all
+O="$(pagejs '
+  const states=[[],["logic"],["ui","ui/src","logic","logic/src"]]
+  for (const st of states) {
+    const l=layoutTree(viewTree(data,st.map(treeId)))
+    if (!l.edges.length) bad("no arrow at all with "+st.join(",")+" open")
+    if (!l.markers||!l.markers.length) bad("the drawing defines no arrowhead with "+st.join(",")+" open")
+    for (const e of l.edges) {
+      if (!e.marker) bad("the arrow "+e.from+" -> "+e.to+" carries no direction marker")
+      const m=l.markers.find(m=>m.id===e.marker)
+      if (!m) bad("the arrow points at the undefined head "+e.marker)
+      // break: one head for the whole page, which loses the colour and the state
+      if (m.color!==e.color) bad("a "+(e.state||"plain")+" arrow is "+e.color+" and its head "+m.color)
+      if ((m.state||null)!==(e.state||null)) bad("the head is "+m.state+" where the arrow is "+e.state)
+    }
+  }
+  const v=view("ui","ui/src","logic","logic/src")
+  const brk=edge(v,"logic/src/c.ts","ui/src/a.ts")
+  const held=edge(v,"ui/src/a.ts","logic/src/b.ts")
+  const plain=edge(v,"ui/src/a.ts","logic/src/t.ts")
+  for (const [n,e] of [["breaking",brk],["inherited",held],["unmarked",plain]]) {
+    if (!e) bad("the fixture has no "+n+" arrow to point")
+    if (!e.marker) bad("the "+n+" arrow has no head")
+  }
+  if (new Set([brk.marker,held.marker,plain.marker]).size!==3)
+    bad("a breaking, an inherited and an unmarked arrow share one head")
+')" || { fail "cast arrow direction" "$O"; S=1; }
+# break: computing the head in the layout and never referencing it in the markup
+grep -qF "'marker-end': 'url(#' + e.marker + ')'" "$CAST_PAGE" \
+  || { fail "cast arrow direction" "the page draws no arrowhead at the end of a curve"; S=1; }
+grep -qF "el('marker'" "$CAST_PAGE" \
+  || { fail "cast arrow direction" "the page defines no marker to point with"; S=1; }
+grep -qF "fill: m.color" "$CAST_PAGE" \
+  || { fail "cast arrow direction" "the arrowhead is not filled in its arrow's colour"; S=1; }
+[ "$S" = 0 ] && ok "cast arrow direction"
+
+# AC2 (of #46) the count is readable where the arrow is drawn: the curve runs
+# down its lane and the digits sit clear of it, on a backing of their own, and no
+# two labels stack.
+S=0
+# break: placing the label on the lane midpoint, where its own curve crosses it,
+# or letting two neighbouring lanes drop their counts on one another
+O="$(pagejs '
+  const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
+  const M=l.metrics
+  if (l.edges.length<2) bad("the fixture has too few arrows to crowd")
+  let wide=0
+  for (const e of l.edges) {
+    if (e.bx<e.mx+M.PAD) bad("the label box starts at "+e.bx+", on the lane the curve runs down at "+e.mx)
+    if (e.bw<M.TAP||e.bh<M.TAP) bad("the label box is "+e.bw+"x"+e.bh+", under the tap floor "+M.TAP)
+    if (e.hx!==e.bx||e.hy!==e.by||e.hw!==e.bw||e.hh!==e.bh) bad("the label is not its own press target")
+    if (e.lx<e.bx||e.lx>e.bx+e.bw) bad("the count is drawn outside its backing")
+    if (e.ly<e.by||e.ly>e.by+e.bh) bad("the count is drawn above or below its backing")
+    if (e.kindLabel&&(e.ky<e.by||e.ky>e.by+e.bh)) bad("the kinds line runs out of the backing")
+    if (e.by+e.bh>l.height) bad("the label is drawn below the drawing, at "+(e.by+e.bh)+" of "+l.height)
+    if (e.bw>M.LANE) wide++
+  }
+  if (!wide) bad("no label is wider than a lane: the fixture cannot crowd two counts")
+  for (let i=0;i<l.edges.length;i++) for (let j=i+1;j<l.edges.length;j++) {
+    const a=l.edges[i], b=l.edges[j]
+    if (a.bx<b.bx+b.bw&&b.bx<a.bx+a.bw&&a.by<b.by+b.bh&&b.by<a.by+a.bh)
+      bad("two counts stack on one another: \""+a.label+"\" and \""+b.label+"\"")
+  }
+')" || { fail "cast weight legible" "$O"; S=1; }
+# break: drawing the digits straight onto the curves with nothing behind them
+grep -qF "class: 'weight-bg'" "$CAST_PAGE" \
+  || { fail "cast weight legible" "the count is drawn with no backing under it"; S=1; }
+grep -q '\.weight-bg{fill:#fff' "$CAST_PAGE" \
+  || { fail "cast weight legible" "the backing of the count is not opaque"; S=1; }
+# break: drawing each arrow and its label together, so the next curve crosses the
+# label before it
+grep -qF "for (const e of l.edges) {" "$CAST_PAGE" \
+  || { fail "cast weight legible" "the page does not loop over the arrows"; S=1; }
+[ "$(grep -cF 'for (const e of l.edges) {' "$CAST_PAGE")" = 2 ] \
+  || { fail "cast weight legible" "the curves and the labels are not drawn in two passes"; S=1; }
+[ "$S" = 0 ] && ok "cast weight legible"
+
+# AC3 (of #46) an arrow carries the kinds of the imports behind it, so an edge a
+# rule's `kinds` spares reads differently from one no rule names.
+S=0
+# break: aggregating an arrow to a weight and a rule and dropping the kinds
+O="$(pagejs '
+  const e=edge(view(),"ui","logic")
+  if (!e.kinds) bad("the arrow carries no kinds")
+  if (e.kinds.join(",")!=="value,type,dynamic") bad("the arrow carries the kinds "+e.kinds.join(","))
+  const counted=e.kinds.reduce((s,k)=>s+e.kindCounts[k],0)
+  if (counted!==e.weight) bad("the kinds count "+counted+" imports, the arrow is weighted "+e.weight)
+  if (!e.kindLabel.includes("1 type")) bad("the arrow does not say how many of each kind: "+e.kindLabel)
+  // the rule flags value imports alone: the type and the dynamic import beside
+  // it are spared, and the kinds are what says so
+  const d=view("ui","ui/src","logic","logic/src")
+  const spared=edge(d,"ui/src/a.ts","logic/src/t.ts")
+  const flagged=edge(d,"ui/src/a.ts","logic/src/b.ts")
+  if (spared.kinds.join(",")!=="type") bad("the type import reads as "+spared.kinds.join(","))
+  if (spared.state) bad("the type import a kinds rule spares is drawn as "+spared.state)
+  if (!flagged.state) bad("the value import the rule names is drawn as unmarked")
+  const other=edge(d,"ui/src/a.ts","logic/src/c.ts")
+  if (other.kindLabel===spared.kindLabel)
+    bad("an import the rule spares reads the same as one it does not name: "+other.kindLabel)
+')" || { fail "cast arrow kinds" "$O"; S=1; }
+# break: keeping the kinds in the data and never drawing them
+grep -qF "class: 'kinds' }, e.kindLabel" "$CAST_PAGE" \
+  || { fail "cast arrow kinds" "the page never draws the kinds of an arrow"; S=1; }
+grep -qF "e.kindLabel ? ' (' + e.kindLabel + ')' : ''" "$CAST_PAGE" \
+  || { fail "cast arrow kinds" "the list of imports is not headed by the kinds behind the arrow"; S=1; }
+printf '%s\n' "$CAST_DATA" | grep -q '"kind":"type"' \
+  || { fail "cast arrow kinds" "the fixture has no type import to spare"; S=1; }
+[ "$S" = 0 ] && ok "cast arrow kinds"
+
+
 # --- cast: the controls that close a group -----------------------------------
 # The same page, read for what a reader can see and press. Still node alone: the
 # markup, the css, the layout numbers and the pure functions the page toggles

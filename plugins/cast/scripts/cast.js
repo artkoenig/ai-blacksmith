@@ -559,6 +559,19 @@ function viewTree(data, open) {
   for (const g of edges) {
     g.color = !g.state ? '#666' : g.state === 'inherited' ? '#888' : g.severity === 'warn' ? '#e08b00' : '#d32f2f'
     g.label = g.rule ? g.weight + ' ' + g.rule + (g.state === 'inherited' ? ' (inherited)' : '') : String(g.weight)
+    // The kinds behind the arrow, counted. Without them a type import a rule's
+    // `kinds` deliberately spares looks exactly like a value import no rule
+    // names: both unmarked arrows, and the reader cannot tell which is which.
+    const order = ['value', 'type', 'dynamic']
+    const rank = (k) => (order.indexOf(k) < 0 ? order.length : order.indexOf(k))
+    g.kindCounts = {}
+    for (const s of g.sites) g.kindCounts[s.kind] = (g.kindCounts[s.kind] || 0) + 1
+    g.kinds = Object.keys(g.kindCounts).sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : x > y ? 1 : 0))
+    g.kindLabel = g.kinds.map((k) => g.kindCounts[k] + ' ' + k).join(', ')
+    // The arrowhead is the arrow's own: one marker per colour and state, so a
+    // breaking edge points in its severity's colour and an inherited one in the
+    // inherited grey. A single shared head would say the same thing everywhere.
+    g.marker = 'arrow-' + (g.state || 'plain') + '-' + g.color.slice(1)
   }
   return { nodes, flat, edges, open: (open || []).slice(), counts: data.counts }
 }
@@ -572,7 +585,7 @@ function viewTree(data, open) {
 // pixels is the smallest target a press lands on reliably, so it is the floor for
 // `H`, `HEAD`, `LANE` and `CHAN` rather than a value the page adds on top.
 function layoutTree(view) {
-  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CHAN: 44, LANE: 44, TAP: 44 }
+  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CHAN: 44, LANE: 44, TAP: 44, CHAR: 7, LINE: 16 }
   const clone = (n) => ({ ...n, children: n.children.map(clone) })
   const size = (n) => {
     if (!n.open) {
@@ -616,26 +629,55 @@ function layoutTree(view) {
   roots.forEach(collect)
   const at = new Map(flat.map((n) => [n.id, n]))
   const right = Math.max(...flat.map((n) => n.x + n.w), 0)
+  // The label sits beside the lane its arrow runs down, never on it: the curve
+  // is vertical at `mx`, so a box starting a padding to the right of `mx` leaves
+  // the digits clear of the line. Where two labels would land on one another -
+  // neighbouring lanes are `LANE` apart and a rule name is wider than that - the
+  // later one is pushed below the ones already placed, so no count is read
+  // through another. The box is the label's target too, never under `TAP`.
+  const placed = []
   const edges = view.edges.map((e, i) => {
     const a = at.get(e.from)
     const b = at.get(e.to)
     const y1 = a.y + a.h / 2
     const y2 = b.y + b.h / 2
     const mx = right + M.CHAN + i * M.LANE
-    const my = (y1 + y2) / 2
-    // The label's own target, a `TAP` box around where it is drawn. The lane is
-    // `TAP` wide too, so two arrows never share one press.
-    return { ...e, x1: a.x + a.w, y1, x2: b.x + b.w, y2, mx, my, hx: mx + 5 - M.TAP / 2, hy: my - M.TAP / 2, hw: M.TAP, hh: M.TAP }
+    const lines = e.kindLabel ? [e.label, e.kindLabel] : [e.label]
+    const bw = Math.max(M.TAP, ...lines.map((s) => s.length * M.CHAR + 12))
+    const bh = Math.max(M.TAP, lines.length * M.LINE + 10)
+    const bx = mx + M.PAD
+    let by = (y1 + y2) / 2 - bh / 2
+    const over = (o) => bx < o.bx + o.bw && o.bx < bx + bw && by < o.by + o.bh && o.by < by + bh
+    for (let guard = 0; guard < placed.length + 1; guard++) {
+      const clash = placed.filter(over)
+      if (clash.length === 0) break
+      by = Math.max(...clash.map((o) => o.by + o.bh)) + M.GAP
+    }
+    const box = { bx, by, bw, bh }
+    placed.push(box)
+    const ly = by + (bh - lines.length * M.LINE) / 2 + M.LINE - 4
+    return {
+      ...e, x1: a.x + a.w, y1, x2: b.x + b.w, y2, mx, my: by + bh / 2,
+      ...box, lx: bx + 6, ly, ky: ly + M.LINE,
+      hx: bx, hy: by, hw: bw, hh: bh,
+    }
   })
+  // One marker definition per colour and state, referenced by every arrow that
+  // wears it: the head is the arrow's, not the page's.
+  const markers = []
+  for (const e of edges) {
+    if (!markers.some((m) => m.id === e.marker)) markers.push({ id: e.marker, color: e.color, state: e.state })
+  }
   return {
     nodes: roots,
     flat,
     edges,
+    markers,
     open: view.open,
     counts: view.counts,
     metrics: M,
     width: Math.max(right, ...edges.map((e) => e.hx + e.hw)) + M.PAD * 2,
-    height: Math.max(...flat.map((n) => n.y + n.h), 0) + M.PAD,
+    height: Math.max(...flat.map((n) => n.y + n.h), 0, ...edges.map((e) => e.by + e.bh)) + M.PAD,
   }
 }
 
@@ -689,7 +731,7 @@ function draw() {
   const sites = (e) => {
     panel.textContent = ''
     const h = document.createElement('h3')
-    h.textContent = e.weight + ' module edges' + (e.rule ? ' - ' + e.label : '')
+    h.textContent = e.weight + ' module edges' + (e.kindLabel ? ' (' + e.kindLabel + ')' : '') + (e.rule ? ' - ' + e.label : '')
     panel.appendChild(h)
     const ul = document.createElement('ul')
     for (const s of e.sites) {
@@ -750,26 +792,52 @@ function draw() {
       for (const c of n.children) box(c)
     }
     for (const n of l.nodes) box(n)
+    // An arrowhead is a marker, and a marker has to be defined before it is
+    // referenced. One per colour and state: `marker-end` alone is what tells the
+    // reader which way the dependency runs.
+    const defs = el('defs', {})
+    for (const m of l.markers) {
+      const mk = el('marker', {
+        id: m.id, markerWidth: 10, markerHeight: 8, refX: 9, refY: 4,
+        orient: 'auto', markerUnits: 'userSpaceOnUse', class: 'arrowhead ' + (m.state || 'plain'),
+      })
+      mk.appendChild(el('path', { d: 'M 0 0 L 10 4 L 0 8 z', fill: m.color }))
+      defs.appendChild(mk)
+    }
+    svg.appendChild(defs)
+    // Every curve first, every label after: a label drawn before the next arrow
+    // would be crossed by it, whatever backing it carries.
     for (const e of l.edges) {
       const d = 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2
       const line = el('path', {
         d, fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
         'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',
+        'marker-end': 'url(#' + e.marker + ')',
         class: 'edge',
       })
       line.addEventListener('click', () => sites(e))
       svg.appendChild(line)
       // A line a pen can hit is thinner than a finger: the arrow's own target is
-      // an invisible stroke `TAP` wide over the same curve.
+      // an invisible stroke `TAP` wide over the same curve. It carries no head -
+      // the head belongs to the curve the reader sees.
       const grab = el('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': M.TAP, class: 'edge grab' })
       grab.addEventListener('click', () => sites(e))
       svg.appendChild(grab)
-      const hit = el('rect', { x: e.hx, y: e.hy, width: e.hw, height: e.hh, class: 'hit' })
-      hit.addEventListener('click', () => sites(e))
-      svg.appendChild(hit)
-      const t = el('text', { x: e.mx + 5, y: e.my, fill: e.color, class: 'weight' }, e.label)
+    }
+    for (const e of l.edges) {
+      // The backing is what keeps the count readable where the arrows run: it
+      // covers the curves behind the digits, and it is the label's target.
+      const back = el('rect', { x: e.hx, y: e.hy, width: e.hw, height: e.hh, rx: 4, class: 'weight-bg' })
+      back.addEventListener('click', () => sites(e))
+      svg.appendChild(back)
+      const t = el('text', { x: e.lx, y: e.ly, fill: e.color, class: 'weight' }, e.label)
       t.addEventListener('click', () => sites(e))
       svg.appendChild(t)
+      if (e.kindLabel) {
+        const k = el('text', { x: e.lx, y: e.ky, fill: e.color, class: 'kinds' }, e.kindLabel)
+        k.addEventListener('click', () => sites(e))
+        svg.appendChild(k)
+      }
     }
   }
   render()
@@ -824,7 +892,11 @@ const PAGE_CSS = [
   '.hit,.node .hit{fill:transparent;pointer-events:all}',
   '.edge{cursor:pointer}',
   '.edge.grab{pointer-events:stroke}',
-  '.weight{font-size:13px;text-anchor:middle;cursor:pointer}',
+  // The count reads off a backing of its own, so the curves behind it do not run
+  // through the digits. Both lines are anchored at the start, beside the lane.
+  '.weight-bg{fill:#fff;fill-opacity:.92;stroke:#ddd;pointer-events:all;cursor:pointer}',
+  '.weight{font-size:13px;text-anchor:start;cursor:pointer}',
+  '.kinds{font-size:11px;text-anchor:start;cursor:pointer;opacity:.8}',
   '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
   '#mermaid{overflow-x:auto}',
 ].join('')
@@ -866,7 +938,7 @@ function html(graph, rules, expand, checkRules, baseline) {
     '</head>',
     '<body>',
     '<h1>cast</h1>',
-    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it.</p>',
+    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow points at the module being imported, in its own colour, and says under its count which kinds of import it carries - value, type or dynamic.</p>',
     '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
     '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',
