@@ -41,9 +41,9 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   the bug `cast altitude` catches, and an edge collapsing to one node is dropped, so a layer never
   self-loops.
 - One description, `viewData` (layers, module-edge sites, rule marks, the counts `report`/`check`
-  print). Mermaid reads it at two altitudes, `viewAt(data, expand)` -> `layout`; the page reads it
-  as a tree, `treeId` -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`. `html` inlines the
-  page's four by `toString()`: each closes over nothing here and may call only the others.
+  print). Mermaid reads it at two altitudes through `viewAt(data, expand)`; the page reads it as a
+  tree, `treeId` -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`. `html` inlines the page's
+  four by `toString()`: each closes over nothing here and may call only the others.
 - The tree is layer / each folder level / file, keyed by containment path (`logic/src/b.ts`), every
   node carrying `modules`, its whole subtree. `viewTree` ends an arrow on the deepest *closed* node
   holding it and drops an edge inside one, so the arrows leaving a node sum to the imports leaving
