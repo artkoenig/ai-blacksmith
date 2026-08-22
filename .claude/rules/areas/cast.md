@@ -57,6 +57,8 @@ The module graph of a project, and the rules it must obey. `bin/cast`/`bin/cast-
   any local ending in `g` (`bg`), failing an unrelated suite - name around it. A multi-line `-F`
   pattern is alternatives, not a block: cut the block out with `sed -n '/a/,/b/p'` first. `grep -c`
   counts lines, not matches; a comment naming the symbol counts too - match the call, not the word.
+  A page handler runs in no node probe, so a clause about what one must *not* do is tested as a
+  negative grep over the block `sed` cut out, comment lines stripped (`grep -v '^ *//'`) first.
 - `render` reads rules.json and baseline.json like `check`: severity colours and the rule label an
   arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, only a flagged one is
   styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node

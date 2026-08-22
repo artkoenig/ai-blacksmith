@@ -1649,6 +1649,18 @@ printf '%s\n' "$SW" | grep -qF 'data = states[at].data' \
   || { fail "cast plan switch" "the switch does not move to the other state"; S=1; }
 printf '%s\n' "$SW" | grep -qF 'render()' \
   || { fail "cast plan switch" "the switch never draws the state it moved to"; S=1; }
+# AC8 what the reader opened stays open across a switch: the press moves the
+# state and draws it, and writes the open set of neither one, so a group the
+# reader opened is still open in the state that arrives
+# break: clearing or rewriting `open` in the switch handler, which collapses the
+# drawing back to the seeded altitude on every press
+printf '%s\n' "$SW" | grep -v '^ *//' | grep -qE 'delete +open|open\[[^]]*\] *=|(^|[^.[:alnum:]_])open *=[^=]' \
+  && { fail "cast plan switch" "the switch writes the open set, so a press drops what the reader opened"; S=1; }
+# and the drawing reads that set as it stands at the press, never a copy taken
+# when the page was written
+# break: seeding render from a fixed list of ids, which freezes the altitude
+printf '%s\n' "$CAST_PPAGE" | grep -qF 'layoutTree(viewTree(data, Object.keys(open)))' \
+  || { fail "cast plan switch" "the drawing does not read the open set at the press"; S=1; }
 printf '%s\n' "$CAST_PPAGE" | grep -qF "svg.textContent = ''" \
   || { fail "cast plan switch" "a render leaves the drawing before it on the page"; S=1; }
 # AC8 the highlight belongs to the drawing being replaced, and a render clears it
