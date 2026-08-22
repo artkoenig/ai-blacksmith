@@ -69,11 +69,10 @@ The module graph of a project, and the rules it must obey. `bin/cast`/`bin/cast-
   `forbidden` names an edge that must not exist, `allowed` drops it. A side is a layer name where
   `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise; layer wins a tie, so
   a rule inside one layer must name the files.
-- `cast check` reads every resolved module edge, never mermaid's aggregate (`cast check altitude`).
-  The exit code comes from severity, not the count: `warn` is listed and leaves 0; the summary is
-  the last line, the only one on a clean project. A count labelled `edges` is every import met -
-  `cast report`'s line, with its resolution breakdown; every narrower one says `module edges` (`cast
-  edges`, the check summary, the page).
+- `cast check` reads resolved module edges, never mermaid's aggregate (`cast check altitude`). Exit
+  code is severity, not count: `warn` is listed and leaves 0; the summary is the last line, alone on
+  a clean project. `edges` unqualified is every import met (`cast report`, with a resolution
+  breakdown); narrower counts say `module edges` - `cast edges`, the check summary, the page.
 - `die()` is exit 2 throughout: an unreadable or invalid `rules.json` is "could not run", not a
   violation or a pass; validation belongs in `readRules`, `soft(fn)` throws instead for preview.
   Control characters in `scripts/cast.js` are escapes (`'\0'`): a literal NUL reads as binary.
@@ -90,12 +89,11 @@ The module graph of a project, and the rules it must obey. `bin/cast`/`bin/cast-
   by rule, file, imported module and edge kind, never by line, which churns (`baselineKey`).
   `--update` refuses (exit 1, no write) a baseline holding more violations than the one it replaces
   - the ratchet; no baseline yet accepts any count.
-- Plans are read at simulate time from `<root>/.cast/plans/<name>.json`, like the rules, applied in
-  order to a deep copy - `cast plan simulate` writes no source file and no `graph.json` - each on
-  the graph the one before left, so one may name a module an earlier one created; `apply()` dies on
-a module it cannot find, `readPlan` on an unknown op or key. `render --html --plan <name>` runs both
-  before it writes, so a bad plan is that exit 2 and no page; it embeds a second `viewData` block,
-  `cast-plan-data`, `cast-data` stays the graph as it is, and `--plan --mermaid` is refused.
+- Plans are read at simulate time from `.cast/plans/<name>.json`, applied in order to a deep copy -
+  `cast plan simulate` writes no file at all - each on the graph the last left, so an op may name a
+  module an earlier made; `apply()` dies on a module not found, `readPlan` on an unknown op or key.
+  `render --html --plan <name>` simulates first, so a bad plan is exit 2 and no page; it adds a
+  second `viewData` block, `cast-plan-data`, leaves `cast-data` the real graph, refuses `--mermaid`.
 - An edge's `file` is the id of the module holding it after the operation too: `move`/`merge` go
   through `resite()`, `split` sites each edge on its part, `invert` the new edge at `line` 0. Plan
   metrics are at layer altitude, counting only edges crossing a layer boundary: `I = fan-out /
