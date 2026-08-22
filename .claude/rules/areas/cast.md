@@ -21,15 +21,14 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   the capture excludes a leading quote, or a literal specifier makes two edges on one line.
 - A count labelled `edges` is every import met - `cast report`'s line, with a resolution breakdown
   under it. Every narrower count says `module edges`: `cast edges`, `cast plan simulate`, the
-  preview tail and the check summary. Relabelling one makes two lines of a run disagree.
+  preview tail, the check summary, the page. Relabelling one makes two lines of a run disagree.
 - Patterns are matched in order and one `(line, specifier)` makes one edge, first kind wins - the
   whole type/value classification: `import type` matches the value pattern too, so a type pattern
   moved below a value one silently reclassifies every type edge.
 - Pattern regexes carry one capture group, the specifier, and tolerate newlines inside the
   statement (`[^;'"]*`, not `[^\n]*`). The site is where the statement starts,
   `m.index + m[0].search(/\S/)`, so the prefix class stays out of the capture.
-- `cast report` names whole strongly connected components, by an iterative Tarjan - a real graph
-  is deeper than the node stack.
+- `cast report` names whole SCCs, by an iterative Tarjan - a real graph outgrows the node stack.
 - Layers are read at report time from `<root>/.cast/layers.json`, never baked into `graph.json`:
   re-layering needs no rescan. Glob to layer name, first match wins, engine `globToRe` (`**` spans
   segments, `*`/`?` stay in one). No file means the first directory level is the layer, a fallback
@@ -37,16 +36,19 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   bare `catch`, or `String(name)`, answers at an altitude nobody declared.
 - A module no glob claims is `unassigned`: counted and named by `cast report`, never swept into a
   declared layer. `assign()` keys placement by module id, making "exactly one layer" structural.
-- `cast render` reads the layers at render time and never rewrites the graph. Layer nodes are
-  `L_<name>`, module nodes `M_<id>`, every character mermaid rejects escaped to `_<hex>_`
-  (`src/b.ts` -> `M_src_2f_b_2e_ts`), the name only in the label. Reversible on purpose: a bare
-  `_` gives `src/a-b.ts` and `src/a_b.ts` one node.
-- The default altitude is layers: a module node without `--expand <layer>` is the bug `cast
-  altitude` catches. An edge whose endpoints collapse to one node is dropped, so a layer never
-  self-loops; `--expand` moves one end to the module.
+- `cast render` reads the layers at render time and never rewrites the graph: layer nodes `L_<name>`,
+  module nodes `M_<id>`, every character mermaid rejects escaped to `_<hex>_` (`M_src_2f_b_2e_ts`),
+  the name only in the label - reversible, or `src/a-b.ts` and `src/a_b.ts` share one node.
+- The default altitude is layers: a module node without `--expand <layer>` is the bug `cast altitude`
+  catches. An edge collapsing to one node is dropped, so a layer never self-loops.
 - The layer arrow's `|n|` counts the module edges `cast edges --from --to` lists - never drift.
-- `--html` is dependency-free on purpose: the page inlines the mermaid source as escaped text and
-  loads nothing over the network (`cast html`).
+- Every view draws from one description: `viewData` (layers, module-edge sites, rule marks, the
+  counts `report`/`check` print) -> `viewAt(data, expand)` -> `layout`. `html` inlines the three by
+  `toString()`, so they close over nothing here and the page cannot drift from `--expand`.
+- `render` reads rules.json and baseline.json like `check`: severity colours and the rule labels an
+  arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, and only a flagged one is
+  styled - a project with no rules renders what it always did. The page fetches nothing: its data in
+  a `<script type="application/json">` with `<` escaped, and its own svg drawing code.
 - Exercised by the `cast *` suites in `test.sh`, all reading one scanned fixture. Assert against
   the written `.cast/graph.json`, the contract, unless the command writes no file.
 - `.cast` is in `ALWAYS_IGNORED` - adapters are loaded, never scanned; walking skips dot dirs.
@@ -67,8 +69,7 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - An unknown rule attribute is `not evaluated: <rule>: <key>`, never ignored: a new attribute
   means adding it to `RULE_KEYS` in the same change.
 - A side present but not a string is rejected by `sideShape` before `side()`, naming the shape
-  expected; only an absent one is "carries no from" - one null for both calls a key that is in the
-  file missing.
+  expected; only an absent one is "carries no from" - one null for both calls a present key missing.
 - One rule object is validated in one place, `readRule`, called by `readRules` and by `cast rules
   preview`. `group()` is the shared rule/layer-edge/site rendering, reused by the plan report.
 - `cast rules preview '<rule json>'` counts flagged module edges, never modules - three forbidden

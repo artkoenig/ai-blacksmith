@@ -176,9 +176,18 @@ graph LR
 ```
 
 `--expand <layer>` resolves that one layer to its modules, in a subgraph, and leaves every other
-layer a single node; an edge into it lands on the module, not on the layer. `--html <file>` writes
-the same view as one self-contained page - it carries the layer names and fetches nothing. How the
-page looks is not a claim it makes.
+layer a single node; an edge into it lands on the module, not on the layer.
+
+An edge that breaks a rule in `.cast/rules.json` is drawn in the colour of its severity and
+labelled with the rule name; one held by `.cast/baseline.json` is labelled `(inherited)` and drawn
+in grey. The render reads both files at render time, exactly as `cast check` does.
+
+`--html <file>` writes the same view as one self-contained page. The page draws the graph itself,
+in svg, from a description embedded in the file, and fetches nothing at view time. Clicking a layer
+opens it to the modules it holds and clicking it again closes it - the same `viewAt` the `--expand`
+flag runs, inlined into the page, so the two cannot drift. Clicking an edge lists the module edges
+behind it, each with its file and its line. The counts beside the drawing are the ones `cast report`
+and `cast check` print for the same graph.
 
 ## Adapters
 

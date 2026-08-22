@@ -1550,6 +1550,201 @@ printf '%s\n' "$CAST_EC" | grep -q 'module edges against' \
   || { fail "cast edge counts" "the check summary does not say which edges it read: $CAST_EC"; S=1; }
 [ "$S" = 0 ] && ok "cast edge counts"
 
+# --- cast: the page ----------------------------------------------------------
+# The same scanned fixture, rendered to html with a rules file and a baseline in
+# place. The suite runs on node alone, so what is asserted is the page's data,
+# its markup, and the pure functions it carries - never a browser.
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [
+  { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui", "kinds": ["value"] },
+  { "name": "ui-owns-nothing", "severity": "warn", "from": "ui", "to": "logic", "kinds": ["value"] },
+  { "name": "logic-internal", "severity": "warn", "from": "src/b.ts", "to": "src/c.ts" }
+] }
+JSON
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "ui-owns-nothing", "file": "src/a.ts", "to": "src/b.ts", "kind": "value" } ] }
+JSON
+(cd "$CASTFIX" && "$CAST_BIN" render --html page.html >/dev/null 2>&1) \
+  || { fail "cast html graph" "cast render --html did not run with rules in place"; }
+CAST_PAGE="$CASTFIX/page.html"
+# the embedded description, read out of the page and run through the very
+# functions the page runs it through
+page_data() { sed -n 's|^<script id="cast-data" type="application/json">\(.*\)</script>$|\1|p' "$CAST_PAGE"; }
+CAST_DATA="$(page_data)"
+pagejs() { CAST_JS="$PWD/plugins/cast/scripts/cast.js" DATA="$CAST_DATA" PAGE="$CAST_PAGE" node -e '
+  const bad=(s)=>{console.log(s);process.exit(1)}
+  const cast=require(process.env.CAST_JS)
+  const {viewAt,layout}=cast
+  const fs=require("fs")
+  const page=fs.readFileSync(process.env.PAGE,"utf8")
+  let data
+  try { data=JSON.parse(process.env.DATA) } catch(e) { bad("the page carries no readable data block: "+e.message) }
+  const view=(x)=>viewAt(data,x)
+  const label=(v,n)=>v.nodes.map(x=>x.label).includes(n)
+  const edge=(v,f,t)=>v.edges.find(e=>e.from===f&&e.to===t)
+  '"$1"'
+'; }
+
+# AC1 the page draws the graph itself - nodes, edges and edge weights - from the
+# data in the file, and fetches nothing
+S=0
+[ -n "$CAST_DATA" ] \
+  || { fail "cast html graph" "the page carries no embedded graph data"; S=1; }
+# break: writing a page with the mermaid source and no canvas to draw on
+grep -q '<svg id="graph"' "$CAST_PAGE" \
+  || { fail "cast html graph" "the page has no svg to draw the graph in"; S=1; }
+# break: embedding the layer names only, which leaves nothing to draw an edge from
+O="$(pagejs '
+  const v=view(null)
+  for (const n of ["ui (1)","logic (5)","unassigned (2)"])
+    if (!label(v,n)) bad("the page data draws no node "+n)
+  const e=edge(v,"L_ui","L_logic")
+  if (!e) bad("the page data carries no ui -> logic edge")
+  if (e.weight!==3) bad("the ui -> logic edge is weighted "+e.weight+", not 3")
+  if (!edge(v,"L_logic","L_ui")) bad("the page data carries no logic -> ui edge")
+  const l=layout(v)
+  if (!(l.width>0&&l.height>0)) bad("the drawing has no extent: "+l.width+"x"+l.height)
+  for (const n of l.nodes) if (!Number.isFinite(n.x)||!Number.isFinite(n.y)) bad("the node "+n.label+" has no place")
+  for (const e2 of l.edges) if (!Number.isFinite(e2.x1)||!Number.isFinite(e2.y2)) bad("an edge has no endpoints")
+')" || { fail "cast html graph" "$O"; S=1; }
+# the page carries the code that draws it, and calls it
+# break: embedding the data and no drawing code, which renders an empty svg
+grep -q 'createElementNS' "$CAST_PAGE" \
+  || { fail "cast html graph" "the page carries no code that draws svg"; S=1; }
+grep -q '^draw()$' "$CAST_PAGE" \
+  || { fail "cast html graph" "the page never calls its drawing code"; S=1; }
+# self-contained: it fetches nothing at view time
+# break: pulling a layout or mermaid library off a cdn
+grep -qE 'src="https?:|href="https?:|<script[^>]*src=|@import|url\(https?:' "$CAST_PAGE" \
+  && { fail "cast html graph" "the page loads an asset over the network"; S=1; }
+[ "$S" = 0 ] && ok "cast html graph"
+
+# AC2 clicking a layer opens it to its modules and clicking it again closes it,
+# through the same function cast render --mermaid --expand runs
+S=0
+O="$(pagejs '
+  const open=view("logic")
+  for (const m of ["src/b.ts","src/c.ts","src/t.ts","src/rel.ts","src/multi.ts"])
+    if (!label(open,m)) bad("opening logic did not draw its module "+m)
+  if (label(open,"logic (5)")) bad("the opened layer is still drawn as one node")
+  if (!label(open,"ui (1)")) bad("opening one layer opened another")
+  if (!edge(open,"L_ui","M_src_2f_b_2e_ts")) bad("an edge into the opened layer did not reach a module")
+  const shut=view(null)
+  if (!label(shut,"logic (5)")) bad("closing the layer did not restore its node")
+  if (label(shut,"src/b.ts")) bad("closing the layer left its modules drawn")
+')" || { fail "cast html expand" "$O"; S=1; }
+# the expansion in the page is the function the command runs, not a second one
+# break: writing a separate expander for the page, which drifts from the command
+O="$(pagejs '
+  if (!page.includes(viewAt.toString()))
+    bad("the page does not carry the source of viewAt, the function cast render --expand runs")
+  if (!page.includes(layout.toString()))
+    bad("the page does not carry the source of layout")
+')" || { fail "cast html expand" "$O"; S=1; }
+# break: opening a layer with no way back, which is a page with one state
+grep -q 'expand === layer ? null : layer' "$CAST_PAGE" \
+  || { fail "cast html expand" "a click on an open layer does not close it again"; S=1; }
+[ "$S" = 0 ] && ok "cast html expand"
+
+# AC3 clicking a layer edge lists the module edges behind it, each with its file
+# and its line, without leaving the page
+S=0
+# break: aggregating the layer edge to a weight and dropping the imports behind it
+O="$(pagejs '
+  const e=edge(view(null),"L_ui","L_logic")
+  const want=["src/a.ts:1 -> src/b.ts (value)","src/a.ts:2 -> src/t.ts (type)","src/a.ts:6 -> src/c.ts (dynamic)"]
+  const got=e.sites.map(s=>s.file+":"+s.line+" -> "+s.to+" ("+s.kind+")")
+  for (const w of want) if (!got.includes(w)) bad("the edge does not carry the site "+w+", only "+got.join(", "))
+  if (got.length!==e.weight) bad("the edge is weighted "+e.weight+" but carries "+got.length+" sites")
+')" || { fail "cast html drilldown" "$O"; S=1; }
+# the sites are shown in the page itself
+# break: linking out to cast edges instead of listing them where the reader is
+grep -q '<div id="sites">' "$CAST_PAGE" \
+  || { fail "cast html drilldown" "the page has nowhere to list the sites"; S=1; }
+grep -qF "s.file + ':' + s.line" "$CAST_PAGE" \
+  || { fail "cast html drilldown" "the page does not render a site with its file and line"; S=1; }
+grep -q "addEventListener('click', () => sites(e))" "$CAST_PAGE" \
+  || { fail "cast html drilldown" "an edge in the page is not clickable"; S=1; }
+[ "$S" = 0 ] && ok "cast html drilldown"
+
+# AC4 an edge that breaks a rule is drawn in the colour of its severity and
+# labelled with the rule, in the mermaid output and in the page alike; one held
+# by the baseline is drawn as inherited
+S=0
+CAST_MARK="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"
+# break: rendering without reading rules.json, which leaves every arrow the same
+printf '%s\n' "$CAST_MARK" | grep -q '^  L_logic -->|1 no-back-edge| L_ui$' \
+  || { fail "cast violation marks" "the breaking edge is not labelled with its rule: $CAST_MARK"; S=1; }
+# break: labelling the rule but drawing every arrow in one colour
+printf '%s\n' "$CAST_MARK" | grep -q '^  linkStyle 0 stroke:#d32f2f' \
+  || { fail "cast violation marks" "the error edge is not drawn in the error colour: $CAST_MARK"; S=1; }
+# break: reading the baseline nowhere but check, which draws inherited debt as new
+printf '%s\n' "$CAST_MARK" | grep -q 'ui-owns-nothing (inherited)' \
+  || { fail "cast violation marks" "a baselined edge is not drawn as inherited: $CAST_MARK"; S=1; }
+printf '%s\n' "$CAST_MARK" | grep -q '^  linkStyle 1 stroke:#888' \
+  || { fail "cast violation marks" "the inherited edge is not drawn as inherited: $CAST_MARK"; S=1; }
+# the page says the same thing, off the same data
+O="$(pagejs '
+  const v=view(null)
+  const bad1=edge(v,"L_logic","L_ui")
+  if (bad1.state!=="breaking") bad("the page draws the breaking edge as "+bad1.state)
+  if (bad1.color!=="#d32f2f") bad("the breaking edge is coloured "+bad1.color)
+  if (bad1.label!=="1 no-back-edge") bad("the breaking edge is labelled "+bad1.label)
+  const held=edge(v,"L_ui","L_logic")
+  if (held.state!=="inherited") bad("the page draws a baselined edge as "+held.state)
+  if (held.color!=="#888") bad("the inherited edge is coloured "+held.color)
+')" || { fail "cast violation marks" "$O"; S=1; }
+printf '%s\n' "$CAST_DATA" | grep -q '"state":"inherited"' \
+  || { fail "cast violation marks" "the page data marks no edge as inherited"; S=1; }
+# drop the baseline and the same edge is breaking, at its own severity: the mark
+# comes from the baseline, not from the rule
+# break: hardcoding inherited, or colouring a warn the colour of an error
+rm -f "$CAST_BASE"
+CAST_MARK2="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"
+printf '%s\n' "$CAST_MARK2" | grep -q '(inherited)' \
+  && { fail "cast violation marks" "an edge is inherited with no baseline: $CAST_MARK2"; S=1; }
+printf '%s\n' "$CAST_MARK2" | grep -q '^  linkStyle 1 stroke:#e08b00' \
+  || { fail "cast violation marks" "the warn edge is not drawn in the warn colour: $CAST_MARK2"; S=1; }
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "ui-owns-nothing", "file": "src/a.ts", "to": "src/b.ts", "kind": "value" } ] }
+JSON
+[ "$S" = 0 ] && ok "cast violation marks"
+
+# AC5 every count the page shows equals what cast report and cast check print
+S=0
+CAST_CHK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)" || true
+C_SUM="$(printf '%s\n' "$CAST_CHK" | tail -1)"
+n_of() { printf '%s\n' "$2" | sed -n "s/$1/\1/p" | head -1; }
+li_of() { sed -n "s|^<li>$1 \([0-9]*\)</li>\$|\1|p" "$CAST_PAGE" | head -1; }
+same() {
+  [ -n "$2" ] || { fail "cast html agrees" "the command printed no $1 to compare"; S=1; return; }
+  [ -n "$3" ] || { fail "cast html agrees" "the page shows no count for $1"; S=1; return; }
+  [ "$2" = "$3" ] || { fail "cast html agrees" "the page says $1 $3, the commands say $2"; S=1; }
+}
+# break: counting the page's numbers off the drawn view, which drops the edges
+# no arrow stands for, or hardcoding one of them
+same modules "$(n_of '^modules \([0-9]*\)$' "$CAST_REPORT")" "$(li_of modules)"
+same edges "$(n_of '^edges \([0-9]*\).*$' "$CAST_REPORT")" "$(li_of edges)"
+same layers "$(n_of '^layers \([0-9]*\)$' "$CAST_REPORT")" "$(li_of layers)"
+same unassigned "$(n_of '^unassigned \([0-9]*\)$' "$CAST_REPORT")" "$(li_of unassigned)"
+same unresolved "$(n_of '^unresolved \([0-9]*\)$' "$CAST_REPORT")" "$(li_of unresolved)"
+same opaque "$(n_of '^opaque \([0-9]*\)$' "$CAST_REPORT")" "$(li_of opaque)"
+same cycles "$(n_of '^cycles \([0-9]*\)$' "$CAST_REPORT")" "$(li_of cycles)"
+same violations "$(n_of '^\([0-9]*\) violation.*$' "$C_SUM")" "$(li_of violations)"
+same errors "$(n_of '^.*(\([0-9]*\) error.*$' "$C_SUM")" "$(li_of errors)"
+same 'module edges' "$(n_of '^.*in \([0-9]*\) module edge.*$' "$C_SUM")" "$(li_of 'module edges')"
+same rules "$(n_of '^.*against \([0-9]*\) rule.*$' "$C_SUM")" "$(li_of rules)"
+same baselined "$(n_of '^.*, \([0-9]*\) baselined$' "$C_SUM")" "$(li_of baselined)"
+# the fixture has to be able to tell the two edge counts apart, or the suite
+# would pass on a page that confused them
+[ "$(li_of edges)" != "$(li_of 'module edges')" ] \
+  || { fail "cast html agrees" "the fixture cannot tell edges from module edges"; S=1; }
+[ "$(li_of violations)" != "$(li_of baselined)" ] || [ "$(li_of baselined)" = 0 ] \
+  || { fail "cast html agrees" "the fixture cannot tell a live violation from a held one"; S=1; }
+[ "$S" = 0 ] && ok "cast html agrees"
+rm -f "$CAST_BASE"
+
+
 # --- cast skills ------------------------------------------------------------
 # The three skills a session reaches cast through. Each one runs its wrapper in
 # the prompt, so the model never has to know the flags - a skill that only

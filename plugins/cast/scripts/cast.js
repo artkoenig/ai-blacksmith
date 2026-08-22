@@ -279,62 +279,329 @@ function nodeId(prefix, name) {
   return prefix + name.replace(/[^A-Za-z0-9]/g, (c) => '_' + c.charCodeAt(0).toString(16) + '_')
 }
 
-function mermaid(graph, rules, expand) {
+// The one description every view draws from: the layers with the modules they
+// hold, every resolved module edge with its site and whatever rule it breaks,
+// and the counts `cast report` and `cast check` print. The page carries this
+// object verbatim, so no number it shows was computed anywhere else.
+function viewData(graph, rules, checkRules, baseline) {
   const { of, names } = assign(graph, rules)
   const all = layerList(graph, of, names)
-  if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
-  const lines = ['graph LR']
-  for (const l of all) {
-    if (l === expand) {
-      lines.push(`  subgraph ${nodeId('L_', l)}["${l}"]`)
-      for (const m of graph.modules) if (of.get(m.id) === l) lines.push(`    ${nodeId('M_', m.id)}["${m.id}"]`)
-      lines.push('  end')
-    } else {
-      const n = graph.modules.filter((m) => of.get(m.id) === l).length
-      lines.push(`  ${nodeId('L_', l)}["${l} (${n})"]`)
-    }
-  }
-  // The weight is the number of module edges behind the layer edge: without it a
-  // layer arrow hides whether it stands for one import or two hundred.
-  const weight = new Map()
-  const ends = (id) => (of.get(id) === expand ? nodeId('M_', id) : nodeId('L_', of.get(id)))
+  const forbidden = checkRules ? checkRules.forbidden : []
+  const found = violations(graph, of, { forbidden, allowed: checkRules ? checkRules.allowed : [] })
+  const { live, held } = partition(found, baseline || null)
+  // A site is the file, the line, the module imported and the kind - the same
+  // shape `cast check` lists. A live violation wins over an inherited one on the
+  // same site: the breaking mark is the one a reader must not miss.
+  const siteKey = (v) => [v.file, v.line, v.to, v.kind].join('\0')
+  const mark = new Map()
+  for (const v of held) mark.set(siteKey(v), { rule: v.rule, severity: v.severity, state: 'inherited' })
+  for (const v of live) mark.set(siteKey(v), { rule: v.rule, severity: v.severity, state: 'breaking' })
+  const edges = []
   for (const m of graph.modules) {
     for (const e of m.edges) {
       if (e.resolution !== 'module') continue
-      const a = ends(m.id)
-      const b = ends(e.to)
-      // An edge inside one collapsed layer has no arrow to draw at this altitude.
-      if (a === b) continue
-      const k = a + '\0' + b
-      weight.set(k, (weight.get(k) || 0) + 1)
+      const site = { from: m.id, to: e.to, file: e.file, line: e.line, kind: e.kind }
+      const v = mark.get(siteKey({ file: e.file, line: e.line, to: e.to, kind: e.kind }))
+      if (v) Object.assign(site, v)
+      edges.push(site)
     }
   }
-  for (const k of [...weight.keys()].sort()) {
-    const [a, b] = k.split('\0')
-    lines.push(`  ${a} -->|${weight.get(k)}| ${b}`)
+  const allEdges = graph.modules.flatMap((m) => m.edges)
+  const byResolution = (r) => allEdges.filter((e) => e.resolution === r).length
+  return {
+    layers: all.map((l) => ({
+      name: l,
+      modules: graph.modules.filter((m) => of.get(m.id) === l).map((m) => m.id),
+    })),
+    edges,
+    counts: {
+      modules: graph.modules.length,
+      edges: allEdges.length,
+      moduleEdges: moduleEdges(graph),
+      layers: names.length,
+      unassigned: graph.modules.filter((m) => of.get(m.id) === UNASSIGNED).length,
+      unresolved: byResolution('unresolved'),
+      opaque: byResolution('opaque'),
+      cycles: cycles(graph).length,
+      violations: live.length,
+      errors: live.filter((v) => v.severity === 'error').length,
+      baselined: held.length,
+      rules: forbidden.length,
+    },
   }
+}
+
+// The expansion, once. `cast render --mermaid --expand` calls it here and the
+// page calls the very same source - `html` inlines `viewAt.toString()` - so the
+// picture a reader opens by clicking cannot drift from the one the command
+// prints. It closes over nothing but its arguments for that reason: a reference
+// to anything in this module would be undefined in the page.
+function viewAt(data, expand) {
+  const esc = (p, n) => p + n.replace(/[^A-Za-z0-9]/g, (c) => '_' + c.charCodeAt(0).toString(16) + '_')
+  const of = new Map()
+  for (const l of data.layers) for (const m of l.modules) of.set(m, l.name)
+  const nodes = []
+  for (const l of data.layers) {
+    if (l.name === expand)
+      for (const m of l.modules) nodes.push({ id: esc('M_', m), label: m, layer: l.name, module: m })
+    else nodes.push({ id: esc('L_', l.name), label: l.name + ' (' + l.modules.length + ')', layer: l.name, module: null })
+  }
+  const end = (m) => (of.get(m) === expand ? esc('M_', m) : esc('L_', of.get(m)))
+  // The weight is the number of module edges behind the layer edge: without it a
+  // layer arrow hides whether it stands for one import or two hundred. An edge
+  // inside one collapsed layer has no arrow to draw at this altitude.
+  const by = new Map()
+  for (const e of data.edges) {
+    const a = end(e.from)
+    const b = end(e.to)
+    if (a === b) continue
+    const k = a + '\0' + b
+    let g = by.get(k)
+    if (!g) {
+      g = { from: a, to: b, weight: 0, sites: [], rule: null, severity: null, state: null }
+      by.set(k, g)
+    }
+    g.weight++
+    g.sites.push(e)
+    if (e.rule && g.state !== 'breaking') {
+      g.rule = e.rule
+      g.severity = e.severity
+      g.state = e.state
+    }
+  }
+  const edges = [...by.keys()].sort().map((k) => by.get(k))
+  for (const g of edges) {
+    // The severity is the colour and the rule name is the label, in both views:
+    // an edge nobody flagged keeps the label it always had, the bare weight.
+    g.color = !g.state ? '#666' : g.state === 'inherited' ? '#888' : g.severity === 'warn' ? '#e08b00' : '#d32f2f'
+    g.label = g.rule ? g.weight + ' ' + g.rule + (g.state === 'inherited' ? ' (inherited)' : '') : String(g.weight)
+  }
+  return { nodes, edges, expand: expand || null, counts: data.counts }
+}
+
+// Where every node and every arrow sits, in numbers alone - the page needs no
+// layout library, and this runs in node too, which is where it is tested. Rank
+// is the longest path in, relaxed until it settles; a cycle stops it at the node
+// count rather than spinning.
+function layout(view) {
+  const W = 190
+  const H = 40
+  const GAPX = 110
+  const GAPY = 26
+  const PAD = 24
+  const rank = new Map(view.nodes.map((n) => [n.id, 0]))
+  for (let pass = 0; pass < view.nodes.length; pass++) {
+    let moved = false
+    for (const e of view.edges) {
+      if (!rank.has(e.from) || !rank.has(e.to)) continue
+      if (rank.get(e.to) < rank.get(e.from) + 1) {
+        rank.set(e.to, rank.get(e.from) + 1)
+        moved = true
+      }
+    }
+    if (!moved) break
+  }
+  const columns = new Map()
+  const nodes = []
+  for (const n of view.nodes) {
+    const r = rank.get(n.id)
+    const row = columns.get(r) || 0
+    columns.set(r, row + 1)
+    nodes.push({ ...n, x: PAD + r * (W + GAPX), y: PAD + row * (H + GAPY), w: W, h: H })
+  }
+  const at = new Map(nodes.map((n) => [n.id, n]))
+  const edges = view.edges.map((e) => {
+    const a = at.get(e.from)
+    const b = at.get(e.to)
+    return {
+      ...e,
+      x1: a.x + a.w,
+      y1: a.y + a.h / 2,
+      x2: b.x,
+      y2: b.y + b.h / 2,
+      mx: (a.x + a.w + b.x) / 2,
+      my: (a.y + b.y + a.h) / 2,
+    }
+  })
+  // An expanded layer is boxed around its modules, and the box is what a reader
+  // clicks to collapse it again - the layer node itself is gone at that altitude.
+  const groups = []
+  if (view.expand) {
+    const mine = nodes.filter((n) => n.layer === view.expand)
+    if (mine.length) {
+      const x = Math.min(...mine.map((n) => n.x))
+      const y = Math.min(...mine.map((n) => n.y))
+      groups.push({
+        layer: view.expand,
+        x: x - 12,
+        y: y - 30,
+        w: Math.max(...mine.map((n) => n.x + n.w)) - x + 24,
+        h: Math.max(...mine.map((n) => n.y + n.h)) - y + 42,
+      })
+    }
+  }
+  const right = nodes.concat(groups.map((g) => ({ x: g.x, y: g.y, w: g.w, h: g.h })))
+  return {
+    nodes,
+    edges,
+    groups,
+    expand: view.expand,
+    counts: view.counts,
+    width: Math.max(...right.map((n) => n.x + n.w), 0) + PAD,
+    height: Math.max(...right.map((n) => n.y + n.h), 0) + PAD,
+  }
+}
+
+// The page's own script, written here and inlined by `html` through
+// `toString()`. It is never called in node: it exists to be read as source, and
+// it may touch nothing this module holds beyond `viewAt` and `layout`, which
+// travel beside it.
+function draw() {
+  const data = JSON.parse(document.getElementById('cast-data').textContent)
+  const svg = document.getElementById('graph')
+  const panel = document.getElementById('sites')
+  const NS = 'http://www.w3.org/2000/svg'
+  let expand = data.expand || null
+  const el = (name, attrs, text) => {
+    const n = document.createElementNS(NS, name)
+    for (const k of Object.keys(attrs)) n.setAttribute(k, attrs[k])
+    if (text !== undefined) n.textContent = text
+    return n
+  }
+  const sites = (e) => {
+    panel.textContent = ''
+    const h = document.createElement('h3')
+    h.textContent = e.weight + ' module edges' + (e.rule ? ' - ' + e.label : '')
+    panel.appendChild(h)
+    const ul = document.createElement('ul')
+    for (const s of e.sites) {
+      const li = document.createElement('li')
+      li.textContent = s.file + ':' + s.line + ' -> ' + s.to + ' (' + s.kind + ')' + (s.rule ? ' ' + s.rule : '')
+      ul.appendChild(li)
+    }
+    panel.appendChild(ul)
+  }
+  const toggle = (layer) => {
+    expand = expand === layer ? null : layer
+    panel.textContent = ''
+    render()
+  }
+  function render() {
+    const l = layout(viewAt(data, expand))
+    svg.textContent = ''
+    svg.setAttribute('viewBox', '0 0 ' + l.width + ' ' + l.height)
+    for (const g of l.groups) {
+      svg.appendChild(el('rect', { x: g.x, y: g.y, width: g.w, height: g.h, rx: 8, class: 'group' }))
+      const t = el('text', { x: g.x + 10, y: g.y + 20, class: 'grouplabel' }, g.layer)
+      t.addEventListener('click', () => toggle(g.layer))
+      svg.appendChild(t)
+    }
+    for (const e of l.edges) {
+      const line = el('line', {
+        x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2,
+        stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
+        'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',
+        class: 'edge',
+      })
+      line.addEventListener('click', () => sites(e))
+      svg.appendChild(line)
+      const t = el('text', { x: e.mx, y: e.my - 6, fill: e.color, class: 'weight' }, e.label)
+      t.addEventListener('click', () => sites(e))
+      svg.appendChild(t)
+    }
+    for (const n of l.nodes) {
+      const g = el('g', { class: n.module ? 'node module' : 'node layer' })
+      g.appendChild(el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 6 }))
+      g.appendChild(el('text', { x: n.x + n.w / 2, y: n.y + n.h / 2 + 5 }, n.label))
+      if (!n.module) g.addEventListener('click', () => toggle(n.layer))
+      svg.appendChild(g)
+    }
+  }
+  render()
+}
+
+function mermaid(graph, rules, expand, checkRules, baseline) {
+  const data = viewData(graph, rules, checkRules, baseline)
+  const all = data.layers.map((l) => l.name)
+  if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
+  const view = viewAt(data, expand)
+  const lines = ['graph LR']
+  for (const l of data.layers) {
+    if (l.name === expand) {
+      lines.push(`  subgraph ${nodeId('L_', l.name)}["${l.name}"]`)
+      for (const n of view.nodes) if (n.layer === l.name) lines.push(`    ${n.id}["${n.label}"]`)
+      lines.push('  end')
+    } else {
+      const n = view.nodes.find((x) => x.layer === l.name && !x.module)
+      lines.push(`  ${n.id}["${n.label}"]`)
+    }
+  }
+  view.edges.forEach((e) => lines.push(`  ${e.from} -->|${e.label}| ${e.to}`))
+  // Only a flagged arrow is styled: a graph nobody has written a rule for prints
+  // exactly what it printed before.
+  view.edges.forEach((e, i) => {
+    if (e.state) lines.push(`  linkStyle ${i} stroke:${e.color},stroke-width:2px`)
+  })
   return lines.join('\n')
 }
 
-// Self-contained: the page carries the diagram source and the layer names as
-// text, and fetches nothing. How it looks is not the claim.
-function html(graph, rules, expand) {
-  const { of, names } = assign(graph, rules)
-  const all = layerList(graph, of, names)
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const rows = all
-    .map((l) => `<li>${esc(l)} (${graph.modules.filter((m) => of.get(m.id) === l).length})</li>`)
+const PAGE_CSS = [
+  'body{font:14px system-ui,sans-serif;margin:1.5rem;color:#222}',
+  'svg{max-width:100%;height:auto;border:1px solid #ddd;background:#fff}',
+  '.node rect{fill:#eef3fb;stroke:#4a6fa5}',
+  '.node.module rect{fill:#f6f6f2;stroke:#8a8a70}',
+  '.node text{text-anchor:middle;font-size:13px;pointer-events:none}',
+  '.node{cursor:pointer}',
+  '.group{fill:none;stroke:#4a6fa5;stroke-dasharray:4 3}',
+  '.grouplabel{font-size:13px;fill:#4a6fa5;cursor:pointer}',
+  '.edge{cursor:pointer}',
+  '.weight{font-size:12px;text-anchor:middle;cursor:pointer}',
+  '#sites li{font-family:ui-monospace,monospace}',
+].join('')
+
+// Self-contained on purpose: the data, the script and the style are in the file
+// and nothing is fetched at view time. What the page draws it computes from the
+// embedded description, through the functions the commands use.
+function html(graph, rules, expand, checkRules, baseline) {
+  const data = viewData(graph, rules, checkRules, baseline)
+  const all = data.layers.map((l) => l.name)
+  if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const c = data.counts
+  const counts = [
+    ['modules', c.modules], ['edges', c.edges], ['module edges', c.moduleEdges],
+    ['layers', c.layers], ['unassigned', c.unassigned], ['unresolved', c.unresolved],
+    ['opaque', c.opaque], ['cycles', c.cycles], ['violations', c.violations],
+    ['errors', c.errors], ['baselined', c.baselined], ['rules', c.rules],
+  ]
+    .map(([k, v]) => `<li>${esc(k)} ${v}</li>`)
     .join('\n')
+  const layers = all
+    .map((l) => `<li>${esc(l)} (${data.layers.find((x) => x.name === l).modules.length})</li>`)
+    .join('\n')
+  // `</` inside the JSON would end the script element early, whatever it means
+  // to JSON: the escape is the only thing between the data and a broken page.
+  const embedded = JSON.stringify({ ...data, expand: expand || null }).replace(/</g, '\\u003c')
+  const script = [viewAt, layout, draw].map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
   return [
     '<!doctype html>',
     '<html lang="en">',
-    '<head><meta charset="utf-8"><title>cast</title></head>',
+    '<head><meta charset="utf-8"><title>cast</title>',
+    `<style>${PAGE_CSS}</style>`,
+    '</head>',
     '<body>',
     '<h1>cast</h1>',
+    '<p>Click a layer to open it, a layer again to close it, an edge to list the imports behind it.</p>',
+    '<svg id="graph" role="img" aria-label="the module graph"></svg>',
+    '<div id="sites"></div>',
+    '<h2>counts</h2>',
+    `<ul id="counts">\n${counts}\n</ul>`,
     '<h2>layers</h2>',
-    `<ul>\n${rows}\n</ul>`,
-    '<h2>graph</h2>',
-    `<pre>${esc(mermaid(graph, rules, expand))}</pre>`,
+    `<ul id="layers">\n${layers}\n</ul>`,
+    '<h2>mermaid</h2>',
+    `<pre id="mermaid">${esc(mermaid(graph, rules, expand, checkRules, baseline))}</pre>`,
+    `<script id="cast-data" type="application/json">${embedded}</script>`,
+    `<script>\n${script}</script>`,
     '</body>',
     '</html>',
     '',
@@ -1195,14 +1462,20 @@ function main(argv) {
     if (!asMermaid && !htmlOut) die(USAGE)
     const graph = readGraph(out)
     const rules = layerRules(root)
+    // The render reads rules.json and the baseline the way `cast check` does, at
+    // render time: a view that marked nothing would be a third answer about the
+    // same graph.
+    const { names } = assign(graph, rules)
+    const checkRules = readRules(root, names)
+    const baseline = readBaseline(root)
     if (htmlOut) {
       const file = path.resolve(root, htmlOut)
       fs.mkdirSync(path.dirname(file), { recursive: true })
-      fs.writeFileSync(file, html(graph, rules, expand))
+      fs.writeFileSync(file, html(graph, rules, expand, checkRules, baseline))
       process.stdout.write(`${path.relative(root, file) || file}\n`)
       return 0
     }
-    process.stdout.write(mermaid(graph, rules, expand) + '\n')
+    process.stdout.write(mermaid(graph, rules, expand, checkRules, baseline) + '\n')
     return 0
   }
   die(USAGE)
@@ -1211,6 +1484,7 @@ function main(argv) {
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
+  viewData, viewAt, layout,
   readRules, violations, check, preview, readBaseline, ratchet,
   readPlan, simulateGraph, simulate, layerMetrics,
 }
