@@ -33,6 +33,19 @@ for d in plugins/*/; do
     [ -x "$f" ] || fail permissions "$f is not executable"
   done
 done
+# The marketplace entry is what a user reads before installing, so it mirrors the
+# plugin's own manifest - break: shipping behaviour in a plugin and leaving the
+# marketplace describing the version before it.
+M="$(node -e '
+const fs=require("fs");
+const mkt=JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json","utf8"));
+for (const p of mkt.plugins) {
+  const own=JSON.parse(fs.readFileSync(`plugins/${p.name}/.claude-plugin/plugin.json`,"utf8"));
+  for (const k of ["displayName","description","keywords"])
+    if (JSON.stringify(p[k])!==JSON.stringify(own[k]))
+      console.log(`${p.name}: marketplace ${k} ${JSON.stringify(p[k])} does not mirror plugin.json ${JSON.stringify(own[k])}`);
+}' 2>&1)"
+[ -z "$M" ] || fail manifest "the marketplace does not mirror the plugin manifests: $M"
 # forge's own hooks manifest: the only plugin that ships one, so it stays named.
 node -e 'JSON.parse(require("fs").readFileSync("plugins/forge/hooks/hooks.json","utf8"))' 2>/dev/null \
   || fail manifest "hooks/hooks.json is not valid JSON"

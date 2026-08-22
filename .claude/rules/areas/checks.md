@@ -16,6 +16,8 @@ paths:
 - The manifest and syntax suite loops `for d in plugins/*/`: validate, `node --check`, `bash -n`
   and the executable-bit checks are derived from the plugin directories, each guarded by
   `[ -f "$f" ] || continue` so a plugin shipping no `bin/`, `scripts/` or `workflows/` is skipped.
+  It also checks that every `.claude-plugin/marketplace.json` entry mirrors its plugin's own
+  `plugin.json` on `displayName`, `description` and `keywords`.
   Forge's `hooks/hooks.json` check stays named - forge is the only plugin that ships one. The
   suites below it stay forge-bound on purpose.
 - A suite is a `# --- <name> ---` block that ends in `ok <name>` or `fail <name> "<what>"`.
