@@ -452,16 +452,187 @@ function layout(view) {
   }
 }
 
+// --- the tree the page draws ------------------------------------------------
+// Mermaid knows two altitudes, a layer or its modules. The page knows one tree:
+// the layer, then every folder level of the module id, then the file. A node at
+// any depth opens in place, and every arrow runs between two closed ones.
+//
+// The same rule as `viewAt` holds for all four functions below: `html` inlines
+// them by `toString()`, so they close over nothing this module holds. A call
+// between them is fine - they travel together - but a reference to anything else
+// here would be undefined in the page.
+
+// The id is the containment key with every character an html id or a `querySelector`
+// would trip over escaped to `_<hex>_`, reversibly: mapping them all to `_` would
+// give `src/a-b.ts` and `src/a_b.ts` one node, and one node for two files hides an
+// import.
+function treeId(key) {
+  return 'N_' + key.replace(/[^A-Za-z0-9]/g, (c) => '_' + c.charCodeAt(0).toString(16) + '_')
+}
+
+// The containment tree over the whole project. A node is keyed by its path from
+// the root - the layer name, then each folder level - so two layers holding the
+// same folder keep two nodes, and the id of a node is derived from that key
+// alone: the page can name what to open without carrying a cursor.
+function treeOf(data) {
+  const root = { id: 'ROOT', key: '', label: '', kind: 'root', module: null, children: [], modules: [] }
+  const child = (parent, key, label, kind, module) => {
+    let n = parent.children.find((x) => x.key === key)
+    if (!n) {
+      n = { id: treeId(key), key, label, kind, module, children: [], modules: [] }
+      parent.children.push(n)
+    }
+    return n
+  }
+  for (const l of data.layers) {
+    const layer = child(root, l.name, l.name, 'layer', null)
+    for (const m of l.modules) {
+      const parts = m.split('/')
+      let cur = layer
+      let key = l.name
+      for (let i = 0; i < parts.length; i++) {
+        key += '/' + parts[i]
+        const leaf = i === parts.length - 1
+        cur = child(cur, key, parts[i], leaf ? 'file' : 'folder', leaf ? m : null)
+      }
+    }
+  }
+  // Every node carries the modules of its whole subtree. That is what an arrow
+  // reads to find the closed node an import is drawn from, and what the count in
+  // a label stands for.
+  const fill = (n) => {
+    n.modules = n.module ? [n.module] : n.children.reduce((a, c) => a.concat(fill(c)), [])
+    if (n.kind === 'layer' || n.kind === 'folder') n.label = n.label + ' (' + n.modules.length + ')'
+    return n.modules
+  }
+  fill(root)
+  return root
+}
+
+// The tree at one state of opening. `open` is the ids that are open; everything
+// else is a closed box. An open node keeps its own node and holds its children,
+// a closed one stands for every module below it.
+function viewTree(data, open) {
+  const isOpen = {}
+  for (const id of open || []) isOpen[id] = true
+  const root = treeOf(data)
+  const show = (n) => {
+    const o = n.children.length > 0 && isOpen[n.id] === true
+    return { ...n, open: o, children: o ? n.children.map(show) : [] }
+  }
+  const nodes = root.children.map(show)
+  // Where a module is drawn: the deepest visible node holding it, which is by
+  // construction a closed one. An arrow never lands on an open ancestor.
+  const flat = []
+  const at = {}
+  const walk = (n) => {
+    flat.push(n)
+    if (n.open) n.children.forEach(walk)
+    else for (const m of n.modules) at[m] = n.id
+  }
+  nodes.forEach(walk)
+  const by = new Map()
+  for (const e of data.edges) {
+    const a = at[e.from]
+    const b = at[e.to]
+    // An import between two modules the same closed node holds has no arrow to
+    // draw: it is inside the box, and opening that box is what reveals it.
+    if (!a || !b || a === b) continue
+    const k = a + '\0' + b
+    let g = by.get(k)
+    if (!g) {
+      g = { from: a, to: b, weight: 0, sites: [], rule: null, severity: null, state: null }
+      by.set(k, g)
+    }
+    g.weight++
+    g.sites.push(e)
+    if (e.rule && g.state !== 'breaking') {
+      g.rule = e.rule
+      g.severity = e.severity
+      g.state = e.state
+    }
+  }
+  const edges = [...by.keys()].sort().map((k) => by.get(k))
+  for (const g of edges) {
+    g.color = !g.state ? '#666' : g.state === 'inherited' ? '#888' : g.severity === 'warn' ? '#e08b00' : '#d32f2f'
+    g.label = g.rule ? g.weight + ' ' + g.rule + (g.state === 'inherited' ? ' (inherited)' : '') : String(g.weight)
+  }
+  return { nodes, flat, edges, open: (open || []).slice(), counts: data.counts }
+}
+
+// Where every box and every arrow sits, in numbers alone. The layout is one
+// vertical stack at every level: a closed node is one box of a fixed height, an
+// open one is a header and its children stacked inside it, so a box is only ever
+// as tall as what it shows. The arrows run in lanes down the right of the stack.
+function layoutTree(view) {
+  const M = { W: 220, H: 30, HEAD: 24, GAP: 8, PAD: 10, CHAN: 34, LANE: 22 }
+  const clone = (n) => ({ ...n, children: n.children.map(clone) })
+  const size = (n) => {
+    if (!n.open) {
+      n.w = M.W
+      n.h = M.H
+      return n
+    }
+    n.children.forEach(size)
+    n.w = M.PAD * 2 + Math.max(...n.children.map((c) => c.w))
+    n.h = M.HEAD + M.PAD + n.children.reduce((s, c) => s + c.h, 0) + M.GAP * (n.children.length - 1)
+    return n
+  }
+  const place = (n, x, y) => {
+    n.x = x
+    n.y = y
+    let cy = y + M.HEAD
+    for (const c of n.children) {
+      place(c, x + M.PAD, cy)
+      cy += c.h + M.GAP
+    }
+  }
+  const roots = view.nodes.map(clone)
+  let y = M.PAD
+  for (const n of roots) {
+    size(n)
+    place(n, M.PAD, y)
+    y += n.h + M.GAP
+  }
+  const flat = []
+  const collect = (n) => {
+    flat.push(n)
+    n.children.forEach(collect)
+  }
+  roots.forEach(collect)
+  const at = new Map(flat.map((n) => [n.id, n]))
+  const right = Math.max(...flat.map((n) => n.x + n.w), 0)
+  const edges = view.edges.map((e, i) => {
+    const a = at.get(e.from)
+    const b = at.get(e.to)
+    const y1 = a.y + a.h / 2
+    const y2 = b.y + b.h / 2
+    const mx = right + M.CHAN + i * M.LANE
+    return { ...e, x1: a.x + a.w, y1, x2: b.x + b.w, y2, mx, my: (y1 + y2) / 2 }
+  })
+  return {
+    nodes: roots,
+    flat,
+    edges,
+    open: view.open,
+    counts: view.counts,
+    metrics: M,
+    width: Math.max(right, ...edges.map((e) => e.mx)) + M.PAD * 2,
+    height: Math.max(...flat.map((n) => n.y + n.h), 0) + M.PAD,
+  }
+}
+
 // The page's own script, written here and inlined by `html` through
 // `toString()`. It is never called in node: it exists to be read as source, and
-// it may touch nothing this module holds beyond `viewAt` and `layout`, which
+// it may touch nothing this module holds beyond the four tree functions, which
 // travel beside it.
 function draw() {
   const data = JSON.parse(document.getElementById('cast-data').textContent)
   const svg = document.getElementById('graph')
   const panel = document.getElementById('sites')
   const NS = 'http://www.w3.org/2000/svg'
-  let expand = data.expand || null
+  const open = {}
+  for (const id of data.open || []) open[id] = true
   const el = (name, attrs, text) => {
     const n = document.createElementNS(NS, name)
     for (const k of Object.keys(attrs)) n.setAttribute(k, attrs[k])
@@ -481,40 +652,40 @@ function draw() {
     }
     panel.appendChild(ul)
   }
-  const toggle = (layer) => {
-    expand = expand === layer ? null : layer
+  const toggle = (id) => {
+    if (open[id] === true) delete open[id]
+    else open[id] = true
     panel.textContent = ''
     render()
   }
   function render() {
-    const l = layout(viewAt(data, expand))
+    const l = layoutTree(viewTree(data, Object.keys(open)))
     svg.textContent = ''
     svg.setAttribute('viewBox', '0 0 ' + l.width + ' ' + l.height)
-    for (const g of l.groups) {
-      svg.appendChild(el('rect', { x: g.x, y: g.y, width: g.w, height: g.h, rx: 8, class: 'group' }))
-      const t = el('text', { x: g.x + 10, y: g.y + 20, class: 'grouplabel' }, g.layer)
-      t.addEventListener('click', () => toggle(g.layer))
-      svg.appendChild(t)
+    // A box is drawn before the children it holds, so an open node keeps its own
+    // outline and they sit inside it. The click stops there: an inner box closes
+    // itself, not the ancestor whose rectangle is behind it.
+    const box = (n) => {
+      const g = el('g', { class: 'node ' + n.kind + (n.open ? ' open' : ' closed'), id: n.id })
+      g.appendChild(el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 6 }))
+      g.appendChild(el('text', { x: n.x + 8, y: n.y + 17 }, n.label))
+      g.addEventListener('click', (ev) => { ev.stopPropagation(); toggle(n.id) })
+      svg.appendChild(g)
+      for (const c of n.children) box(c)
     }
+    for (const n of l.nodes) box(n)
     for (const e of l.edges) {
-      const line = el('line', {
-        x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2,
-        stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
+      const line = el('path', {
+        d: 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2,
+        fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
         'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',
         class: 'edge',
       })
       line.addEventListener('click', () => sites(e))
       svg.appendChild(line)
-      const t = el('text', { x: e.mx, y: e.my - 6, fill: e.color, class: 'weight' }, e.label)
+      const t = el('text', { x: e.mx + 5, y: e.my, fill: e.color, class: 'weight' }, e.label)
       t.addEventListener('click', () => sites(e))
       svg.appendChild(t)
-    }
-    for (const n of l.nodes) {
-      const g = el('g', { class: n.module ? 'node module' : 'node layer' })
-      g.appendChild(el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 6 }))
-      g.appendChild(el('text', { x: n.x + n.w / 2, y: n.y + n.h / 2 + 5 }, n.label))
-      if (!n.module) g.addEventListener('click', () => toggle(n.layer))
-      svg.appendChild(g)
     }
   }
   render()
@@ -549,11 +720,11 @@ const PAGE_CSS = [
   'body{font:14px system-ui,sans-serif;margin:1.5rem;color:#222}',
   'svg{max-width:100%;height:auto;border:1px solid #ddd;background:#fff}',
   '.node rect{fill:#eef3fb;stroke:#4a6fa5}',
-  '.node.module rect{fill:#f6f6f2;stroke:#8a8a70}',
-  '.node text{text-anchor:middle;font-size:13px;pointer-events:none}',
+  '.node.folder rect{fill:#f2f5ee;stroke:#6f8a5a}',
+  '.node.file rect{fill:#f6f6f2;stroke:#8a8a70}',
+  '.node.open>rect{fill:none;stroke-dasharray:4 3}',
+  '.node text{font-size:13px;pointer-events:none}',
   '.node{cursor:pointer}',
-  '.group{fill:none;stroke:#4a6fa5;stroke-dasharray:4 3}',
-  '.grouplabel{font-size:13px;fill:#4a6fa5;cursor:pointer}',
   '.edge{cursor:pointer}',
   '.weight{font-size:12px;text-anchor:middle;cursor:pointer}',
   '#sites li{font-family:ui-monospace,monospace}',
@@ -581,8 +752,10 @@ function html(graph, rules, expand, checkRules, baseline) {
     .join('\n')
   // `</` inside the JSON would end the script element early, whatever it means
   // to JSON: the escape is the only thing between the data and a broken page.
-  const embedded = JSON.stringify({ ...data, expand: expand || null }).replace(/</g, '\\u003c')
-  const script = [viewAt, layout, draw].map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
+  // `--expand <layer>` opens that layer's node, the one state the command can
+  // name; every deeper node is opened by clicking it.
+  const embedded = JSON.stringify({ ...data, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
+  const script = [treeId, treeOf, viewTree, layoutTree, draw].map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
   return [
     '<!doctype html>',
     '<html lang="en">',
@@ -591,7 +764,7 @@ function html(graph, rules, expand, checkRules, baseline) {
     '</head>',
     '<body>',
     '<h1>cast</h1>',
-    '<p>Click a layer to open it, a layer again to close it, an edge to list the imports behind it.</p>',
+    '<p>Click a node to open it in place, the same node again to close it, an arrow to list the imports behind it.</p>',
     '<svg id="graph" role="img" aria-label="the module graph"></svg>',
     '<div id="sites"></div>',
     '<h2>counts</h2>',
@@ -1484,7 +1657,7 @@ function main(argv) {
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
-  viewData, viewAt, layout,
+  viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree,
   readRules, violations, check, preview, readBaseline, ratchet,
   readPlan, simulateGraph, simulate, layerMetrics,
 }
