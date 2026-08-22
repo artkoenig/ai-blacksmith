@@ -24,6 +24,16 @@ const patterns = [
   { kind: 'value', re: /(?:^|[^\w.$])require\s*\(\s*['"]([^'"]+)['"]\s*\)/g },
 ]
 
+// An import cast cannot read: `require(path.join(dir, name))`, `import(url)`.
+// Reading one needs a parser, so these patterns claim no target - they capture
+// the expression, so the engine can count the edge and name the site instead of
+// passing the line over. The quote is excluded, so a literal specifier is never
+// matched here as well as above.
+const opaque = [
+  { kind: 'dynamic', re: /(?:^|[^\w.$])import\s*\(\s*([^'"\s)][^\n]*)\)/g },
+  { kind: 'value', re: /(?:^|[^\w.$])require\s*\(\s*([^'"\s)][^\n]*)\)/g },
+]
+
 // tsconfig.json is the only configuration read, and only for baseUrl and paths:
 // those are what make two spellings of one import the same edge.
 function init(ctx) {
@@ -118,6 +128,7 @@ module.exports = {
   extensions: SOURCE,
   ignore: ['node_modules', 'dist', 'build', 'coverage', 'out'],
   patterns,
+  opaque,
   init,
   resolve,
 }
