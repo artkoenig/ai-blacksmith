@@ -12,6 +12,15 @@
       "license": "MIT",
       "keywords": ["issues", "workflow", "subagents", "tokens", "automation"],
       "source": "./plugins/forge"
+    },
+    {
+      "name": "cast",
+      "displayName": "Cast",
+      "description": "Placeholder for the cast plugin - no runtime behaviour ships yet.",
+      "author": { "name": "artkoenig" },
+      "license": "MIT",
+      "keywords": ["cast"],
+      "source": "./plugins/cast"
     }
   ]
 }

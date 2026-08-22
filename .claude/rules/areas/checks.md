@@ -12,6 +12,11 @@ paths:
   fixture agent and a synthetic transcript, that the project rules are tracked, that every area
   note parses and still globs something, and the workflow control flow against stubbed agents -
   wave order, stall detection, skipped dependents, merge conflicts, a missing issue id.
+- The manifest and syntax suite loops `for d in plugins/*/`: validate, `node --check`, `bash -n`
+  and the executable-bit checks are derived from the plugin directories, each guarded by
+  `[ -f "$f" ] || continue` so a plugin shipping no `bin/`, `scripts/` or `workflows/` is skipped.
+  Forge's `hooks/hooks.json` check stays named - forge is the only plugin that ships one. The
+  suites below it stay forge-bound on purpose.
 - A suite is a `# --- <name> ---` block that ends in `ok <name>` or `fail <name> "<what>"`.
   `fail` sets `FAILED`; the script exits with it.
 - Guard a multi-step suite with `S=0` and report once at the end.

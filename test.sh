@@ -9,22 +9,31 @@ fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILED=1; }
 ok()   { printf 'ok   %s\n' "$1"; }
 
 # --- manifest and syntax ----------------------------------------------------
-# The plugin pins no version on purpose - it is released from the tip of main, so
+# No plugin pins a version on purpose - each is released from the tip of main, so
 # the commit is the version. --strict warns about exactly that one thing, and
 # every other line it prints is a break.
-if command -v claude >/dev/null; then
-  V="$(claude plugin validate ./plugins/forge --strict 2>&1 \
-        | grep '^  > ' | grep -v '^  > version: No version specified')"
-  [ -z "$V" ] || fail manifest "claude plugin validate rejected plugins/forge:${V}"
-fi
-for f in plugins/forge/workflows/*.js plugins/forge/scripts/*.js; do
-  node --check "$f" 2>/dev/null || fail syntax "$f"
+for d in plugins/*/; do
+  d="${d%/}"
+  if command -v claude >/dev/null; then
+    V="$(claude plugin validate "./$d" --strict 2>&1 \
+          | grep '^  > ' | grep -v '^  > version: No version specified')"
+    [ -z "$V" ] || fail manifest "claude plugin validate rejected $d:${V}"
+  fi
+  for f in "$d"/workflows/*.js "$d"/scripts/*.js; do
+    [ -f "$f" ] || continue
+    node --check "$f" 2>/dev/null || fail syntax "$f"
+  done
+  for f in "$d"/bin/*; do
+    [ -f "$f" ] || continue
+    bash -n "$f" 2>/dev/null || fail syntax "$f"
+    [ -x "$f" ] || fail permissions "$f is not executable"
+  done
+  for f in "$d"/scripts/*.js; do
+    [ -f "$f" ] || continue
+    [ -x "$f" ] || fail permissions "$f is not executable"
+  done
 done
-for f in plugins/forge/bin/*; do
-  bash -n "$f" 2>/dev/null || fail syntax "$f"
-  [ -x "$f" ] || fail permissions "$f is not executable"
-done
-for f in plugins/forge/scripts/*.js; do [ -x "$f" ] || fail permissions "$f is not executable"; done
+# forge's own hooks manifest: the only plugin that ships one, so it stays named.
 node -e 'JSON.parse(require("fs").readFileSync("plugins/forge/hooks/hooks.json","utf8"))' 2>/dev/null \
   || fail manifest "hooks/hooks.json is not valid JSON"
 [ "$FAILED" = 0 ] && ok "manifest and syntax"

@@ -1,0 +1,10 @@
+{
+  "name": "cast",
+  "displayName": "Cast",
+  "description": "Placeholder for the cast plugin - no runtime behaviour ships yet.",
+  "author": {
+    "name": "artkoenig"
+  },
+  "license": "MIT",
+  "keywords": ["cast"]
+}
