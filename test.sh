@@ -1711,6 +1711,43 @@ O="$(CAST_JS="$PWD/plugins/cast/scripts/cast.js" PAGE="$CASTFIX/plan.html" node 
 # break: leaving the reader to compare a baselined page with an unbaselined report
 printf '%s\n' "$CAST_PPAGE" | grep -qF 'answer different questions' \
   || { fail "cast plan switch" "the page never says its marks and the report's counts differ"; S=1; }
+# AC4 the figures under the drawing belong to the state drawn above them: the
+# switch rewrites the counts and the layers from the state it draws, out of the
+# very function `html` writes them with, so the two paths cannot drift
+# break: leaving the lists on the state being replaced, which puts one state's
+# picture over the other's numbers
+O="$(CAST_JS="$PWD/plugins/cast/scripts/cast.js" PAGE="$CASTFIX/plan.html" node -e '
+  const cast=require(process.env.CAST_JS)
+  const fs=require("fs"), page=fs.readFileSync(process.env.PAGE,"utf8")
+  const bad=[]
+  const block=(id)=>{
+    const open="<script id=\""+id+"\" type=\"application/json\">"
+    const i=page.indexOf(open)
+    if (i<0) { bad.push("the page carries no "+id+" block"); return null }
+    const rest=page.slice(i+open.length)
+    return JSON.parse(rest.slice(0,rest.indexOf("</script>")))
+  }
+  const b=block("cast-data"), a=block("cast-plan-data")
+  if (b&&a) {
+    const before=cast.stateLists(b), after=cast.stateLists(a)
+    if (before.counts.join("|")===after.counts.join("|"))
+      bad.push("the fixture plan moves no count: the case cannot tell a switched list from a frozen one")
+    const i=page.indexOf("<ul id=\"counts\">")
+    if (i<0) bad.push("the page carries no counts list")
+    else {
+      const list=page.slice(i,page.indexOf("</ul>",i))
+      for (const line of before.counts)
+        if (list.indexOf(">"+line+"<")<0)
+          bad.push("the counts the page opens at do not come from stateLists: "+line)
+    }
+  }
+  if (page.indexOf("const relist = () => {")<0) bad.push("the switch never rewrites the lists")
+  const swap=page.slice(page.indexOf("swap.addEventListener"))
+  if (swap.slice(0,swap.indexOf("    })")).indexOf("relist()")<0)
+    bad.push("the switch does not call relist")
+  console.log(bad.join("; "))
+' 2>&1)"
+[ -z "$O" ] || { fail "cast plan switch" "$O"; S=1; }
 [ "$S" = 0 ] && ok "cast plan switch"
 
 # AC6 AC7 AC10 the plan as text, and nothing marked as added or removed

@@ -724,6 +724,24 @@ function edgeLines(edges, id) {
   })
 }
 
+// The figures under the drawing, for whichever state is drawn. `html` writes them
+// into the page for the state it opens at and the switch rewrites them from here,
+// so the two paths cannot drift: one order of keys, one way of counting a layer's
+// modules. The mermaid block below them is deliberately not among these - a plan
+// is not rendered as mermaid, so it keeps saying what the graph is today.
+function stateLists(data) {
+  const c = data.counts
+  return {
+    counts: [
+      ['modules', c.modules], ['edges', c.edges], ['module edges', c.moduleEdges],
+      ['layers', c.layers], ['unassigned', c.unassigned], ['unresolved', c.unresolved],
+      ['opaque', c.opaque], ['cycles', c.cycles], ['violations', c.violations],
+      ['errors', c.errors], ['baselined', c.baselined], ['rules', c.rules],
+    ].map(([k, v]) => k + ' ' + v),
+    layers: data.layers.map((l) => l.name + ' (' + l.modules.length + ')'),
+  }
+}
+
 // The page's own script, written here and inlined by `html` through
 // `toString()`. It is never called in node: it exists to be read as source, and
 // it may touch nothing this module holds beyond the functions `fns` inlines
@@ -843,10 +861,27 @@ function draw() {
       swap.textContent = 'showing ' + states[at].name + ' - show ' + states[1 - at].name
     }
     say()
+    // The figures under the drawing belong to the state drawn above them. Leaving
+    // them on the state being replaced would put one state's picture over the
+    // other's numbers, which is the one reading the switch must not allow.
+    const relist = () => {
+      const lists = stateLists(data)
+      for (const [id, items] of [['counts', lists.counts], ['layers', lists.layers]]) {
+        const ul = document.getElementById(id)
+        if (!ul) continue
+        ul.textContent = ''
+        for (const line of items) {
+          const li = document.createElement('li')
+          li.textContent = line
+          ul.appendChild(li)
+        }
+      }
+    }
     swap.addEventListener('click', () => {
       at = at === 0 ? 1 : 0
       data = states[at].data
       say()
+      relist()
       panel.textContent = ''
       render()
     })
@@ -1028,18 +1063,9 @@ function html(graph, rules, expand, checkRules, baseline, plan) {
   const all = data.layers.map((l) => l.name)
   if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const c = data.counts
-  const counts = [
-    ['modules', c.modules], ['edges', c.edges], ['module edges', c.moduleEdges],
-    ['layers', c.layers], ['unassigned', c.unassigned], ['unresolved', c.unresolved],
-    ['opaque', c.opaque], ['cycles', c.cycles], ['violations', c.violations],
-    ['errors', c.errors], ['baselined', c.baselined], ['rules', c.rules],
-  ]
-    .map(([k, v]) => `<li>${esc(k)} ${v}</li>`)
-    .join('\n')
-  const layers = all
-    .map((l) => `<li>${esc(l)} (${data.layers.find((x) => x.name === l).modules.length})</li>`)
-    .join('\n')
+  const lists = stateLists(data)
+  const counts = lists.counts.map((l) => `<li>${esc(l)}</li>`).join('\n')
+  const layers = lists.layers.map((l) => `<li>${esc(l)}</li>`).join('\n')
   // `</` inside the JSON would end the script element early, whatever it means
   // to JSON: the escape is the only thing between the data and a broken page.
   // `--expand <layer>` opens that layer's node, the one state the command can
@@ -1063,7 +1089,7 @@ function html(graph, rules, expand, checkRules, baseline, plan) {
       `<script id="cast-plan-data" type="application/json">${embed(after)}</script>`,
     ]
     : []
-  const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, edgesAt, edgeLines, draw]
+  const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, edgesAt, edgeLines, stateLists, draw]
   const script = fns.map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
   return [
     '<!doctype html>',
@@ -1080,7 +1106,7 @@ function html(graph, rules, expand, checkRules, baseline, plan) {
     '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',
     ...(plan
-      ? ['<p id="plan-legend">The page holds one drawing. Press the switch above to show the graph the plan would leave behind: the state you ask for replaces the one showing rather than joining it, so there is never a second picture beside this one and never a hidden copy of it. Neither state marks what the plan changed - no edge is drawn as added or removed, and an arrow’s colour, width and dash answer to the rules and the baseline alone in both. The groups you opened stay open across the switch; a node the plan removed is simply absent. The operations that produced the other state are listed under plan below.</p>']
+      ? ['<p id="plan-legend">The page holds one drawing. Press the switch above to show the graph the plan would leave behind: the state you ask for replaces the one showing rather than joining it, so there is never a second picture beside this one and never a hidden copy of it. Neither state marks what the plan changed - no edge is drawn as added or removed, and an arrow’s colour, width and dash answer to the rules and the baseline alone in both. The groups you opened stay open across the switch; a node the plan removed is simply absent. The counts and the layers below the drawing follow the switch and describe the state showing; the mermaid source under them is the graph as it is, whichever state is drawn, because a plan is not rendered as mermaid. The operations that produced the other state are listed under plan below.</p>']
       : []),
     '<h2>counts</h2>',
     `<ul id="counts">\n${counts}\n</ul>`,
@@ -1986,7 +2012,7 @@ function main(argv) {
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
-  viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
+  viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, stateLists,
   edgesAt, edgeLines,
   readRules, violations, check, preview, readBaseline, ratchet,
   readPlan, simulateGraph, simulate, layerMetrics,
