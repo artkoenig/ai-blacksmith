@@ -2167,14 +2167,19 @@ grep -qF "if (suppress) { suppress = false; ev.stopPropagation(); return }" "$CA
 # break: letting a scroll or a release count as a press
 grep -qF "if (press && (Math.abs(ev.clientX - press.x) > SLOP || Math.abs(ev.clientY - press.y) > SLOP)) cancelPress()" "$CAST_PAGE" \
   || { fail "cast highlight touch" "a move beyond the slop does not cancel the press"; S=1; }
-grep -qF "head.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })" "$CAST_PAGE" \
+grep -qF "head.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') cancelPress() })" "$CAST_PAGE" \
   || { fail "cast highlight touch" "a release does not cancel the press"; S=1; }
-grep -qF "head.addEventListener('pointercancel', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })" "$CAST_PAGE" \
+grep -qF "head.addEventListener('pointercancel', (ev) => { if (ev.pointerType !== 'mouse') cancelPress() })" "$CAST_PAGE" \
   || { fail "cast highlight touch" "a cancelled press is left running"; S=1; }
+# break: clearing the highlight on the release, which takes the numbers away in
+# the moment the finger lifts and leaves a phone no way to read them
+grep -qE "pointer(up|cancel)', \(ev\) => \{ if \(ev.pointerType !== 'mouse'\) \{ cancelPress\(\); unhighlight" "$CAST_PAGE" \
+  && { fail "cast highlight touch" "lifting the finger clears the highlight the press asked for"; S=1; }
 [ "$S" = 0 ] && ok "cast highlight touch"
 
-# AC8 (of #47) the highlight ends: on leaving, on releasing, on a press
-# elsewhere, and on the render that opening or closing a group brings
+# AC8 (of #47) the highlight ends: on leaving with the mouse, on a press
+# elsewhere, and on the render that opening or closing a group brings. Not on the
+# release of the long press - the finger lifts and the numbers stay readable.
 S=0
 # break: fading the arrows and never restoring them, or leaving the panel full
 O="$(pagejs '

@@ -199,8 +199,9 @@ for: pointing at a node with a mouse, or pressing and holding it on a touch scre
 node's own arrows at full strength, fades every other arrow, and lists one line per neighbour saying
 which way the dependency runs, how many module imports are behind it, which kinds it carries -
 `2 value, 1 type`, what tells an edge a rule's `kinds` deliberately spares from one no rule names -
-and the rule where one names it. Leaving the node, releasing the press, pressing elsewhere or
-opening a group ends it. Clicking an arrow still lists
+and the rule where one names it. Leaving the node with the mouse, pressing elsewhere or opening a
+group ends it; lifting the finger after a long press does not - the numbers stay until the next
+press, because a phone has no pointer to leave with. Clicking an arrow still lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
 The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
 

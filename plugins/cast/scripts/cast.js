@@ -872,8 +872,11 @@ function draw() {
       head.addEventListener('pointermove', (ev) => {
         if (press && (Math.abs(ev.clientX - press.x) > SLOP || Math.abs(ev.clientY - press.y) > SLOP)) cancelPress()
       })
-      head.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })
-      head.addEventListener('pointercancel', (ev) => { if (ev.pointerType !== 'mouse') { cancelPress(); unhighlight() } })
+      // A release ends the press, never the highlight: a finger that lifted is a
+      // finger off the screen, and clearing here would take the numbers away in
+      // the moment the reader looks at them. The press elsewhere clears it.
+      head.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') cancelPress() })
+      head.addEventListener('pointercancel', (ev) => { if (ev.pointerType !== 'mouse') cancelPress() })
       if (n.hasChildren) {
         head.setAttribute('role', 'button')
         head.setAttribute('tabindex', '0')
@@ -980,7 +983,7 @@ const PAGE_CSS = [
   // The one thing a highlight does to an arrow it did not name: fade it. The
   // arrows it does name are left alone, so their colour, width, dash and head
   // are the ones they carry at rest.
-  '.edge.dim{opacity:.12}',
+  '.edge.dim{opacity:.5}',
   '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
   '#mermaid{overflow-x:auto}',
 ].join('')
