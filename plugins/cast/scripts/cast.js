@@ -629,22 +629,47 @@ function layoutTree(view) {
   roots.forEach(collect)
   const at = new Map(flat.map((n) => [n.id, n]))
   const right = Math.max(...flat.map((n) => n.x + n.w), 0)
-  // An arrow is a curve down a lane of its own and nothing else: no box, no
+  // No curve is drawn over a box. An arrow leaves the right edge of its node on
+  // a straight stub out to `sx`, clear of the widest box in the drawing, and
+  // only there does it turn: the bend, the run down the lane and the return all
+  // live in the margin. The only ink a box ever meets is that stub crossing its
+  // border square on, and the head landing on the node the arrow points at.
+  const sx = right + M.GAP
+  // A lane is not an arrow's by right, it is the arrow's for as long as it is on
+  // it. Two arrows whose spans stand `TAP` apart run down one lane and still
+  // take separate presses, so the margin is as wide as the arrows that truly
+  // overlap rather than as wide as the arrow count. Taken in the order they
+  // start, each into the first lane with room, that width is the least any
+  // routing can reach: the spans are intervals, and sweeping intervals from the
+  // left costs exactly as many lanes as the most that ever overlap at once.
+  const runs = view.edges.map((e, i) => {
+    const a = at.get(e.from)
+    const b = at.get(e.to)
+    const y1 = a.y + a.h / 2
+    const y2 = b.y + b.h / 2
+    return { e, i, a, b, y1, y2, lo: Math.min(y1, y2), hi: Math.max(y1, y2) }
+  })
+  const lanes = []
+  const room = (lane, r) => lane.every((o) => o.lo - r.hi >= M.TAP || r.lo - o.hi >= M.TAP)
+  for (const r of [...runs].sort((p, q) => p.lo - q.lo || p.hi - q.hi || p.i - q.i)) {
+    let k = lanes.findIndex((lane) => room(lane, r))
+    if (k < 0) k = lanes.push([]) - 1
+    lanes[k].push(r)
+    r.lane = k
+  }
+  // An arrow is a curve down a lane and nothing else: no box, no
   // digits, no backing. What it carries travels with it as data - `weight`,
   // `label`, `kinds`, `rule`, `sites` - and is read out on demand, by pressing
   // the arrow or by pointing at one of the nodes it joins. The labels of both
   // ends come along so the panel can name a neighbour without the drawing.
-  const edges = view.edges.map((e, i) => {
-    const a = at.get(e.from)
-    const b = at.get(e.to)
-    return {
-      ...e,
-      x1: a.x + a.w, y1: a.y + a.h / 2,
-      x2: b.x + b.w, y2: b.y + b.h / 2,
-      mx: right + M.CHAN + i * M.LANE,
-      fromLabel: a.label, toLabel: b.label,
-    }
-  })
+  const edges = runs.map((r) => ({
+    ...r.e,
+    x1: r.a.x + r.a.w, y1: r.y1,
+    x2: r.b.x + r.b.w, y2: r.y2,
+    sx,
+    mx: right + M.CHAN + r.lane * M.LANE,
+    fromLabel: r.a.label, toLabel: r.b.label,
+  }))
   // One marker definition per colour and state, referenced by every arrow that
   // wears it: the head is the arrow's, not the page's.
   const markers = []
@@ -910,7 +935,9 @@ function draw() {
     // by pressing it or by pointing at a node it joins, so no digits are drawn
     // over the lanes and no arrow needs a backing to stay legible.
     for (const e of l.edges) {
-      const d = 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2
+      const d = 'M ' + e.x1 + ' ' + e.y1 + ' L ' + e.sx + ' ' + e.y1 +
+        ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.sx + ' ' + e.y2 +
+        ' L ' + e.x2 + ' ' + e.y2
       const line = el('path', {
         d, fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
         'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',

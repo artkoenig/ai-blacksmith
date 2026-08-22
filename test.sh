@@ -2043,6 +2043,76 @@ grep -qF "e.weight + ' module edges'" "$CAST_PAGE" \
   || { fail "cast arrows alone" "the list of imports is no longer headed by the count behind the arrow"; S=1; }
 [ "$S" = 0 ] && ok "cast arrows alone"
 
+# The arrows keep off the boxes and share the margin between them.
+# AC1 no curve is drawn over a box: every arrow runs straight out of its node to
+# a gutter clear of the widest box, and turns only there
+S=0
+# break: anchoring the curve at the node's right edge, so an arrow leaving a
+# nested box bends through its parent's ground and out over its border
+O="$(pagejs '
+  const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
+  const M=l.metrics
+  const right=Math.max(...l.flat.map(n=>n.x+n.w))
+  if (l.edges.length<2) bad("the fixture has too few arrows to say anything about clearance")
+  for (const e of l.edges) {
+    if (!(e.sx>=right+M.GAP)) bad("an arrow turns at "+e.sx+", not clear of the widest box at "+right)
+    if (!(e.mx>=e.sx)) bad("an arrow lane at "+e.mx+" lies inside its own gutter at "+e.sx)
+    // the stub is the only ink over a box, and it is a straight line at the
+    // node|s own height
+    if (e.x1>e.sx||e.x2>e.sx) bad("an arrow is anchored right of the gutter: "+e.x1+", "+e.x2+" against "+e.sx)
+  }
+  // the drawn path leaves and returns on that stub - break: keeping the bare
+  // cubic from anchor to anchor, which is the curve that crosses the boxes
+  if (!page.includes("\x27 L \x27 + e.sx + \x27 \x27 + e.y1"))
+    bad("the page draws no stub out to the gutter before the curve")
+  if (!page.includes("\x27 L \x27 + e.x2 + \x27 \x27 + e.y2"))
+    bad("the page draws no stub back from the gutter to the node")
+')" || { fail "cast arrows clear" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast arrows clear"
+
+# AC2 a lane carries every arrow it has room for, so the margin is as wide as
+# the arrows that truly overlap and not as wide as the arrow count
+S=0
+# break: indexing the lane by the arrow|s position in the list, which gives every
+# arrow a lane of its own and a drawing that grows with the edge count
+O="$(pagejs '
+  const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
+  const M=l.metrics
+  const span=(e)=>Math.abs(e.y1-e.y2)
+  const shareable=l.edges.some((a,i)=>l.edges.some((b,j)=>j>i&&
+    Math.max(Math.min(a.y1,a.y2)-Math.max(b.y1,b.y2),Math.min(b.y1,b.y2)-Math.max(a.y1,a.y2))>=M.TAP))
+  if (!shareable) bad("the fixture holds no two arrows far enough apart to share a lane")
+  const lanes=new Set(l.edges.map(e=>e.mx))
+  if (!(lanes.size<l.edges.length))
+    bad(l.edges.length+" arrows take "+lanes.size+" lanes: none is shared")
+  // as compact as it can be: the margin is exactly as wide as the most arrows
+  // that ever overlap at one height, which is the floor for any routing that
+  // keeps two arrows off one press - break: taking the arrows in any order but
+  // the one they start in, which is what makes the greedy pass optimal
+  const lo=(e)=>Math.min(e.y1,e.y2)-M.TAP/2, hi=(e)=>Math.max(e.y1,e.y2)+M.TAP/2
+  const most=Math.max(...l.edges.map(p=>l.edges.filter(q=>lo(q)<=lo(p)&&lo(p)<hi(q)).length))
+  if (lanes.size!==most)
+    bad(lanes.size+" lanes for "+l.edges.length+" arrows, where "+most+" overlap at once")
+  // a row of closed boxes and four arrows over it, cut so that taking them in
+  // list order costs a third lane and taking them in the order they start does
+  // not - break: any order but the one they start in
+  const row={
+    nodes:Array.from({length:13},(_,i)=>({id:"n"+i,label:"n"+i,children:[],open:false,hasChildren:false})),
+    edges:[[0,4],[3,8],[9,12],[7,10]].map(([f,t],k)=>({
+      from:"n"+f,to:"n"+t,marker:"m",color:"#000",state:"",weight:1,label:"1",
+      kinds:[],kindCounts:{},kindLabel:"",rule:null,sites:[]})),
+    open:{},counts:{},
+  }
+  const r=layoutTree(row)
+  const rlo=(e)=>Math.min(e.y1,e.y2)-M.TAP/2, rhi=(e)=>Math.max(e.y1,e.y2)+M.TAP/2
+  const rmost=Math.max(...r.edges.map(p=>r.edges.filter(q=>rlo(q)<=rlo(p)&&rlo(p)<rhi(q)).length))
+  const rlanes=new Set(r.edges.map(e=>e.mx))
+  if (rmost!==2) bad("the cut fixture no longer overlaps two deep: "+rmost)
+  if (rlanes.size!==rmost)
+    bad("the cut fixture takes "+rlanes.size+" lanes where "+rmost+" arrows overlap at once")
+')" || { fail "cast lanes shared" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast lanes shared"
+
 # AC3 (of #47) the set of arrows a node answers for is computed from the laid-out
 # edges, holds every arrow that starts or ends at the node and nothing else, and
 # is empty for a node no arrow touches
@@ -2390,10 +2460,19 @@ O="$(pagejs '
     if (n.hh<TAP) bad("the header of "+n.key+" is "+n.hh+" high, below "+TAP)
     if (n.hw<TAP) bad("the header of "+n.key+" is "+n.hw+" wide, below "+TAP)
   }
-  // two arrows never share one press
-  const lanes=l.edges.map(e=>e.mx).sort((a,b)=>a-b)
+  // two arrows never share one press. Lanes stand TAP apart across the margin,
+  // and two arrows sharing a lane stand TAP apart down it
+  const lanes=[...new Set(l.edges.map(e=>e.mx))].sort((a,b)=>a-b)
   for (let i=1;i<lanes.length;i++)
     if (lanes[i]-lanes[i-1]<TAP) bad("two arrow lanes are "+(lanes[i]-lanes[i-1])+" apart, closer than "+TAP)
+  const span=(e)=>[Math.min(e.y1,e.y2),Math.max(e.y1,e.y2)]
+  for (let i=0;i<l.edges.length;i++) for (let j=i+1;j<l.edges.length;j++) {
+    const a=l.edges[i], b=l.edges[j]
+    if (a.mx!==b.mx) continue
+    const [alo,ahi]=span(a), [blo,bhi]=span(b)
+    const gap=Math.max(blo-ahi,alo-bhi)
+    if (gap<TAP) bad("two arrows down lane "+a.mx+" are "+gap+" apart, closer than "+TAP)
+  }
 ')" || { fail "cast touch targets" "$O"; S=1; }
 # break: leaving the html controls at the browser default, ~20 pixels high
 grep -qF 'button{font:inherit;min-height:44px;min-width:44px' "$CAST_PAGE" \

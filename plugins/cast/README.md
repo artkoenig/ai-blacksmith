@@ -193,7 +193,13 @@ between two closed nodes: opening a node splits its arrows over the children tha
 and the arrows leaving a node always sum to the imports leaving its subtree. An arrow ends in a head
 on the module being imported, so which way the dependency runs is on the page rather than inferred,
 and the head takes the arrow's own colour and state: a breaking edge points in its severity's
-colour, one held by the baseline in the inherited grey. At rest the drawing carries boxes and
+colour, one held by the baseline in the inherited grey. No curve is drawn over a box: an arrow
+leaves its node on a straight stub out past the widest box in the drawing and turns only there, so
+the bend and the run down the lane live in the margin and the only ink a box meets is that stub
+crossing its border and the head landing on it. Two arrows whose spans stand a press apart share
+one lane, and the arrows are taken in the order they start, which costs exactly as many lanes as
+the most that ever overlap at one height - the fewest any routing can use while two arrows still
+take two presses. At rest the drawing carries boxes and
 pointed lines and nothing else - no arrow is labelled with the count behind it. A number is asked
 for: pointing at a node with a mouse, or pressing and holding it on a touch screen, keeps that
 node's own arrows at full strength, fades every other arrow, and lists one line per neighbour saying
