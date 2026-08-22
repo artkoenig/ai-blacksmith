@@ -33,3 +33,6 @@ and every fact about a language is an adapter file.
   modules. Walking also skips every dot directory.
 - The regex limit belongs in `README.md`, not in a workaround: inline `import { type X }` stays
   `value` on purpose.
+- Separators and control characters in `scripts/cast.js` are written as escapes (`'\0'`), never as
+  the raw byte: one literal NUL makes git and grep treat the file as binary, so the diff carries no
+  hunks and `grep` prints `binary file matches` instead of lines.
