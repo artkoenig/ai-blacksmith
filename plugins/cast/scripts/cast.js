@@ -13,6 +13,9 @@
 //                                a refactoring written down before it is done:
 //                                <root>/.cast/plans/<name>.json applied to a copy
 //                                of the graph, before and after, writing nothing
+//   cast baseline [--update] [--root <dir>]
+//                                the inherited violations <root>/.cast/baseline.json
+//                                holds; --update rewrites it, and refuses to grow it
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
 //   cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -29,9 +32,28 @@ const path = require('path')
 const SHIPPED = path.join(__dirname, '..', 'adapters')
 const ALWAYS_IGNORED = ['.git', '.cast', '.claude', '.forge']
 
+// Exit 2 is "cast could not run", and every validation failure goes through it.
+// One caller cannot afford that - a preview of a command-line rule is still an
+// answer when the project's own rules file is broken - so `soft()` turns the
+// exit into a throw for the length of one call, and nothing else changes.
+let SOFT = 0
+
 function die(msg) {
+  if (SOFT) throw Object.assign(new Error(msg), { cast: true })
   process.stderr.write(msg + '\n')
   process.exit(2)
+}
+
+function soft(fn) {
+  SOFT++
+  try {
+    return { value: fn() }
+  } catch (e) {
+    if (!e || !e.cast) throw e
+    return { error: e.message }
+  } finally {
+    SOFT--
+  }
 }
 
 // --- adapters ---------------------------------------------------------------
@@ -166,15 +188,28 @@ function globToRe(glob) {
   return new RegExp('^' + re + '$')
 }
 
+// No layers.json at all is the documented default, and the only thing the
+// directory-level fallback answers for. A file that is there but cannot be read
+// or parsed is not that: falling back on it would read the graph at an altitude
+// nobody declared and call it the project's own, so it is exit 2 like every
+// other file cast cannot run on.
 function layerRules(root) {
+  const file = path.join(root, '.cast', 'layers.json')
+  let text
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch (e) {
+    if (e.code === 'ENOENT') return null
+    die(`${file} could not be read: ${e.message}`)
+  }
   let raw
   try {
-    raw = JSON.parse(fs.readFileSync(path.join(root, '.cast', 'layers.json'), 'utf8'))
-  } catch {
-    return null
+    raw = JSON.parse(text)
+  } catch (e) {
+    die(`${file} is not valid JSON: ${e.message}`)
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
-    die(`${path.join(root, '.cast', 'layers.json')} is not an object mapping globs to layer names`)
+    die(`${file} is not an object mapping globs to layer names`)
   return Object.entries(raw).map(([glob, name]) => ({ glob, name: String(name), re: globToRe(glob) }))
 }
 
@@ -229,10 +264,13 @@ function layerList(graph, of, names) {
   return all
 }
 
-// Mermaid ids may not carry `/`, `.` or a space, so the id is sanitised and the
+// Mermaid ids may not carry `/`, `.` or a space, so the id is escaped and the
 // name travels in the quoted label - the label is what a reader matches on.
+// Each character mermaid rejects becomes `_<hex>_`, which is reversible: mapping
+// them all to a bare `_` would give `src/a-b.ts` and `src/a_b.ts` one id, and one
+// node drawn for two modules is a graph that hides an edge.
 function nodeId(prefix, name) {
-  return prefix + name.replace(/[^A-Za-z0-9]/g, '_')
+  return prefix + name.replace(/[^A-Za-z0-9]/g, (c) => '_' + c.charCodeAt(0).toString(16) + '_')
 }
 
 function mermaid(graph, rules, expand) {
@@ -643,11 +681,23 @@ function group(found, forbidden) {
 // with no `allowed` list. The count is edges, never modules - one module with
 // three forbidden imports is three imports to move, and a per-module count hides
 // two of them. The modules are named beside it, not instead of it.
-function preview(graph, of, rule, allowed, notEvaluated) {
+// A rules file that cannot be read stops `cast check`, but not a preview: the
+// rule under preview came from the command line, and the file only supplies the
+// exceptions. The preview answers without them and says so - a number quietly
+// missing the project's `allowed` list is the one thing this command must not
+// print, because it reads as what `cast check` would add today.
+function writtenAllowed(root, names) {
+  const read = soft(() => readRules(root, names))
+  if (read.error) return { allowed: [], unreadable: read.error }
+  return { allowed: read.value ? read.value.allowed : [] }
+}
+
+function preview(graph, of, rule, allowed, notEvaluated, unreadable) {
   const found = violations(graph, of, { forbidden: [rule], allowed })
   const mods = new Set(found.map((v) => v.file)).size
   const lines = group(found, [rule])
   for (const n of notEvaluated) lines.push(`not evaluated: ${n}`)
+  if (unreadable) lines.push(`the allowed list was not available: ${unreadable}`)
   lines.push(
     `${plural(found.length, 'edge')} flagged in ${plural(mods, 'module')} ` +
       `of ${plural(moduleEdges(graph), 'edge')}`
@@ -793,14 +843,23 @@ function retarget(graph, was, now) {
     for (const e of m.edges) if (e.resolution === 'module' && e.to === was) e.to = now
 }
 
-// Every operation rewrites the copy in place. An edge keeps its site - the file
-// and line it was read from - because a simulated edge that names no site is one
-// nobody could go and look at once the plan is executed.
+// Every operation rewrites the copy in place, and every edge it leaves behind
+// names a site in the module that holds it: `file` is that module's id after the
+// operation, never the id the module had before it. A site under a name the plan
+// has just retired is one nobody can open once the plan is executed. The line is
+// the line the import was read at - except on an inverted edge, which is an
+// import nobody has written yet and carries line 0.
+function resite(m) {
+  for (const e of m.edges) e.file = m.id
+  return m
+}
+
 function apply(graph, o, at) {
   if (o.op === 'move') {
     const m = findModule(graph, o.module, at)
     if (graph.modules.some((x) => x.id === o.to)) die(`${at}: ${o.to} is already a module`)
     m.id = o.to
+    resite(m)
     retarget(graph, o.module, o.to)
     return
   }
@@ -816,6 +875,7 @@ function apply(graph, o, at) {
       // call inside the one module now, which is what merging them means.
       edges: parts.flatMap((p) => p.edges).filter((e) => !(e.resolution === 'module' && gone.has(e.to))),
     }
+    resite(merged)
     const at0 = graph.modules.indexOf(parts[0])
     graph.modules = graph.modules.filter((x) => !gone.has(x.id))
     graph.modules.splice(Math.min(at0, graph.modules.length), 0, merged)
@@ -829,10 +889,12 @@ function apply(graph, o, at) {
     if (!inverted.length) die(`${at}: no edge ${o.from} -> ${o.to} to invert`)
     from.edges = from.edges.filter((e) => !inverted.includes(e))
     const target = findModule(graph, o.to, at)
-    // The direction is what an inversion turns around; the kind and the site are
-    // the ones the import has today, so the answer stays traceable to real code.
+    // The direction is what an inversion turns around, and the kind is the one
+    // the import has today. The site is the module that would declare it, at
+    // line 0: the line the import sits on now belongs to the other file, and
+    // carrying it over would name a line of the target nobody wrote it on.
     for (const e of inverted)
-      target.edges.push({ ...e, target: o.from, to: o.from, file: o.to, resolution: 'module' })
+      target.edges.push({ ...e, target: o.from, to: o.from, file: o.to, line: 0, resolution: 'module' })
     return
   }
   const m = findModule(graph, o.module, at)
@@ -1021,8 +1083,10 @@ function main(argv) {
     const { of, names } = assign(graph, layerRules(root))
     const notEvaluated = []
     const rule = readRule(parsed, 'the rule', names, notEvaluated)
-    const written = readRules(root, names)
-    process.stdout.write(preview(graph, of, rule, written ? written.allowed : [], notEvaluated) + '\n')
+    const written = writtenAllowed(root, names)
+    process.stdout.write(
+      preview(graph, of, rule, written.allowed, notEvaluated, written.unreadable) + '\n'
+    )
     // A preview reports; it never fails a build. The rule it tried is not one
     // the project has agreed to yet.
     return 0

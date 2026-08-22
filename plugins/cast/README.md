@@ -11,6 +11,9 @@ cast rules preview <rule json> [--root <dir>]
 cast plan simulate <name> [--root <dir>]
                              applies <root>/.cast/plans/<name>.json to a copy of
                              the graph and says what it would change
+cast baseline [--update] [--root <dir>]
+                             the inherited violations <root>/.cast/baseline.json
+                             holds, and the ratchet that rewrites it
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
 cast render --mermaid [--expand <layer>] [--root <dir>]

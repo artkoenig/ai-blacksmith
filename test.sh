@@ -623,7 +623,8 @@ JS
 # language the engine has never heard of, described by an adapter the fixture
 # itself ships.
 CASTFIX="$(mktemp -d)"
-trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX"' EXIT
+CASTIDS="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS"' EXIT
 mkdir -p "$CASTFIX/src" "$CASTFIX/pkg" "$CASTFIX/.cast/adapters" "$CASTFIX/node_modules/react"
 cat > "$CASTFIX/tsconfig.json" <<'JSON'
 { "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/*"] } } }
@@ -823,6 +824,40 @@ MODS="$(printf '%s\n' "$CAST_REPORT" | awk '/^modules /{print $2}')"
   || { fail "cast layers" "$MODS modules were placed $SUM times: $CAST_REPORT"; S=1; }
 [ "$S" = 0 ] && ok "cast layers"
 
+# a layers.json that is present but unreadable stops the run: the directory-level
+# fallback answers for a missing file only
+S=0
+CAST_LAYERS="$CASTFIX/.cast/layers.json"
+cp "$CAST_LAYERS" "$CASTFIX/layers.bak"
+printf '{ "src/a.ts": ' > "$CAST_LAYERS"
+CAST_LM="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+# break: catching the parse the way the missing file is caught, which reads the
+# graph at an altitude nobody declared and never says the layer file was ignored
+[ "$RC" = 2 ] \
+  || { fail "cast layers malformed" "a malformed layers.json exited $RC, not 2: $CAST_LM"; S=1; }
+printf '%s\n' "$CAST_LM" | grep -q 'layers.json is not valid JSON' \
+  || { fail "cast layers malformed" "the malformed layer file was not named: $CAST_LM"; S=1; }
+printf '%s\n' "$CAST_LM" | grep -q '^layers ' \
+  && { fail "cast layers malformed" "the run fell back to directory layering: $CAST_LM"; S=1; }
+# a file that cannot be read at all is the same answer, not a fallback either
+rm -f "$CAST_LAYERS"; mkdir "$CAST_LAYERS"
+CAST_LU="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+# break: one bare catch around read and parse together, which swallows this too
+[ "$RC" = 2 ] \
+  || { fail "cast layers malformed" "an unreadable layers.json exited $RC, not 2: $CAST_LU"; S=1; }
+printf '%s\n' "$CAST_LU" | grep -q 'layers.json could not be read' \
+  || { fail "cast layers malformed" "the unreadable layer file was not named: $CAST_LU"; S=1; }
+rmdir "$CAST_LAYERS"
+# no layers.json at all is still the documented default, not an error
+# break: turning the missing file into an exit 2, which makes a first run need a
+# layer file before it can say anything
+CAST_LN="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast layers malformed" "no layers.json exited $RC, not 0: $CAST_LN"; S=1; }
+printf '%s\n' "$CAST_LN" | grep -q '^layers ' \
+  || { fail "cast layers malformed" "the directory-level fallback did not run: $CAST_LN"; S=1; }
+cp "$CASTFIX/layers.bak" "$CAST_LAYERS"; rm -f "$CASTFIX/layers.bak"
+[ "$S" = 0 ] && ok "cast layers malformed"
+
 # AC2 a module no glob claims is counted and named, never silently dropped
 S=0
 # break: skipping the unmatched modules instead of filing them as unassigned
@@ -911,9 +946,31 @@ printf '%s\n' "$CAST_EXP" | grep -q '"src/a.ts"' \
   && { fail "cast expand" "a module of an unexpanded layer became a node: $CAST_EXP"; S=1; }
 # the edge into the expanded layer lands on the module, not the layer node
 # break: keeping the layer endpoint after expanding, which hides what is imported
-printf '%s\n' "$CAST_EXP" | grep -q '^  L_ui -->|1| M_src_b_ts$' \
+printf '%s\n' "$CAST_EXP" | grep -q '^  L_ui -->|1| M_src_2f_b_2e_ts$' \
   || { fail "cast expand" "an edge into the expanded layer did not reach a module: $CAST_EXP"; S=1; }
 [ "$S" = 0 ] && ok "cast expand"
+
+# two modules whose ids differ only in punctuation are two nodes, never one
+S=0
+# a fixture of its own: the ids have to collide under a lossy sanitiser, and the
+# layer sizes the suites above assert must not move
+mkdir -p "$CASTIDS/src"
+printf 'export const a = 1\n' > "$CASTIDS/src/x-y.ts"
+printf 'export const b = 2\n' > "$CASTIDS/src/x_y.ts"
+(cd "$CASTIDS" && "$CAST_BIN" scan >/dev/null 2>&1) \
+  || { fail "cast node ids" "cast scan did not run on the collision fixture"; S=1; }
+CAST_IDS="$(cd "$CASTIDS" && "$CAST_BIN" render --mermaid --expand src 2>&1)"
+node_of() { printf '%s\n' "$CAST_IDS" | sed -n "s/^ *\(M_[A-Za-z0-9_]*\)\[\"$1\"\]\$/\1/p"; }
+ID_A="$(node_of 'src\/x-y\.ts')"
+ID_B="$(node_of 'src\/x_y\.ts')"
+# break: mapping every character mermaid rejects to a bare `_`, which gives both
+# modules the id M_src_x_y_ts - one node drawn for two modules, and an edge of
+# one of them silently attributed to the other
+[ -n "$ID_A" ] && [ -n "$ID_B" ] \
+  || { fail "cast node ids" "a module was not drawn as its own node: $CAST_IDS"; S=1; }
+[ "$ID_A" != "$ID_B" ] \
+  || { fail "cast node ids" "two modules share the node id $ID_A: $CAST_IDS"; S=1; }
+[ "$S" = 0 ] && ok "cast node ids"
 
 # AC7 cast render --html writes one self-contained page carrying the layer names
 S=0
@@ -1156,6 +1213,29 @@ CAST_PRE4="$(cd "$CASTFIX" && "$CAST_BIN" rules preview 'not json' 2>&1)"; RC=$?
 [ "$RC" = 2 ] || { fail "cast preview" "an unreadable rule exited $RC, not 2: $CAST_PRE4"; S=1; }
 [ "$S" = 0 ] && ok "cast preview"
 
+# a preview still previews where the project's own rules.json cannot be read
+S=0
+printf '{ "forbidden": [ ' > "$CAST_RULES"
+CAST_PR="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
+# break: reading the exceptions with the same die() the check reads them with,
+# which kills a preview of a rule the broken file has nothing to do with
+[ "$RC" = 0 ] \
+  || { fail "cast preview robust" "a preview beside an unreadable rules.json exited $RC, not 0: $CAST_PR"; S=1; }
+printf '%s\n' "$CAST_PR" | grep -q '^3 edges flagged in 1 module of ' \
+  || { fail "cast preview robust" "the rule was not previewed: $CAST_PR"; S=1; }
+# break: falling back to an empty allowed list in silence, which prints a number
+# that is not what cast check would add today
+printf '%s\n' "$CAST_PR" | grep -q 'the allowed list was not available' \
+  || { fail "cast preview robust" "the missing allowed list was not reported: $CAST_PR"; S=1; }
+printf '%s\n' "$CAST_PR" | grep -q 'rules.json is not valid JSON' \
+  || { fail "cast preview robust" "the unreadable rules file was not named: $CAST_PR"; S=1; }
+# the same file still stops cast check: exit 2 is what a file cast cannot run on
+# break: making every rules read soft, which turns a broken file into a pass
+CAST_PRC="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast preview robust" "cast check on an unreadable rules.json exited $RC, not 2: $CAST_PRC"; S=1; }
+[ "$S" = 0 ] && ok "cast preview robust"
+
 
 # AC8 a violation listed in .cast/baseline.json leaves the check green; one that
 # is not listed turns it red
@@ -1266,6 +1346,31 @@ printf '%s\n' "$CAST_PLAN" | grep -q 'no module src/bc.ts' \
 printf '%s\n' "$CAST_PLAN" | grep -q '^edges 8 -> 7' \
   || { fail "cast plan" "the operations did not reach the copied graph: $CAST_PLAN"; S=1; }
 [ "$S" = 0 ] && ok "cast plan"
+
+# every edge the simulation produces names a site in the module that holds it
+S=0
+# a simulation writes nothing, so the after graph is read in process: stdout
+# carries only the edges a rule flags, and this is about all of them
+CAST_SITES="$(CASTFIX="$CASTFIX" CAST_JS="$PWD/plugins/cast/scripts/cast.js" node -e '
+  const cast = require(process.env.CAST_JS)
+  const root = process.env.CASTFIX
+  const graph = JSON.parse(require("fs").readFileSync(root + "/.cast/graph.json", "utf8"))
+  const after = cast.simulateGraph(graph, cast.readPlan(root, "cut"))
+  const bad = []
+  for (const m of after.modules)
+    for (const e of m.edges)
+      if (e.file !== m.id) bad.push(m.id + " holds an edge sited in " + e.file)
+  const t = after.modules.find((x) => x.id === "src/t.ts")
+  const inv = ((t || {}).edges || []).find((e) => e.to === "src/a.ts")
+  if (!inv) bad.push("the inverted edge did not land on src/t.ts")
+  else if (inv.line !== 0)
+    bad.push("the inverted edge names line " + inv.line + ", a line of the file it came from")
+  console.log(bad.join("; "))
+' 2>&1)"
+# break: renaming the module a move or a merge produces without retargeting the
+# sites of its edges, which names a file the plan has just retired
+[ -z "$CAST_SITES" ] || { fail "cast plan sites" "$CAST_SITES"; S=1; }
+[ "$S" = 0 ] && ok "cast plan sites"
 
 # AC2 every source file is byte-identical before and after the simulation
 S=0
