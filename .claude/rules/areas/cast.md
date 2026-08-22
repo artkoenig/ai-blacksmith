@@ -5,8 +5,8 @@ paths:
 
 # cast
 
-The module graph of a project. `bin/cast` is a two-line shim; all behaviour is `scripts/cast.js`,
-and every fact about a language is an adapter file.
+The module graph of a project, and the rules it must obey. `bin/cast` and `bin/cast-check` are
+shims; all behaviour is `scripts/cast.js`, and every fact about a language is an adapter file.
 
 - The engine holds no language knowledge, and that is the point of the plugin. Extensions,
   import patterns, edge kinds and resolution all come from an adapter. Anything language-specific
@@ -46,7 +46,7 @@ and every fact about a language is an adapter file.
 - `--html` is deliberately dependency-free: the page inlines the mermaid source as escaped text
   and loads nothing over the network, which the `cast html` suite asserts. Adding a CDN script
   turns it red.
-- Exercised by the thirteen `cast *` suites in `test.sh`, all reading one scanned fixture. Assert
+- Exercised by the twenty `cast *` suites in `test.sh`, all reading one scanned fixture. Assert
   against the written `.cast/graph.json`, never an in-process call - the file is the contract.
 - `.cast` is in `ALWAYS_IGNORED`, so a project's own adapters are loaded but never scanned as
   modules. Walking also skips every dot directory.
@@ -55,3 +55,22 @@ and every fact about a language is an adapter file.
 - Separators and control characters in `scripts/cast.js` are written as escapes (`'\0'`), never as
   the raw byte: one literal NUL makes git and grep treat the file as binary, so the diff carries no
   hunks and `grep` prints `binary file matches` instead of lines.
+- Rules are read at check time from `<root>/.cast/rules.json`, like layers.json and for the same
+  reason: a rule can change with no rescan. `forbidden` names an edge that must not exist,
+  `allowed` is the exception list, and an allowed rule matching the same edge drops the violation.
+- A rule side is a layer name where `assign()` reports one (`unassigned` included), and a
+  `globToRe` path glob otherwise. Layer wins on a tie, so a layer named like a directory is read
+  as the layer - a rule between two files inside one layer must name the files.
+- `cast check` evaluates every resolved module edge, never the layer aggregate `mermaid` builds:
+  the render drops an edge whose endpoints collapse to one node, and the `cast check altitude`
+  suite is what catches an evaluator rebuilt on top of it.
+- The exit code comes from severity, not from the violation count: `warn` is listed and leaves 0.
+  The summary is always the last line, and on a clean project the only line - that single line is
+  the wrapper contract `bin/cast-check` inherits.
+- `die()` is exit 2 throughout, which is what makes an unreadable or invalid `rules.json` the
+  "could not run" answer of the wrapper contract rather than a violation or a pass. Validation
+  belongs in `readRules` for that reason.
+- An unknown rule attribute is reported as `not evaluated: <rule>: <key>`, never ignored. A new
+  attribute means adding it to `RULE_KEYS` in the same change.
+- `bin/cast-check` scans before it checks, so a check command needs no arguments and never reads a
+  stale graph. Every `bin/*` file must be executable, or the manifest suite fails on it.

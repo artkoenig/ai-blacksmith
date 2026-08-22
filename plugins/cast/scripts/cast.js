@@ -4,6 +4,8 @@
 //
 //   cast scan [--root <dir>]     writes <root>/.cast/graph.json
 //   cast report [--root <dir>]   reads it and says what is wrong
+//   cast check [--root <dir>]    the rules of <root>/.cast/rules.json, evaluated
+//                                against the module graph; exit 1 on an error
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
 //   cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -444,10 +446,144 @@ function readGraph(out) {
   }
 }
 
+// --- rules ------------------------------------------------------------------
+
+// Rules are read at check time from `<root>/.cast/rules.json`, the same contract
+// as layers.json: never baked into the graph, so a rule can be added, tightened
+// or dropped without a rescan. `forbidden` names an edge that must not exist;
+// `allowed` is the exception list - an edge a forbidden rule caught is dropped
+// where an allowed rule claims the same edge.
+//
+// Each rule carries `name`, `severity`, `from`, `to` and `kinds`. A side is a
+// layer name where one is declared, and a path glob otherwise, so a rule can be
+// written between two layers or between two files with no layer of their own.
+const RULE_KEYS = ['name', 'severity', 'from', 'to', 'kinds']
+
+function side(spec, names) {
+  if (typeof spec !== 'string' || !spec) return null
+  // A declared layer name wins over a path of the same spelling: layers are what
+  // rules are normally written between, and a layer name is rarely a valid path.
+  if (names.includes(spec) || spec === UNASSIGNED) return { layer: spec }
+  return { re: globToRe(spec) }
+}
+
+function readRules(root, names) {
+  const file = path.join(root, '.cast', 'rules.json')
+  let raw
+  try {
+    raw = fs.readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    die(`${file} is not valid JSON: ${e.message}`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    die(`${file} is not an object holding forbidden and allowed rules`)
+  const notEvaluated = []
+  const read = (key) => {
+    const list = parsed[key]
+    if (list === undefined) return []
+    if (!Array.isArray(list)) die(`${file}: ${key} is not an array of rules`)
+    return list.map((r, i) => {
+      const at = `${file}: ${key}[${i}]`
+      if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${at} is not a rule object`)
+      if (typeof r.name !== 'string' || !r.name) die(`${at} carries no name`)
+      const from = side(r.from, names)
+      const to = side(r.to, names)
+      if (!from) die(`${at} (${r.name}) carries no from`)
+      if (!to) die(`${at} (${r.name}) carries no to`)
+      const severity = r.severity === undefined ? 'error' : r.severity
+      if (severity !== 'error' && severity !== 'warn')
+        die(`${at} (${r.name}) has severity ${JSON.stringify(r.severity)}, not error or warn`)
+      let kinds = null
+      if (r.kinds !== undefined) {
+        if (!Array.isArray(r.kinds) || r.kinds.some((k) => typeof k !== 'string'))
+          die(`${at} (${r.name}) has kinds that are not a list of edge kinds`)
+        kinds = r.kinds
+      }
+      // An attribute this evaluator cannot decide is named, never quietly passed:
+      // a green check must not stand for a rule nobody evaluated.
+      for (const k of Object.keys(r)) if (!RULE_KEYS.includes(k)) notEvaluated.push(`${r.name}: ${k}`)
+      return { name: r.name, severity, kinds, from, to, fromSpec: r.from, toSpec: r.to }
+    })
+  }
+  const forbidden = read('forbidden')
+  const allowed = read('allowed')
+  return { forbidden, allowed, notEvaluated }
+}
+
+function sideHits(s, id, of) {
+  return s.layer !== undefined ? of.get(id) === s.layer : s.re.test(id)
+}
+
+function hits(rule, fromId, edge, of) {
+  if (rule.kinds && !rule.kinds.includes(edge.kind)) return false
+  return sideHits(rule.from, fromId, of) && sideHits(rule.to, edge.to, of)
+}
+
+// Every resolved module edge is evaluated, including the ones inside a single
+// layer. The check reads the module graph and never the aggregate the renderer
+// draws, where an intra-layer edge has no arrow at all.
+function violations(graph, of, rules) {
+  const out = []
+  for (const m of graph.modules) {
+    for (const e of m.edges) {
+      if (e.resolution !== 'module') continue
+      rules.forbidden.forEach((r, ri) => {
+        if (!hits(r, m.id, e, of)) return
+        if (rules.allowed.some((a) => hits(a, m.id, e, of))) return
+        out.push({
+          ri,
+          rule: r.name,
+          severity: r.severity,
+          file: e.file,
+          line: e.line,
+          to: e.to,
+          kind: e.kind,
+          edge: `${of.get(m.id)} -> ${of.get(e.to)}`,
+        })
+      })
+    }
+  }
+  return out.sort((a, b) => a.ri - b.ri || (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
+}
+
+// Grouped by rule and then by layer edge, because a violation is fixed one rule
+// at a time and read one edge at a time; the site under it is what gets opened.
+function check(graph, of, rules) {
+  const found = violations(graph, of, rules)
+  const edges = graph.modules.reduce((n, m) => n + m.edges.filter((e) => e.resolution === 'module').length, 0)
+  const errors = found.filter((v) => v.severity === 'error').length
+  const lines = []
+  rules.forbidden.forEach((r, ri) => {
+    const mine = found.filter((v) => v.ri === ri)
+    if (!mine.length) return
+    lines.push(`${r.name} (${r.severity}) ${r.fromSpec} -> ${r.toSpec} ${mine.length}`)
+    for (const le of [...new Set(mine.map((v) => v.edge))].sort()) {
+      const sites = mine.filter((v) => v.edge === le)
+      lines.push(`  ${le} ${sites.length}`)
+      for (const v of sites) lines.push(`    ${v.file}:${v.line} -> ${v.to} (${v.kind})`)
+    }
+  })
+  for (const n of rules.notEvaluated) lines.push(`not evaluated: ${n}`)
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
+  // The last line is the whole answer where nothing is wrong: one line, the
+  // wrapper contract, and it says what was read so a green check is not a silence.
+  lines.push(
+    `${plural(found.length, 'violation')} (${plural(errors, 'error')}) in ` +
+      `${plural(edges, 'edge')} against ${plural(rules.forbidden.length, 'rule')}`
+  )
+  return { text: lines.join('\n'), code: errors ? 1 : 0 }
+}
+
 // --- cli --------------------------------------------------------------------
 
 const USAGE =
-  'usage: cast <scan|report> [--root <dir>]\n' +
+  'usage: cast <scan|report|check> [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
   '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
   '       cast render --html <file> [--expand <layer>] [--root <dir>]'
@@ -483,6 +619,20 @@ function main(argv) {
     process.stdout.write(report(graph, layerRules(root)) + '\n')
     return 0
   }
+  if (cmd === 'check') {
+    const graph = readGraph(out)
+    const { of, names } = assign(graph, layerRules(root))
+    const rules = readRules(root, names)
+    // No rules file is not a pass with nothing said: it is the one thing that
+    // makes a green check meaningless, so it names itself.
+    if (!rules) {
+      process.stdout.write(`no rules: write ${path.join('.cast', 'rules.json')} to check any\n`)
+      return 0
+    }
+    const answer = check(graph, of, rules)
+    process.stdout.write(answer.text + '\n')
+    return answer.code
+  }
   if (cmd === 'edges') {
     if (!from || !to) die(USAGE)
     const graph = readGraph(out)
@@ -513,4 +663,7 @@ function main(argv) {
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
-module.exports = { scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html }
+module.exports = {
+  scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
+  readRules, violations, check,
+}

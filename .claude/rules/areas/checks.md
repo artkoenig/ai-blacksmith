@@ -11,9 +11,11 @@ paths:
   contract against a fixture project, every hook decision, the startup measurement against a
   fixture agent and a synthetic transcript, that the project rules are tracked, that every area
   note parses and still globs something, and the workflow control flow against stubbed agents -
-  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id, and nine
+  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id, and twenty
   `cast *` suites over one scanned fixture project. The cast fixture ships its own
-  `.cast/layers.json`, so every `cast report` assertion sees the layer sections too.
+  `.cast/layers.json`, so every `cast report` assertion sees the layer sections too, and the
+  `cast check` suites rewrite its `.cast/rules.json` per case - rules are read at check time, so
+  none of them rescans.
 - The manifest and syntax suite loops `for d in plugins/*/`: validate, `node --check`, `bash -n`
   and the executable-bit checks are derived from the plugin directories, each guarded by
   `[ -f "$f" ] || continue` so a plugin shipping no `bin/`, `scripts/` or `workflows/` is skipped.

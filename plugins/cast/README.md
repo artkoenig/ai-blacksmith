@@ -5,6 +5,7 @@ The module graph of a project, and what is wrong with it.
 ```
 cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
+cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
 cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -45,6 +46,39 @@ edges ui -> logic 3
 
 Only edges that landed on a module have a far layer; an unresolved or external import is named by
 `cast report` instead.
+
+## Rules
+
+`<root>/.cast/rules.json` holds the dependencies the project does not allow. A `forbidden` rule
+names an edge that must not exist; an `allowed` rule is the exception to it - an edge a forbidden
+rule caught is dropped where an allowed rule claims the same edge.
+
+```json
+{
+  "forbidden": [
+    { "name": "ui-off-data", "severity": "error", "from": "ui", "to": "data",
+      "kinds": ["value", "type", "dynamic"] }
+  ],
+  "allowed": [
+    { "name": "the-one-legacy-read", "severity": "error", "from": "src/ui/report.ts",
+      "to": "db/read.ts", "kinds": ["value"] }
+  ]
+}
+```
+
+`from` and `to` are a layer name where the project declares one, and a path glob otherwise (the
+same glob engine `layers.json` uses), so a rule can be written between two layers or between two
+files that share one. `kinds` limits the rule to those edge kinds: a rule carrying
+`kinds: ["value"]` is not violated by an `import type`. `severity` is `error` or `warn`; a warning
+is listed and leaves the exit code alone. An attribute this evaluator does not know is reported as
+`not evaluated`, never quietly passed.
+
+`cast check` reads the rules against the module graph, never against the layer aggregate the
+render draws, so a violation between two modules of one layer is found like any other. It answers
+on the wrapper contract: exit 0 with a single line, exit 1 with every violation - grouped by rule
+and by layer edge, each site with its file and its line - and exit 2 where the check could not run
+at all. `bin/cast-check` is that check as a check command: it scans, then checks, and takes no
+arguments.
 
 ## Rendering
 

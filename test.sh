@@ -938,4 +938,174 @@ printf '%s\n' "$CAST_HTML" | grep -qE 'src="https?:|href="https?:' \
   && { fail "cast html" "the page loads an external asset: $CAST_HTML"; S=1; }
 [ "$S" = 0 ] && ok "cast html"
 
+
+# --- cast: the rules ---------------------------------------------------------
+# The same scanned fixture, read through .cast/rules.json. Rules are read at
+# check time, so every case here rewrites the file and rescans nothing.
+CAST_RULES="$CASTFIX/.cast/rules.json"
+
+# AC1 rules.json holds forbidden and allowed rules, each with name, severity,
+# from, to and kinds, and a side is a layer or a path
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{
+  "forbidden": [
+    { "name": "ui-owns-nothing", "severity": "error", "from": "ui", "to": "logic",
+      "kinds": ["value", "type", "dynamic"] }
+  ],
+  "allowed": [
+    { "name": "a-may-type-t", "severity": "error", "from": "src/a.ts", "to": "src/t.ts",
+      "kinds": ["type"] }
+  ]
+}
+JSON
+CAST_CHECK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"
+# a forbidden rule written between two layers catches the edges behind them
+# break: reading `from`/`to` as a path only, which leaves a layer rule matching nothing
+for v in 'src/a.ts:1 -> src/b.ts' 'src/a.ts:6 -> src/c.ts'; do
+  printf '%s\n' "$CAST_CHECK" | grep -q "$v" \
+    || { fail "cast rules" "the forbidden layer rule did not catch $v: $CAST_CHECK"; S=1; }
+done
+# an allowed rule, written between two paths, is the exception to it
+# break: ignoring the allowed list, which makes every exception unwritable
+printf '%s\n' "$CAST_CHECK" | grep -q 'src/a.ts:2' \
+  && { fail "cast rules" "an edge an allowed rule claims was still a violation: $CAST_CHECK"; S=1; }
+printf '%s\n' "$CAST_CHECK" | grep -q '^2 violations' \
+  || { fail "cast rules" "the violations were not counted: $CAST_CHECK"; S=1; }
+# a rule attribute the evaluator cannot decide is named, never quietly passed
+# break: dropping the unknown-key report, which reads as a rule that held
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "guess", "severity": "warn", "from": "ui", "to": "unassigned",
+                   "kinds": ["value"], "unless": "friday" } ] }
+JSON
+CAST_UNK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"
+printf '%s\n' "$CAST_UNK" | grep -q 'not evaluated: guess: unless' \
+  || { fail "cast rules" "an attribute the evaluator cannot decide was passed silently: $CAST_UNK"; S=1; }
+[ "$S" = 0 ] && ok "cast rules"
+
+# AC2 a project that breaks no rule exits 0 with a single line
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_CLEAN="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: exiting non-zero on a graph that breaks nothing
+[ "$RC" = 0 ] || { fail "cast check clean" "a clean project did not exit 0: $CAST_CLEAN"; S=1; }
+# break: printing a header, or a line per rule, above the answer
+[ "$(printf '%s\n' "$CAST_CLEAN" | wc -l)" = 1 ] \
+  || { fail "cast check clean" "a clean check answered in more than one line: $CAST_CLEAN"; S=1; }
+printf '%s\n' "$CAST_CLEAN" | grep -q '^0 violations' \
+  || { fail "cast check clean" "the one line does not say the project is clean: $CAST_CLEAN"; S=1; }
+[ "$S" = 0 ] && ok "cast check clean"
+
+# AC3 a violated error rule exits 1 and names every violation, grouped by rule
+# and layer edge
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_BAD="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reporting the violation and still exiting 0, which lets the build pass
+[ "$RC" = 1 ] || { fail "cast check violation" "a violated error rule exited $RC, not 1: $CAST_BAD"; S=1; }
+# the rule, the file and the line: a violation without its site is unopenable
+# break: dropping the site from the line, or naming the count only
+printf '%s\n' "$CAST_BAD" | grep -q '^no-back-edge (error) logic -> ui 1$' \
+  || { fail "cast check violation" "the violations are not grouped under their rule: $CAST_BAD"; S=1; }
+printf '%s\n' "$CAST_BAD" | grep -q '^  logic -> ui 1$' \
+  || { fail "cast check violation" "the violations are not grouped by layer edge: $CAST_BAD"; S=1; }
+printf '%s\n' "$CAST_BAD" | grep -q '^    src/c.ts:1 -> src/a.ts (value)$' \
+  || { fail "cast check violation" "the violation does not carry its file and line: $CAST_BAD"; S=1; }
+[ "$S" = 0 ] && ok "cast check violation"
+
+# AC4 the same rule at severity warn is listed and leaves the exit code 0
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "warn", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_WARN="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reading severity as decoration, which fails the build on a warning
+[ "$RC" = 0 ] || { fail "cast severity" "a warn rule exited $RC, not 0: $CAST_WARN"; S=1; }
+# break: silencing what does not fail, which makes a warning unfindable
+printf '%s\n' "$CAST_WARN" | grep -q '^no-back-edge (warn) logic -> ui 1$' \
+  || { fail "cast severity" "a warn violation was not listed: $CAST_WARN"; S=1; }
+printf '%s\n' "$CAST_WARN" | grep -q '^    src/c.ts:1 -> src/a.ts (value)$' \
+  || { fail "cast severity" "a warn violation was listed without its site: $CAST_WARN"; S=1; }
+printf '%s\n' "$CAST_WARN" | grep -q '(0 errors)' \
+  || { fail "cast severity" "a warn violation was counted as an error: $CAST_WARN"; S=1; }
+[ "$S" = 0 ] && ok "cast severity"
+
+# AC5 a rule carrying kinds: ["value"] is not violated by an import type edge
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "rel-off-t", "severity": "error", "from": "src/rel.ts", "to": "src/t.ts",
+                   "kinds": ["value"] } ] }
+JSON
+CAST_KIND="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# src/rel.ts imports src/t.ts with `import type` and nothing else
+# break: evaluating a rule over every edge whatever its kind
+[ "$RC" = 0 ] || { fail "cast kinds" "a value rule was violated by a type edge: $CAST_KIND"; S=1; }
+printf '%s\n' "$CAST_KIND" | grep -q '^0 violations' \
+  || { fail "cast kinds" "a value rule caught a type edge: $CAST_KIND"; S=1; }
+# and the same rule over the kind that is there does catch it
+# break: dropping every edge whose kind is not value, which would pass either way
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "rel-off-t", "severity": "error", "from": "src/rel.ts", "to": "src/t.ts",
+                   "kinds": ["type"] } ] }
+JSON
+CAST_KIND2="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast kinds" "the type edge was not caught by a type rule: $CAST_KIND2"; S=1; }
+printf '%s\n' "$CAST_KIND2" | grep -q '^    src/rel.ts:1 -> src/t.ts (type)$' \
+  || { fail "cast kinds" "the type edge was not named: $CAST_KIND2"; S=1; }
+[ "$S" = 0 ] && ok "cast kinds"
+
+# AC6 a violation inside one layer is still found: the check reads the module
+# graph, never the aggregate the render draws
+S=0
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "b-off-c", "severity": "error", "from": "src/b.ts", "to": "src/c.ts",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_IN="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# src/b.ts and src/c.ts are both in `logic`, so this edge has no arrow at layer
+# altitude at all - the render drops it as a self edge
+# break: evaluating the rules over the layer edges the render aggregates, which
+# never carries an edge whose endpoints collapse to one node
+[ "$RC" = 1 ] || { fail "cast check altitude" "an edge inside one layer was not checked: $CAST_IN"; S=1; }
+printf '%s\n' "$CAST_IN" | grep -q '^    src/b.ts:1 -> src/c.ts (value)$' \
+  || { fail "cast check altitude" "the intra-layer violation was not named with its site: $CAST_IN"; S=1; }
+printf '%s\n' "$CAST_IN" | grep -q '^  logic -> logic 1$' \
+  || { fail "cast check altitude" "the intra-layer violation lost its layer edge: $CAST_IN"; S=1; }
+[ "$S" = 0 ] && ok "cast check altitude"
+
+# AC7 bin/cast-check runs the check without arguments, on the wrapper contract
+S=0
+CAST_CHECK_BIN="$PWD/plugins/cast/bin/cast-check"
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_W="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
+# break: requiring a subcommand or a --root, which no check command passes
+[ "$RC" = 0 ] || { fail "cast check wrapper" "the wrapper exited $RC on a clean project: $CAST_W"; S=1; }
+[ "$(printf '%s\n' "$CAST_W" | wc -l)" = 1 ] \
+  || { fail "cast check wrapper" "a green wrapper run answered in more than one line: $CAST_W"; S=1; }
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_W1="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
+# break: swallowing the check's exit code, which reports every red run as green
+[ "$RC" = 1 ] || { fail "cast check wrapper" "the wrapper exited $RC on a violation: $CAST_W1"; S=1; }
+printf '%s\n' "$CAST_W1" | grep -q '^    src/c.ts:1 -> src/a.ts (value)$' \
+  || { fail "cast check wrapper" "the wrapper dropped the detail of the failure: $CAST_W1"; S=1; }
+# exit 2 is the third answer: the check could not run
+# break: reporting a broken rules file as a violation, or as a pass
+printf 'not json\n' > "$CAST_RULES"
+CAST_W2="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast check wrapper" "an unreadable rules file exited $RC, not 2: $CAST_W2"; S=1; }
+[ "$S" = 0 ] && ok "cast check wrapper"
+
 exit "$FAILED"
