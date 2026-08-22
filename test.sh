@@ -367,13 +367,32 @@ grep -q 'resumed, never restarted' plugins/forge/rules/forge.md \
   && ok "a stopped run is resumed" \
   || fail resume "the plugin rules no longer require resuming a stopped run"
 
+# --- the interview starts grounded ------------------------------------------
+# What the codebase already does is read out of the codebase, never out of the
+# user. That analysis is one dispatch of the built-in Explore agent, so the
+# skill carries that tool and no search tool of its own: a Grep here would put
+# every excerpt into the one context that has to hold the whole issue.
+S=0
+# break: dropping Agent(Explore) from allowed-tools
+grep -q '^allowed-tools:.*Agent(Explore)' plugins/forge/skills/issue/SKILL.md \
+  || { fail grounding "the issue skill can no longer dispatch the Explore agent"; S=1; }
+# break: handing the skill its own search tools instead of delegating the analysis
+grep -q '^allowed-tools:.*\(Grep\|Glob\)' plugins/forge/skills/issue/SKILL.md \
+  && { fail grounding "the issue skill searches itself instead of delegating"; S=1; }
+# break: removing the grounding step, or moving it after the interview
+G="$(grep -n '^## [0-9]\+\. Ground it$' plugins/forge/skills/issue/SKILL.md | cut -d: -f1)"
+I="$(grep -n '^## [0-9]\+\. Interview$' plugins/forge/skills/issue/SKILL.md | cut -d: -f1)"
+{ [ -n "$G" ] && [ -n "$I" ] && [ "$G" -lt "$I" ]; } \
+  || { fail grounding "the issue skill no longer grounds itself before it asks"; S=1; }
+[ "$S" = 0 ] && ok "the interview starts grounded"
+
 # --- the run starts on demand -----------------------------------------------
 # Writing an issue spends no dispatch. The behaviour lives in prose, so the
 # prose is what is checked: a skill that ends by invoking the workflow starts
 # work nobody asked for.
 S=0
 # break: restoring a "## 4. Start the run" step that invokes /forge:work
-grep -q '^## 4. Hand it over$' plugins/forge/skills/issue/SKILL.md \
+grep -q '^## [0-9]\+\. Hand it over$' plugins/forge/skills/issue/SKILL.md \
   || { fail handoff "the issue skill no longer hands the run over"; S=1; }
 grep -q 'Never invoke `/forge:work` off the back of writing an issue' \
   plugins/forge/skills/issue/SKILL.md \
@@ -400,6 +419,9 @@ S=0
 # break: dropping the reply-language line and going English-only again
 grep -q "the language the user writes in" plugins/forge/output-styles/terse.md \
   || { fail language "the output style no longer replies in the user's language"; S=1; }
+# break: dropping the think-in-it half, leaving a reply translated at the last word
+grep -q "and think in it" plugins/forge/output-styles/terse.md \
+  || { fail language "the output style no longer requires thinking in the user's language"; S=1; }
 # break: dropping the English-artifacts rule from either reader
 grep -q '^- Write English into every file' plugins/forge/output-styles/terse.md \
   || { fail language "the output style no longer requires English in files"; S=1; }
