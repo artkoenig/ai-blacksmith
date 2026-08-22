@@ -90,6 +90,29 @@ modules are named beside it. The exceptions in the project's `allowed` list are 
 number is what `cast check` would add. A preview reports and always exits 0; only a rule it cannot
 read at all is exit 2.
 
+## Baseline
+
+`<root>/.cast/baseline.json` is the violations the project inherited. A listed violation is held:
+it leaves `cast check` green and is counted in the summary as `N baselined`, so a rule can be
+turned on before the code obeys it. A violation that is not listed is red like any other.
+
+```json
+{
+  "violations": [
+    { "rule": "ui-off-data", "file": "src/ui/report.ts", "to": "db/read.ts", "kind": "value" }
+  ]
+}
+```
+
+An entry is keyed by its rule, its file, the module imported and the edge kind - never the line,
+which moves whenever anything above it is edited.
+
+`cast baseline` says how big the debt is: how many violations are held, how many are not, and how
+many held entries the code no longer violates. `cast baseline --update` rewrites the file from the
+violations there are now - dropping the ones already fixed - and **refuses**, with exit 1, to write
+a baseline holding more violations than the one it replaces. That refusal is the ratchet: the file
+can only shrink, so a rule cannot quietly stop meaning anything.
+
 ## Rendering
 
 `cast render --mermaid` draws the graph at layer altitude: one node per layer, none per module,

@@ -566,6 +566,56 @@ function moduleEdges(graph) {
   return graph.modules.reduce((n, m) => n + m.edges.filter((e) => e.resolution === 'module').length, 0)
 }
 
+// --- baseline ---------------------------------------------------------------
+
+// The baseline is the violations a project inherited: listed, they leave the
+// check green, so a rule can be turned on before the code obeys it. A key is
+// the rule, the file, the module imported and the edge kind - never the line,
+// which moves every time anything above it is edited and would churn the file.
+function baselineKey(v) {
+  return [v.rule, v.file, v.to, v.kind].join('\0')
+}
+
+const BASELINE_FILE = path.join('.cast', 'baseline.json')
+
+function readBaseline(root) {
+  const file = path.join(root, BASELINE_FILE)
+  let raw
+  try {
+    raw = fs.readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (e) {
+    die(`${file} is not valid JSON: ${e.message}`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.violations))
+    die(`${file} is not an object holding a violations array`)
+  const keys = new Set()
+  parsed.violations.forEach((v, i) => {
+    const at = `${file}: violations[${i}]`
+    if (!v || typeof v !== 'object' || Array.isArray(v)) die(`${at} is not a violation object`)
+    for (const k of ['rule', 'file', 'to', 'kind'])
+      if (typeof v[k] !== 'string' || !v[k]) die(`${at} carries no ${k}`)
+    keys.add(baselineKey(v))
+  })
+  return { file, keys, count: parsed.violations.length }
+}
+
+// A held violation is dropped from the listing and from the exit code, and
+// counted in the summary: a baseline that hides its own size is a way to stop
+// looking at it.
+function partition(found, baseline) {
+  if (!baseline) return { live: found, held: [] }
+  const live = []
+  const held = []
+  for (const v of found) (baseline.keys.has(baselineKey(v)) ? held : live).push(v)
+  return { live, held }
+}
+
 // Grouped by rule and then by layer edge, because a violation is fixed one rule
 // at a time and read one edge at a time; the site under it is what gets opened.
 function group(found, forbidden) {
@@ -601,8 +651,8 @@ function preview(graph, of, rule, allowed, notEvaluated) {
   return lines.join('\n')
 }
 
-function check(graph, of, rules) {
-  const found = violations(graph, of, rules)
+function check(graph, of, rules, baseline) {
+  const { live: found, held } = partition(violations(graph, of, rules), baseline)
   const edges = moduleEdges(graph)
   const errors = found.filter((v) => v.severity === 'error').length
   const lines = group(found, rules.forbidden)
@@ -611,9 +661,36 @@ function check(graph, of, rules) {
   // wrapper contract, and it says what was read so a green check is not a silence.
   lines.push(
     `${plural(found.length, 'violation')} (${plural(errors, 'error')}) in ` +
-      `${plural(edges, 'edge')} against ${plural(rules.forbidden.length, 'rule')}`
+      `${plural(edges, 'edge')} against ${plural(rules.forbidden.length, 'rule')}` +
+      (held.length ? `, ${held.length} baselined` : '')
   )
   return { text: lines.join('\n'), code: errors ? 1 : 0 }
+}
+
+// The ratchet: a baseline may replace one that holds at least as many
+// violations, never more. Writing is how a violation is accepted, so an
+// unguarded write is how a rule quietly stops meaning anything; the refusal is
+// the only thing that makes `.cast/baseline.json` a debt that pays down.
+function ratchet(root, found) {
+  const current = readBaseline(root)
+  const had = current ? current.count : null
+  if (had !== null && found.length > had)
+    return {
+      text:
+        `refused: ${found.length} violations would replace a baseline of ${had}` +
+        ` - a baseline can only shrink`,
+      code: 1,
+    }
+  const body = {
+    violations: found.map((v) => ({ rule: v.rule, file: v.file, to: v.to, kind: v.kind })),
+  }
+  const file = path.join(root, BASELINE_FILE)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(body, null, 2) + '\n')
+  return {
+    text: `${found.length} violations baselined in ${BASELINE_FILE}` + (had === null ? '' : ` (was ${had})`),
+    code: 0,
+  }
 }
 
 // --- cli --------------------------------------------------------------------
@@ -621,6 +698,7 @@ function check(graph, of, rules) {
 const USAGE =
   'usage: cast <scan|report|check> [--root <dir>]\n' +
   '       cast rules preview <rule json> [--root <dir>]\n' +
+  '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
   '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
   '       cast render --html <file> [--expand <layer>] [--root <dir>]'
@@ -633,6 +711,7 @@ function main(argv) {
   let expand = null
   let htmlOut = null
   let asMermaid = false
+  let update = false
   // `rules` is the one command with a subcommand and a positional; both are
   // taken before the flag loop, which knows only flags.
   let sub = null
@@ -645,6 +724,7 @@ function main(argv) {
   }
   for (let i = first; i < argv.length; i++) {
     if (argv[i] === '--root' && argv[i + 1]) root = path.resolve(argv[++i])
+    else if (cmd === 'baseline' && argv[i] === '--update') update = true
     else if (cmd === 'edges' && argv[i] === '--from' && argv[i + 1]) from = argv[++i]
     else if (cmd === 'edges' && argv[i] === '--to' && argv[i + 1]) to = argv[++i]
     else if (cmd === 'render' && argv[i] === '--mermaid') asMermaid = true
@@ -676,7 +756,7 @@ function main(argv) {
       process.stdout.write(`no rules: write ${path.join('.cast', 'rules.json')} to check any\n`)
       return 0
     }
-    const answer = check(graph, of, rules)
+    const answer = check(graph, of, rules, readBaseline(root))
     process.stdout.write(answer.text + '\n')
     return answer.code
   }
@@ -696,6 +776,35 @@ function main(argv) {
     process.stdout.write(preview(graph, of, rule, written ? written.allowed : [], notEvaluated) + '\n')
     // A preview reports; it never fails a build. The rule it tried is not one
     // the project has agreed to yet.
+    return 0
+  }
+  if (cmd === 'baseline') {
+    const graph = readGraph(out)
+    const { of, names } = assign(graph, layerRules(root))
+    const rules = readRules(root, names)
+    if (!rules) {
+      process.stdout.write(`no rules: write ${path.join('.cast', 'rules.json')} to check any\n`)
+      return 0
+    }
+    const found = violations(graph, of, rules)
+    if (update) {
+      const answer = ratchet(root, found)
+      process.stdout.write(answer.text + '\n')
+      return answer.code
+    }
+    const current = readBaseline(root)
+    if (!current) {
+      process.stdout.write(`no baseline: run cast baseline --update to write ${BASELINE_FILE}\n`)
+      return 0
+    }
+    const { live } = partition(found, current)
+    // The stale count is the debt already paid: baselined edges the code no
+    // longer violates, which the next --update drops.
+    const still = new Set(found.map(baselineKey))
+    const stale = [...current.keys].filter((k) => !still.has(k)).length
+    process.stdout.write(
+      `${current.count} baselined, ${live.length} not baselined, ${stale} no longer violated\n`
+    )
     return 0
   }
   if (cmd === 'edges') {
@@ -730,5 +839,5 @@ function main(argv) {
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
-  readRules, violations, check, preview,
+  readRules, violations, check, preview, readBaseline, ratchet,
 }

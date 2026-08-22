@@ -84,3 +84,13 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   anything else, so a new positional command must do the same or it dies on its own argument.
 - `bin/cast-check` scans before it checks, so a check command needs no arguments and never reads a
   stale graph. Every `bin/*` file must be executable, or the manifest suite fails on it.
+- `.cast/baseline.json` holds inherited violations and is read at check time like the rules. A
+  held violation drops out of the listing and out of the exit code, and is counted in the summary
+  as `, N baselined` - a suffix, so the clean-project single line stays one line.
+- A baseline entry is keyed by rule, file, imported module and edge kind, never by line: keying on
+  the line churns the file on every edit above the import. `baselineKey` is that key, and both
+  `check` and `cast baseline` must go through it.
+- `cast baseline --update` refuses, with exit 1 and no write, a baseline holding more violations
+  than the one it replaces - that refusal is the whole ratchet. No baseline yet is the bootstrap
+  case and accepts any count. An update writes only the violations there are now, so a fixed one
+  is dropped.

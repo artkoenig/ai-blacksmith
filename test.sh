@@ -1156,4 +1156,68 @@ CAST_PRE4="$(cd "$CASTFIX" && "$CAST_BIN" rules preview 'not json' 2>&1)"; RC=$?
 [ "$RC" = 2 ] || { fail "cast preview" "an unreadable rule exited $RC, not 2: $CAST_PRE4"; S=1; }
 [ "$S" = 0 ] && ok "cast preview"
 
+
+# AC8 a violation listed in .cast/baseline.json leaves the check green; one that
+# is not listed turns it red
+S=0
+CAST_BASE="$CASTFIX/.cast/baseline.json"
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "no-back-edge", "file": "src/c.ts", "to": "src/a.ts", "kind": "value" } ] }
+JSON
+CAST_B="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: checking without reading the baseline, which fails a build on inherited debt
+[ "$RC" = 0 ] || { fail "cast baseline" "a baselined violation exited $RC, not 0: $CAST_B"; S=1; }
+# break: holding a violation silently, which hides the size of the debt
+printf '%s\n' "$CAST_B" | grep -q '1 baselined' \
+  || { fail "cast baseline" "the held violation was not counted in the summary: $CAST_B"; S=1; }
+printf '%s\n' "$CAST_B" | grep -q '^0 violations (0 errors)' \
+  || { fail "cast baseline" "a baselined violation was still counted as live: $CAST_B"; S=1; }
+# two violations, one of them listed: the unlisted one is still red and still named
+# break: reading the baseline as a switch per rule, or as "any entry means green"
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-logic", "severity": "error", "from": "ui", "to": "logic",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+cat > "$CAST_BASE" <<'JSON'
+{ "violations": [ { "rule": "ui-off-logic", "file": "src/a.ts", "to": "src/b.ts", "kind": "value" } ] }
+JSON
+CAST_B2="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast baseline" "an unlisted violation exited $RC, not 1: $CAST_B2"; S=1; }
+printf '%s\n' "$CAST_B2" | grep -q '^    src/a.ts:6 -> src/c.ts (dynamic)$' \
+  || { fail "cast baseline" "the unlisted violation was not named: $CAST_B2"; S=1; }
+printf '%s\n' "$CAST_B2" | grep -q 'src/a.ts:1 -> src/b.ts' \
+  && { fail "cast baseline" "the baselined violation was listed as live: $CAST_B2"; S=1; }
+[ "$S" = 0 ] && ok "cast baseline"
+
+# AC9 cast baseline --update refuses a baseline holding more violations than the
+# one it replaces
+S=0
+# the rules above are violated twice, the baseline on disk holds one
+CAST_R1="$(cd "$CASTFIX" && "$CAST_BIN" baseline --update 2>&1)"; RC=$?
+# break: writing the current violations unconditionally, which lets debt grow
+[ "$RC" = 1 ] || { fail "cast ratchet" "growing the baseline exited $RC, not 1: $CAST_R1"; S=1; }
+printf '%s\n' "$CAST_R1" | grep -q 'refused' \
+  || { fail "cast ratchet" "the refusal did not say it refused: $CAST_R1"; S=1; }
+# break: refusing but writing anyway, which is the same growth one run later
+grep -q 'src/c.ts' "$CAST_BASE" \
+  && { fail "cast ratchet" "the refused baseline was written to disk: $(cat "$CAST_BASE")"; S=1; }
+# a baseline that shrinks is written, and the check is green on it
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-back-edge", "severity": "error", "from": "logic", "to": "ui",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+CAST_R2="$(cd "$CASTFIX" && "$CAST_BIN" baseline --update 2>&1)"; RC=$?
+# break: refusing every update, which makes the baseline unwritable
+[ "$RC" = 0 ] || { fail "cast ratchet" "an equal-sized baseline exited $RC, not 0: $CAST_R2"; S=1; }
+grep -q 'src/c.ts' "$CAST_BASE" \
+  || { fail "cast ratchet" "the accepted baseline was not written: $(cat "$CAST_BASE")"; S=1; }
+CAST_R3="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast ratchet" "the written baseline did not hold its violation: $CAST_R3"; S=1; }
+rm -f "$CAST_BASE"
+[ "$S" = 0 ] && ok "cast ratchet"
+
 exit "$FAILED"
