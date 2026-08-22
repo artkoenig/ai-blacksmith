@@ -35,7 +35,18 @@ and every fact about a language is an adapter file.
   named by `cast report`, never dropped, and never swept into a declared layer.
 - `assign()` keys placement by module id, which is what makes "exactly one layer" true by
   construction; `cast edges --from <l> --to <l>` filters resolved module edges through that map.
-- Exercised by the nine `cast *` suites in `test.sh`, all reading one scanned fixture. Assert
+- `cast render` reads the layers at render time like `report` does, and never rewrites the graph.
+  Layer nodes are `L_<name>` and module nodes `M_<id>`, both sanitised to `[^A-Za-z0-9]->_`, with
+  the real name only in the quoted label - a test matches the label, never the id alone.
+- The default altitude is layers: a module node without `--expand <layer>` is the bug the
+  `cast altitude` suite exists to catch. An edge whose two endpoints collapse to the same node is
+  dropped, so a layer never gets a self loop; `--expand` moves one endpoint to the module.
+- The layer arrow's `|n|` label is the count of module edges behind it, the same number
+  `cast edges --from --to` lists - the two must not drift apart.
+- `--html` is deliberately dependency-free: the page inlines the mermaid source as escaped text
+  and loads nothing over the network, which the `cast html` suite asserts. Adding a CDN script
+  turns it red.
+- Exercised by the thirteen `cast *` suites in `test.sh`, all reading one scanned fixture. Assert
   against the written `.cast/graph.json`, never an in-process call - the file is the contract.
 - `.cast` is in `ALWAYS_IGNORED`, so a project's own adapters are loaded but never scanned as
   modules. Walking also skips every dot directory.

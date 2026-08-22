@@ -7,6 +7,9 @@ cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
+cast render --mermaid [--expand <layer>] [--root <dir>]
+cast render --html <file> [--expand <layer>] [--root <dir>]
+                             the graph at layer altitude, one layer resolved
 ```
 
 `scan` writes one entry per source module with its outgoing edges. Every edge carries the
@@ -42,6 +45,24 @@ edges ui -> logic 3
 
 Only edges that landed on a module have a far layer; an unresolved or external import is named by
 `cast report` instead.
+
+## Rendering
+
+`cast render --mermaid` draws the graph at layer altitude: one node per layer, none per module,
+and each layer arrow labelled with the number of module edges behind it - the same number
+`cast edges` then lists. An edge inside one layer is no arrow at this altitude.
+
+```
+graph LR
+  L_ui["ui (1)"]
+  L_logic["logic (5)"]
+  L_ui -->|3| L_logic
+```
+
+`--expand <layer>` resolves that one layer to its modules, in a subgraph, and leaves every other
+layer a single node; an edge into it lands on the module, not on the layer. `--html <file>` writes
+the same view as one self-contained page - it carries the layer names and fetches nothing. How the
+page looks is not a claim it makes.
 
 ## Adapters
 

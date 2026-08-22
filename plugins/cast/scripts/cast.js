@@ -6,6 +6,9 @@
 //   cast report [--root <dir>]   reads it and says what is wrong
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
+//   cast render --mermaid [--expand <layer>] [--root <dir>]
+//   cast render --html <file> [--expand <layer>] [--root <dir>]
+//                                the graph at layer altitude, one layer resolved
 //
 // The engine holds no language knowledge. Every fact about a language - which
 // files are modules, which text is an import, what kind of edge it makes, how a
@@ -206,6 +209,85 @@ function layerEdges(graph, of, from, to) {
   return out.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
 }
 
+// --- render -----------------------------------------------------------------
+
+// Every view opens at layer altitude: one node per layer, none per module. A
+// module only becomes a node where `--expand` asks for its layer, so the picture
+// stays readable on a project no reader can hold in their head.
+function layerList(graph, of, names) {
+  const all = names.slice()
+  if (graph.modules.some((m) => of.get(m.id) === UNASSIGNED)) all.push(UNASSIGNED)
+  return all
+}
+
+// Mermaid ids may not carry `/`, `.` or a space, so the id is sanitised and the
+// name travels in the quoted label - the label is what a reader matches on.
+function nodeId(prefix, name) {
+  return prefix + name.replace(/[^A-Za-z0-9]/g, '_')
+}
+
+function mermaid(graph, rules, expand) {
+  const { of, names } = assign(graph, rules)
+  const all = layerList(graph, of, names)
+  if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
+  const lines = ['graph LR']
+  for (const l of all) {
+    if (l === expand) {
+      lines.push(`  subgraph ${nodeId('L_', l)}["${l}"]`)
+      for (const m of graph.modules) if (of.get(m.id) === l) lines.push(`    ${nodeId('M_', m.id)}["${m.id}"]`)
+      lines.push('  end')
+    } else {
+      const n = graph.modules.filter((m) => of.get(m.id) === l).length
+      lines.push(`  ${nodeId('L_', l)}["${l} (${n})"]`)
+    }
+  }
+  // The weight is the number of module edges behind the layer edge: without it a
+  // layer arrow hides whether it stands for one import or two hundred.
+  const weight = new Map()
+  const ends = (id) => (of.get(id) === expand ? nodeId('M_', id) : nodeId('L_', of.get(id)))
+  for (const m of graph.modules) {
+    for (const e of m.edges) {
+      if (e.resolution !== 'module') continue
+      const a = ends(m.id)
+      const b = ends(e.to)
+      // An edge inside one collapsed layer has no arrow to draw at this altitude.
+      if (a === b) continue
+      const k = a + '\0' + b
+      weight.set(k, (weight.get(k) || 0) + 1)
+    }
+  }
+  for (const k of [...weight.keys()].sort()) {
+    const [a, b] = k.split('\0')
+    lines.push(`  ${a} -->|${weight.get(k)}| ${b}`)
+  }
+  return lines.join('\n')
+}
+
+// Self-contained: the page carries the diagram source and the layer names as
+// text, and fetches nothing. How it looks is not the claim.
+function html(graph, rules, expand) {
+  const { of, names } = assign(graph, rules)
+  const all = layerList(graph, of, names)
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const rows = all
+    .map((l) => `<li>${esc(l)} (${graph.modules.filter((m) => of.get(m.id) === l).length})</li>`)
+    .join('\n')
+  return [
+    '<!doctype html>',
+    '<html lang="en">',
+    '<head><meta charset="utf-8"><title>cast</title></head>',
+    '<body>',
+    '<h1>cast</h1>',
+    '<h2>layers</h2>',
+    `<ul>\n${rows}\n</ul>`,
+    '<h2>graph</h2>',
+    `<pre>${esc(mermaid(graph, rules, expand))}</pre>`,
+    '</body>',
+    '</html>',
+    '',
+  ].join('\n')
+}
+
 // --- scan -------------------------------------------------------------------
 
 function scan(root) {
@@ -366,17 +448,25 @@ function readGraph(out) {
 
 const USAGE =
   'usage: cast <scan|report> [--root <dir>]\n' +
-  '       cast edges --from <layer> --to <layer> [--root <dir>]'
+  '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
+  '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
+  '       cast render --html <file> [--expand <layer>] [--root <dir>]'
 
 function main(argv) {
   const cmd = argv[0]
   let root = process.cwd()
   let from = null
   let to = null
+  let expand = null
+  let htmlOut = null
+  let asMermaid = false
   for (let i = 1; i < argv.length; i++) {
     if (argv[i] === '--root' && argv[i + 1]) root = path.resolve(argv[++i])
     else if (cmd === 'edges' && argv[i] === '--from' && argv[i + 1]) from = argv[++i]
     else if (cmd === 'edges' && argv[i] === '--to' && argv[i + 1]) to = argv[++i]
+    else if (cmd === 'render' && argv[i] === '--mermaid') asMermaid = true
+    else if (cmd === 'render' && argv[i] === '--html' && argv[i + 1]) htmlOut = argv[++i]
+    else if (cmd === 'render' && argv[i] === '--expand' && argv[i + 1]) expand = argv[++i]
     else die(USAGE)
   }
   const out = path.join(root, '.cast', 'graph.json')
@@ -405,8 +495,22 @@ function main(argv) {
     process.stdout.write(lines.join('\n') + '\n')
     return 0
   }
+  if (cmd === 'render') {
+    if (!asMermaid && !htmlOut) die(USAGE)
+    const graph = readGraph(out)
+    const rules = layerRules(root)
+    if (htmlOut) {
+      const file = path.resolve(root, htmlOut)
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, html(graph, rules, expand))
+      process.stdout.write(`${path.relative(root, file) || file}\n`)
+      return 0
+    }
+    process.stdout.write(mermaid(graph, rules, expand) + '\n')
+    return 0
+  }
   die(USAGE)
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
-module.exports = { scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges }
+module.exports = { scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html }

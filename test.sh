@@ -860,4 +860,82 @@ printf '%s\n' "$CAST_BACK" | grep -q 'src/b.ts' \
   && { fail "cast edges" "an edge outside the layer edge was listed: $CAST_BACK"; S=1; }
 [ "$S" = 0 ] && ok "cast edges"
 
+# AC4 cast render --mermaid opens at layer altitude: one node per layer, no module
+S=0
+CAST_MMD="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)" \
+  || { fail "cast altitude" "cast render --mermaid did not run: $CAST_MMD"; S=1; }
+# break: emitting one node per module, the view every project is unreadable at
+printf '%s\n' "$CAST_MMD" | grep -q 'src/' \
+  && { fail "cast altitude" "a module node was emitted without --expand: $CAST_MMD"; S=1; }
+# one node per layer, the unassigned modules included - a layer left out is a
+# part of the project the picture denies
+# break: rendering only the layers that carry an edge, or dropping unassigned
+for l in 'ui (1)' 'logic (5)' 'unassigned (2)'; do
+  printf '%s\n' "$CAST_MMD" | grep -q "\"$l\"" \
+    || { fail "cast altitude" "no node for the layer $l: $CAST_MMD"; S=1; }
+done
+printf '%s\n' "$CAST_MMD" | grep -q '^graph ' \
+  || { fail "cast altitude" "the output is not a mermaid graph: $CAST_MMD"; S=1; }
+[ "$S" = 0 ] && ok "cast altitude"
+
+# AC5 a layer edge carries the number of module edges behind it
+S=0
+# break: drawing the arrow without its label, or labelling it 1 per layer pair
+# instead of counting the module edges layerEdges lists
+printf '%s\n' "$CAST_MMD" | grep -q '^  L_ui -->|3| L_logic$' \
+  || { fail "cast edge weight" "the ui -> logic edge is not weighted 3: $CAST_MMD"; S=1; }
+printf '%s\n' "$CAST_MMD" | grep -q '^  L_logic -->|1| L_ui$' \
+  || { fail "cast edge weight" "the logic -> ui edge is not weighted 1: $CAST_MMD"; S=1; }
+# an edge inside one collapsed layer is not an arrow at this altitude
+# break: emitting a self loop for the module edges within a layer
+printf '%s\n' "$CAST_MMD" | grep -qE '^  (L_[A-Za-z_]+) -->\|[0-9]+\| \1$' \
+  && { fail "cast edge weight" "a layer was given a self edge: $CAST_MMD"; S=1; }
+[ "$S" = 0 ] && ok "cast edge weight"
+
+# AC6 --expand resolves one layer to its modules and leaves the others alone
+S=0
+CAST_EXP="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --expand logic 2>&1)" \
+  || { fail "cast expand" "cast render --expand did not run: $CAST_EXP"; S=1; }
+# break: ignoring --expand, which leaves the layer a single node
+printf '%s\n' "$CAST_EXP" | grep -q '^  subgraph L_logic\["logic"\]$' \
+  || { fail "cast expand" "the expanded layer is not a subgraph: $CAST_EXP"; S=1; }
+for m in src/b.ts src/c.ts src/t.ts src/rel.ts src/multi.ts; do
+  printf '%s\n' "$CAST_EXP" | grep -q "^    M_[A-Za-z0-9_]*\[\"$m\"\]" \
+    || { fail "cast expand" "the module $m is not inside the expanded layer: $CAST_EXP"; S=1; }
+done
+# every other layer stays one node
+# break: expanding the whole graph instead of the named layer
+printf '%s\n' "$CAST_EXP" | grep -q '"ui (1)"' \
+  || { fail "cast expand" "the ui layer did not stay a single node: $CAST_EXP"; S=1; }
+printf '%s\n' "$CAST_EXP" | grep -q '"src/a.ts"' \
+  && { fail "cast expand" "a module of an unexpanded layer became a node: $CAST_EXP"; S=1; }
+# the edge into the expanded layer lands on the module, not the layer node
+# break: keeping the layer endpoint after expanding, which hides what is imported
+printf '%s\n' "$CAST_EXP" | grep -q '^  L_ui -->|1| M_src_b_ts$' \
+  || { fail "cast expand" "an edge into the expanded layer did not reach a module: $CAST_EXP"; S=1; }
+[ "$S" = 0 ] && ok "cast expand"
+
+# AC7 cast render --html writes one self-contained page carrying the layer names
+S=0
+CAST_HTML_OUT="$(cd "$CASTFIX" && "$CAST_BIN" render --html view.html 2>&1)" \
+  || { fail "cast html" "cast render --html did not run: $CAST_HTML_OUT"; S=1; }
+# break: rendering to stdout and writing no file
+[ -f "$CASTFIX/view.html" ] \
+  || { fail "cast html" "cast render --html wrote no page: $CAST_HTML_OUT"; S=1; }
+CAST_HTML="$(cat "$CASTFIX/view.html" 2>/dev/null)"
+# break: writing the mermaid source under an .html name, with no page around it
+printf '%s\n' "$CAST_HTML" | grep -qi '<html' \
+  || { fail "cast html" "the page is not html: $CAST_HTML"; S=1; }
+# the layer names are the whole claim
+# break: emitting the graph without ever naming a layer
+for l in ui logic unassigned; do
+  printf '%s\n' "$CAST_HTML" | grep -q "$l" \
+    || { fail "cast html" "the page does not carry the layer $l: $CAST_HTML"; S=1; }
+done
+# self-contained: it fetches nothing
+# break: pulling mermaid off a cdn, which makes the page useless offline
+printf '%s\n' "$CAST_HTML" | grep -qE 'src="https?:|href="https?:' \
+  && { fail "cast html" "the page loads an external asset: $CAST_HTML"; S=1; }
+[ "$S" = 0 ] && ok "cast html"
+
 exit "$FAILED"
