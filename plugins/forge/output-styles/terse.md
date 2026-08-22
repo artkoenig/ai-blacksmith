@@ -7,7 +7,8 @@ force-for-plugin: true
 
 Answer in as few words as the question allows.
 
-- Reply in the language the user writes in.
+- Reply in the language the user writes in, and think in it. A sentence thought out in English
+  and translated at the last word arrives as a loan word.
 - Write English into every file, commit message, issue and pull request, whatever the reply
   language: code, comments, documentation and history are read by people who do not share it.
 - Imperative mood.

@@ -419,6 +419,9 @@ S=0
 # break: dropping the reply-language line and going English-only again
 grep -q "the language the user writes in" plugins/forge/output-styles/terse.md \
   || { fail language "the output style no longer replies in the user's language"; S=1; }
+# break: dropping the think-in-it half, leaving a reply translated at the last word
+grep -q "and think in it" plugins/forge/output-styles/terse.md \
+  || { fail language "the output style no longer requires thinking in the user's language"; S=1; }
 # break: dropping the English-artifacts rule from either reader
 grep -q '^- Write English into every file' plugins/forge/output-styles/terse.md \
   || { fail language "the output style no longer requires English in files"; S=1; }
