@@ -671,8 +671,8 @@ function groupIds(data) {
 
 // The page's own script, written here and inlined by `html` through
 // `toString()`. It is never called in node: it exists to be read as source, and
-// it may touch nothing this module holds beyond the four tree functions, which
-// travel beside it.
+// it may touch nothing this module holds beyond the functions `fns` inlines
+// beside it, which travel together.
 function draw() {
   const data = JSON.parse(document.getElementById('cast-data').textContent)
   const svg = document.getElementById('graph')
