@@ -1108,4 +1108,52 @@ CAST_W2="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
 [ "$RC" = 2 ] || { fail "cast check wrapper" "an unreadable rules file exited $RC, not 2: $CAST_W2"; S=1; }
 [ "$S" = 0 ] && ok "cast check wrapper"
 
+# AC10 cast rules preview <rule> reports how many module edges that rule would
+# flag today, counted per edge and not per module
+S=0
+# The rule under preview is written nowhere: rules.json holds an unrelated one,
+# so a preview that only looks up a written rule finds nothing to report.
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
+                   "kinds": ["value", "type", "dynamic"] } ] }
+JSON
+TRY='{ "name": "try-me", "severity": "error", "from": "ui", "to": "logic",
+       "kinds": ["value", "type", "dynamic"] }'
+CAST_PRE="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
+# src/a.ts is the only module in `ui` and carries three edges into `logic`
+# break: counting the modules that violate the rule, or the distinct layer
+# edges, either of which answers 1 where three imports have to move
+printf '%s\n' "$CAST_PRE" | grep -q '^3 edges flagged in 1 module of ' \
+  || { fail "cast preview" "the edges a rule would flag were not counted per edge: $CAST_PRE"; S=1; }
+# break: previewing only a rule already in rules.json, which cannot try one
+printf '%s\n' "$CAST_PRE" | grep -q '^try-me (error) ui -> logic 3$' \
+  || { fail "cast preview" "a rule that is written nowhere was not previewed: $CAST_PRE"; S=1; }
+# break: dropping the sites, which leaves a count nobody can act on
+printf '%s\n' "$CAST_PRE" | grep -q '^    src/a.ts:6 -> src/c.ts (dynamic)$' \
+  || { fail "cast preview" "the flagged edges were not named with their sites: $CAST_PRE"; S=1; }
+# break: routing the preview through the check's exit code, which fails a build
+# on a rule the project has not agreed to
+[ "$RC" = 0 ] || { fail "cast preview" "a preview of a violated error rule exited $RC, not 0: $CAST_PRE"; S=1; }
+# today, not in the abstract: the exceptions the project has already written
+# down are the ones a new rule lands beside
+cat > "$CAST_RULES" <<'JSON'
+{ "forbidden": [],
+  "allowed": [ { "name": "a-may-type-t", "severity": "error", "from": "src/a.ts", "to": "src/t.ts",
+                 "kinds": ["type"] } ] }
+JSON
+CAST_PRE2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"
+# break: previewing the rule alone, which counts an edge an allowed rule drops
+printf '%s\n' "$CAST_PRE2" | grep -q '^2 edges flagged in 1 module of ' \
+  || { fail "cast preview" "an edge the allowed list claims was still flagged: $CAST_PRE2"; S=1; }
+# break: dropping the unknown-key report on the preview path, which reads as a
+# rule the preview evaluated whole
+CAST_PRE3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview \
+  '{ "name": "guess", "from": "ui", "to": "logic", "unless": "friday" }' 2>&1)"
+printf '%s\n' "$CAST_PRE3" | grep -q 'not evaluated: guess: unless' \
+  || { fail "cast preview" "a previewed attribute the evaluator cannot decide was passed silently: $CAST_PRE3"; S=1; }
+# break: reading a malformed rule as a rule that flags nothing
+CAST_PRE4="$(cd "$CASTFIX" && "$CAST_BIN" rules preview 'not json' 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast preview" "an unreadable rule exited $RC, not 2: $CAST_PRE4"; S=1; }
+[ "$S" = 0 ] && ok "cast preview"
+
 exit "$FAILED"

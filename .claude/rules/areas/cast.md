@@ -72,5 +72,15 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   belongs in `readRules` for that reason.
 - An unknown rule attribute is reported as `not evaluated: <rule>: <key>`, never ignored. A new
   attribute means adding it to `RULE_KEYS` in the same change.
+- One rule object is validated in exactly one place, `readRule`; `readRules` maps it over the file
+  and `cast rules preview` calls it on the command-line rule, so a tried rule is read by the rules
+  the written one is read by. `group()` is the shared rule/layer-edge/site rendering.
+- `cast rules preview '<rule json>'` counts the module edges the rule would flag per edge and
+  never per module - one module with three forbidden imports is three imports to move - and
+  applies the project's `allowed` list so the number is what `cast check` would add today. It
+  reports, so it exits 0 even on a rule it flags; only an unreadable rule is `die()`'s exit 2.
+- `rules` is the only command with a subcommand and a positional. `main` takes `argv[1]`/`argv[2]`
+  before the flag loop and starts the loop at 3; the loop knows flags only and `die(USAGE)`s on
+  anything else, so a new positional command must do the same or it dies on its own argument.
 - `bin/cast-check` scans before it checks, so a check command needs no arguments and never reads a
   stale graph. Every `bin/*` file must be executable, or the manifest suite fails on it.

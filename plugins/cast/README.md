@@ -6,6 +6,8 @@ The module graph of a project, and what is wrong with it.
 cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
 cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
+cast rules preview <rule json> [--root <dir>]
+                             one rule, tried before it is written down
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
 cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -79,6 +81,14 @@ on the wrapper contract: exit 0 with a single line, exit 1 with every violation 
 and by layer edge, each site with its file and its line - and exit 2 where the check could not run
 at all. `bin/cast-check` is that check as a check command: it scans, then checks, and takes no
 arguments.
+
+A rule is tried before it is written down: `cast rules preview '<rule json>'` takes one rule
+object - the same shape a `forbidden` entry has, read by the same validation - and reports the
+module edges it would flag today, grouped like the check and counted per edge, never per module.
+One module with three forbidden imports is three imports to move, so the count is 3 and the
+modules are named beside it. The exceptions in the project's `allowed` list are applied, so the
+number is what `cast check` would add. A preview reports and always exits 0; only a rule it cannot
+read at all is exit 2.
 
 ## Rendering
 

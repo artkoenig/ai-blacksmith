@@ -6,6 +6,9 @@
 //   cast report [--root <dir>]   reads it and says what is wrong
 //   cast check [--root <dir>]    the rules of <root>/.cast/rules.json, evaluated
 //                                against the module graph; exit 1 on an error
+//   cast rules preview <rule json> [--root <dir>]
+//                                one rule, tried before it is written down: the
+//                                module edges it would flag today, per edge
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
 //   cast render --mermaid [--expand <layer>] [--root <dir>]
@@ -467,6 +470,32 @@ function side(spec, names) {
   return { re: globToRe(spec) }
 }
 
+// One rule object, validated. Every path into the evaluator goes through this -
+// the rules file and `cast rules preview` alike - so a rule tried on the command
+// line is read by exactly the rules the file is read by, unknown attribute
+// report included.
+function readRule(r, at, names, notEvaluated) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${at} is not a rule object`)
+  if (typeof r.name !== 'string' || !r.name) die(`${at} carries no name`)
+  const from = side(r.from, names)
+  const to = side(r.to, names)
+  if (!from) die(`${at} (${r.name}) carries no from`)
+  if (!to) die(`${at} (${r.name}) carries no to`)
+  const severity = r.severity === undefined ? 'error' : r.severity
+  if (severity !== 'error' && severity !== 'warn')
+    die(`${at} (${r.name}) has severity ${JSON.stringify(r.severity)}, not error or warn`)
+  let kinds = null
+  if (r.kinds !== undefined) {
+    if (!Array.isArray(r.kinds) || r.kinds.some((k) => typeof k !== 'string'))
+      die(`${at} (${r.name}) has kinds that are not a list of edge kinds`)
+    kinds = r.kinds
+  }
+  // An attribute this evaluator cannot decide is named, never quietly passed:
+  // a green check must not stand for a rule nobody evaluated.
+  for (const k of Object.keys(r)) if (!RULE_KEYS.includes(k)) notEvaluated.push(`${r.name}: ${k}`)
+  return { name: r.name, severity, kinds, from, to, fromSpec: r.from, toSpec: r.to }
+}
+
 function readRules(root, names) {
   const file = path.join(root, '.cast', 'rules.json')
   let raw
@@ -488,28 +517,7 @@ function readRules(root, names) {
     const list = parsed[key]
     if (list === undefined) return []
     if (!Array.isArray(list)) die(`${file}: ${key} is not an array of rules`)
-    return list.map((r, i) => {
-      const at = `${file}: ${key}[${i}]`
-      if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${at} is not a rule object`)
-      if (typeof r.name !== 'string' || !r.name) die(`${at} carries no name`)
-      const from = side(r.from, names)
-      const to = side(r.to, names)
-      if (!from) die(`${at} (${r.name}) carries no from`)
-      if (!to) die(`${at} (${r.name}) carries no to`)
-      const severity = r.severity === undefined ? 'error' : r.severity
-      if (severity !== 'error' && severity !== 'warn')
-        die(`${at} (${r.name}) has severity ${JSON.stringify(r.severity)}, not error or warn`)
-      let kinds = null
-      if (r.kinds !== undefined) {
-        if (!Array.isArray(r.kinds) || r.kinds.some((k) => typeof k !== 'string'))
-          die(`${at} (${r.name}) has kinds that are not a list of edge kinds`)
-        kinds = r.kinds
-      }
-      // An attribute this evaluator cannot decide is named, never quietly passed:
-      // a green check must not stand for a rule nobody evaluated.
-      for (const k of Object.keys(r)) if (!RULE_KEYS.includes(k)) notEvaluated.push(`${r.name}: ${k}`)
-      return { name: r.name, severity, kinds, from, to, fromSpec: r.from, toSpec: r.to }
-    })
+    return list.map((r, i) => readRule(r, `${file}: ${key}[${i}]`, names, notEvaluated))
   }
   const forbidden = read('forbidden')
   const allowed = read('allowed')
@@ -552,14 +560,17 @@ function violations(graph, of, rules) {
   return out.sort((a, b) => a.ri - b.ri || (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
 }
 
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
+
+function moduleEdges(graph) {
+  return graph.modules.reduce((n, m) => n + m.edges.filter((e) => e.resolution === 'module').length, 0)
+}
+
 // Grouped by rule and then by layer edge, because a violation is fixed one rule
 // at a time and read one edge at a time; the site under it is what gets opened.
-function check(graph, of, rules) {
-  const found = violations(graph, of, rules)
-  const edges = graph.modules.reduce((n, m) => n + m.edges.filter((e) => e.resolution === 'module').length, 0)
-  const errors = found.filter((v) => v.severity === 'error').length
+function group(found, forbidden) {
   const lines = []
-  rules.forbidden.forEach((r, ri) => {
+  forbidden.forEach((r, ri) => {
     const mine = found.filter((v) => v.ri === ri)
     if (!mine.length) return
     lines.push(`${r.name} (${r.severity}) ${r.fromSpec} -> ${r.toSpec} ${mine.length}`)
@@ -569,8 +580,33 @@ function check(graph, of, rules) {
       for (const v of sites) lines.push(`    ${v.file}:${v.line} -> ${v.to} (${v.kind})`)
     }
   })
+  return lines
+}
+
+// A rule is tried before it is written down: one rule object, evaluated against
+// the scanned graph with the exceptions the project already writes down, so the
+// number is what `cast check` would add today and not a number from a project
+// with no `allowed` list. The count is edges, never modules - one module with
+// three forbidden imports is three imports to move, and a per-module count hides
+// two of them. The modules are named beside it, not instead of it.
+function preview(graph, of, rule, allowed, notEvaluated) {
+  const found = violations(graph, of, { forbidden: [rule], allowed })
+  const mods = new Set(found.map((v) => v.file)).size
+  const lines = group(found, [rule])
+  for (const n of notEvaluated) lines.push(`not evaluated: ${n}`)
+  lines.push(
+    `${plural(found.length, 'edge')} flagged in ${plural(mods, 'module')} ` +
+      `of ${plural(moduleEdges(graph), 'edge')}`
+  )
+  return lines.join('\n')
+}
+
+function check(graph, of, rules) {
+  const found = violations(graph, of, rules)
+  const edges = moduleEdges(graph)
+  const errors = found.filter((v) => v.severity === 'error').length
+  const lines = group(found, rules.forbidden)
   for (const n of rules.notEvaluated) lines.push(`not evaluated: ${n}`)
-  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
   // The last line is the whole answer where nothing is wrong: one line, the
   // wrapper contract, and it says what was read so a green check is not a silence.
   lines.push(
@@ -584,6 +620,7 @@ function check(graph, of, rules) {
 
 const USAGE =
   'usage: cast <scan|report|check> [--root <dir>]\n' +
+  '       cast rules preview <rule json> [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
   '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
   '       cast render --html <file> [--expand <layer>] [--root <dir>]'
@@ -596,7 +633,17 @@ function main(argv) {
   let expand = null
   let htmlOut = null
   let asMermaid = false
-  for (let i = 1; i < argv.length; i++) {
+  // `rules` is the one command with a subcommand and a positional; both are
+  // taken before the flag loop, which knows only flags.
+  let sub = null
+  let ruleArg = null
+  let first = 1
+  if (cmd === 'rules') {
+    sub = argv[1]
+    ruleArg = argv[2]
+    first = 3
+  }
+  for (let i = first; i < argv.length; i++) {
     if (argv[i] === '--root' && argv[i + 1]) root = path.resolve(argv[++i])
     else if (cmd === 'edges' && argv[i] === '--from' && argv[i + 1]) from = argv[++i]
     else if (cmd === 'edges' && argv[i] === '--to' && argv[i + 1]) to = argv[++i]
@@ -633,6 +680,24 @@ function main(argv) {
     process.stdout.write(answer.text + '\n')
     return answer.code
   }
+  if (cmd === 'rules') {
+    if (sub !== 'preview' || !ruleArg) die(USAGE)
+    let parsed
+    try {
+      parsed = JSON.parse(ruleArg)
+    } catch (e) {
+      die(`the rule is not valid JSON: ${e.message}`)
+    }
+    const graph = readGraph(out)
+    const { of, names } = assign(graph, layerRules(root))
+    const notEvaluated = []
+    const rule = readRule(parsed, 'the rule', names, notEvaluated)
+    const written = readRules(root, names)
+    process.stdout.write(preview(graph, of, rule, written ? written.allowed : [], notEvaluated) + '\n')
+    // A preview reports; it never fails a build. The rule it tried is not one
+    // the project has agreed to yet.
+    return 0
+  }
   if (cmd === 'edges') {
     if (!from || !to) die(USAGE)
     const graph = readGraph(out)
@@ -665,5 +730,5 @@ function main(argv) {
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
-  readRules, violations, check,
+  readRules, violations, check, preview,
 }
