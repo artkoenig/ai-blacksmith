@@ -1576,7 +1576,7 @@ CAST_DATA="$(page_data)"
 pagejs() { CAST_JS="$PWD/plugins/cast/scripts/cast.js" DATA="$CAST_DATA" PAGE="$CAST_PAGE" node -e '
   const bad=(s)=>{console.log(s);process.exit(1)}
   const cast=require(process.env.CAST_JS)
-  const {treeId,treeOf,viewTree,layoutTree}=cast
+  const {treeId,treeOf,viewTree,layoutTree,marker,toggleOpen,groupIds}=cast
   const fs=require("fs")
   const page=fs.readFileSync(process.env.PAGE,"utf8")
   let data
@@ -1941,6 +1941,205 @@ O="$(MODEDGES="$(li_of 'module edges')" pagejs '
   || { fail "cast html agrees" "the fixture cannot tell a live violation from a held one"; S=1; }
 [ "$S" = 0 ] && ok "cast html agrees"
 rm -f "$CAST_BASE"
+
+# --- cast: the controls that close a group -----------------------------------
+# The same page, read for what a reader can see and press. Still node alone: the
+# markup, the css, the layout numbers and the pure functions the page toggles
+# with are what these assert - never a browser and never a device.
+
+# AC1 a node that has children carries a visible open/closed marker in its own
+# header, and a node without children carries none
+S=0
+# break: drawing one glyph for both states, or drawing a marker on a file, which
+# tells the reader a leaf is a group and leaves a group looking like a leaf
+O="$(pagejs '
+  const v=view("logic","logic/src")
+  const openg=at(v,"logic"), file=at(v,"logic/src/b.ts"), shut=at(view(),"logic")
+  if (openg.hasChildren!==true) bad("an opened group is not marked as having children")
+  if (at(view(),"logic").hasChildren!==true) bad("a closed group forgets it has children")
+  if (file.hasChildren!==false) bad("the file node b.ts claims children")
+  if (!marker(shut)) bad("a closed group carries no marker")
+  if (!marker(openg)) bad("an open group carries no marker")
+  if (marker(shut)===marker(openg)) bad("open and closed carry the same marker "+marker(shut))
+  if (marker(file)!=="") bad("a node without children carries the marker "+marker(file))
+')" || { fail "cast group marker" "$O"; S=1; }
+# the marker is drawn, in the header, and only where there is one
+# break: computing the marker and never putting it on the page
+grep -qF 'const m = marker(n)' "$CAST_PAGE" \
+  || { fail "cast group marker" "the page draws no marker for a node"; S=1; }
+grep -qF "if (m) head.appendChild(el('text'" "$CAST_PAGE" \
+  || { fail "cast group marker" "the marker is not drawn into the node's header"; S=1; }
+# break: hiding the marker behind :hover, which no phone can produce
+grep -qF ':hover' "$CAST_PAGE" \
+  && { fail "cast group marker" "the page puts something behind :hover, which a touch screen cannot reach"; S=1; }
+[ "$S" = 0 ] && ok "cast group marker"
+
+# AC2 opening and closing happens on the header - its marker and its label - and
+# not on the rest of the box
+S=0
+# break: sizing the header to the whole box, so a press anywhere inside an open
+# group collapses it
+O="$(pagejs '
+  const l=layoutTree(view("logic","logic/src"))
+  const M=l.metrics
+  const g=at(l,"logic")
+  if (g.hx!==g.x||g.hy!==g.y) bad("the header does not sit at the top left of the node")
+  if (g.hw!==g.w) bad("the header is "+g.hw+" wide, the node is "+g.w)
+  if (g.hh!==M.HEAD) bad("the header of an open node is "+g.hh+" high, not the header height "+M.HEAD)
+  if (!(g.h>g.hh)) bad("the open node is all header: there is no area a press does nothing in")
+  for (const c of g.children)
+    if (c.y<g.hy+g.hh) bad("the child "+c.key+" sits inside its parent header")
+  // a closed node has no ground of its own: the box is the header
+  const ui=at(l,"ui")
+  if (ui.hh!==ui.h) bad("a closed node is "+ui.h+" high and its header "+ui.hh)
+')" || { fail "cast group control" "$O"; S=1; }
+# break: leaving the click on the node group, which is the whole box again
+grep -qF "head.addEventListener('click'" "$CAST_PAGE" \
+  || { fail "cast group control" "the header does not toggle the node"; S=1; }
+grep -qF "g.addEventListener('click'" "$CAST_PAGE" \
+  && { fail "cast group control" "the whole node box still toggles"; S=1; }
+# break: toggling a node that has nothing to open, which is a press with no answer
+grep -qF 'if (n.hasChildren) {' "$CAST_PAGE" \
+  || { fail "cast group control" "a node without children is given the toggle too"; S=1; }
+# break: dropping stopPropagation, so one press closes the node and its ancestor
+grep -qF 'ev.stopPropagation()' "$CAST_PAGE" \
+  || { fail "cast group control" "a press on an inner header reaches the ancestor too"; S=1; }
+[ "$S" = 0 ] && ok "cast group control"
+
+# AC3 one control closes every group at once, one opens every group that has
+# children
+S=0
+# break: offering only the layers, which leaves a reader who opened three levels
+# with two of them still open
+O="$(pagejs '
+  const ids=groupIds(data)
+  for (const k of ["ui","logic","unassigned","ui/src","logic/src","unassigned/pkg"])
+    if (!ids.includes(treeId(k))) bad("open all does not open the group "+k)
+  for (const k of ["logic/src/b.ts","ui/src/a.ts"])
+    if (ids.includes(treeId(k))) bad("open all offers to open "+k+", which has nothing inside it")
+  const all=viewTree(data,ids)
+  for (const id of ids) {
+    const n=all.flat.find(x=>x.id===id)
+    if (!n) bad("a group open all names is not drawn")
+    if (!n.open) bad("the group "+n.key+" is not open after open all")
+  }
+  if (all.flat.filter(n=>!n.open).length===0) bad("nothing is left closed, so the fixture proves nothing")
+  // close all is the empty state, and it is reachable from any other
+  const shut=viewTree(data,[])
+  if (shut.flat.length!==3) bad("closing every group leaves "+shut.flat.length+" nodes, not the 3 layers")
+  if (shut.flat.some(n=>n.open)) bad("a group is still open after close all")
+')" || { fail "cast collapse all" "$O"; S=1; }
+# the controls are on the page and wired to that state
+# break: writing the two buttons and leaving them inert
+grep -q 'id="collapse-all"' "$CAST_PAGE" \
+  || { fail "cast collapse all" "the page carries no control that closes every group"; S=1; }
+grep -q 'id="expand-all"' "$CAST_PAGE" \
+  || { fail "cast collapse all" "the page carries no control that opens every group"; S=1; }
+grep -qF "getElementById('collapse-all').addEventListener('click', () => setAll([]))" "$CAST_PAGE" \
+  || { fail "cast collapse all" "the close-all control is not wired to the empty state"; S=1; }
+grep -qF "getElementById('expand-all').addEventListener('click', () => setAll(groupIds(data)))" "$CAST_PAGE" \
+  || { fail "cast collapse all" "the open-all control is not wired to every group"; S=1; }
+[ "$S" = 0 ] && ok "cast collapse all"
+
+# AC4 closing a group closes it alone: its descendants keep the state they had
+S=0
+# break: clearing the ids below the one closed - the page looks the same until
+# the group is opened again, and then everything inside it is shut
+O="$(pagejs '
+  const L=treeId("logic"), SRC=treeId("logic/src"), UI=treeId("ui")
+  const open={}
+  for (const id of [UI,L,SRC]) toggleOpen(open,id)
+  toggleOpen(open,L)
+  if (open[L]) bad("closing the group left it open")
+  if (open[SRC]!==true) bad("closing a group forgot that the folder inside it was open")
+  if (open[UI]!==true) bad("closing a group closed a sibling")
+  const half=viewTree(data,Object.keys(open))
+  if (at(half,"logic/src")) bad("the closed group still draws what was inside it")
+  toggleOpen(open,L)
+  const back=viewTree(data,Object.keys(open))
+  if (!at(back,"logic").open) bad("opening the group again left it closed")
+  if (!at(back,"logic/src").open) bad("reopening the group did not restore the folder that was open")
+  if (!at(back,"logic/src/b.ts")) bad("reopening the group shows a collapsed subtree, not what was open before")
+')" || { fail "cast collapse state" "$O"; S=1; }
+# break: giving the page its own toggle beside the tested one, which drifts
+grep -qF 'toggleOpen(open, id)' "$CAST_PAGE" \
+  || { fail "cast collapse state" "the page does not toggle through toggleOpen"; S=1; }
+[ "$S" = 0 ] && ok "cast collapse state"
+
+# AC5 the page declares a viewport, so a phone lays it out at device width
+S=0
+# break: leaving the meta out, which lays the page out at a desktop width and
+# scales it down until every target and every label is a third of its size
+grep -qF '<meta name="viewport" content="width=device-width, initial-scale=1">' "$CAST_PAGE" \
+  || { fail "cast viewport" "the page declares no viewport at device width"; S=1; }
+# break: locking the scale, which is the same page with pinch zoom taken away
+grep -qE 'user-scalable=no|maximum-scale=1' "$CAST_PAGE" \
+  && { fail "cast viewport" "the page forbids the reader to zoom"; S=1; }
+[ "$S" = 0 ] && ok "cast viewport"
+
+# AC6 every control offers at least 44 css pixels in both directions, and a
+# single press acts once
+S=0
+# break: keeping the desktop metrics - a 24 pixel header and a 22 pixel lane,
+# which is a target a finger misses
+O="$(pagejs '
+  const TAP=44
+  const l=layoutTree(view("logic","logic/src","ui","ui/src"))
+  const M=l.metrics
+  if (M.TAP!==TAP) bad("the layout does not carry the 44 pixel target size: TAP is "+M.TAP)
+  for (const k of ["H","HEAD","LANE","CHAN"])
+    if (M[k]<TAP) bad("the metric "+k+" is "+M[k]+", below the "+TAP+" pixel target")
+  for (const n of l.flat) {
+    if (n.hh<TAP) bad("the header of "+n.key+" is "+n.hh+" high, below "+TAP)
+    if (n.hw<TAP) bad("the header of "+n.key+" is "+n.hw+" wide, below "+TAP)
+  }
+  for (const e of l.edges) {
+    if (e.hw<TAP||e.hh<TAP) bad("an arrow label offers "+e.hw+"x"+e.hh+", below "+TAP)
+    if (e.hx+e.hw>l.width) bad("an arrow label target runs off the drawing")
+  }
+  // two arrows never share one press
+  const lanes=l.edges.map(e=>e.mx).sort((a,b)=>a-b)
+  for (let i=1;i<lanes.length;i++)
+    if (lanes[i]-lanes[i-1]<TAP) bad("two arrow lanes are "+(lanes[i]-lanes[i-1])+" apart, closer than "+TAP)
+')" || { fail "cast touch targets" "$O"; S=1; }
+# break: leaving the html controls at the browser default, ~20 pixels high
+grep -qF 'button{font:inherit;min-height:44px;min-width:44px' "$CAST_PAGE" \
+  || { fail "cast touch targets" "the page's own controls carry no 44 pixel minimum"; S=1; }
+# break: dropping touch-action, so a phone holds every press back to see whether
+# a second one is coming and zooms instead
+grep -qF 'touch-action:manipulation' "$CAST_PAGE" \
+  || { fail "cast touch targets" "the page never declares touch-action, so a press can become a zoom"; S=1; }
+# break: drawing the target and never letting it take the press
+grep -qF '.hit,.node .hit{fill:transparent;pointer-events:all}' "$CAST_PAGE" \
+  || { fail "cast touch targets" "the invisible targets take no press"; S=1; }
+grep -qF "class: 'edge grab'" "$CAST_PAGE" \
+  || { fail "cast touch targets" "an arrow is only as wide as the line drawn for it"; S=1; }
+[ "$S" = 0 ] && ok "cast touch targets"
+
+# AC7 on a narrow screen the graph scrolls inside its own container instead of
+# shrinking, and the body never scrolls sideways
+S=0
+# break: svg{max-width:100%;height:auto}, which fits a deep tree to a phone by
+# shrinking it until nothing on it can be read or pressed
+grep -qE 'svg\{[^}]*max-width:100%' "$CAST_PAGE" \
+  && { fail "cast narrow screen" "the graph is still scaled down to fit the screen"; S=1; }
+grep -qF '<div id="graph-scroll">' "$CAST_PAGE" \
+  || { fail "cast narrow screen" "the graph has no container of its own to scroll in"; S=1; }
+grep -qF '#graph-scroll{overflow-x:auto;max-width:100%' "$CAST_PAGE" \
+  || { fail "cast narrow screen" "the graph container does not scroll sideways within the screen"; S=1; }
+# break: leaving the svg without a size, so the container has nothing to scroll
+grep -qF "svg.setAttribute('width', l.width)" "$CAST_PAGE" \
+  || { fail "cast narrow screen" "the drawing does not keep its own width"; S=1; }
+grep -qF "svg.setAttribute('height', l.height)" "$CAST_PAGE" \
+  || { fail "cast narrow screen" "the drawing does not keep its own height"; S=1; }
+# break: letting the page itself scroll sideways, which moves the text away from
+# the reader every time they scroll the graph
+grep -qF 'html,body{max-width:100%;overflow-x:hidden}' "$CAST_PAGE" \
+  || { fail "cast narrow screen" "the page body can scroll sideways"; S=1; }
+# the other wide block on the page scrolls in place too
+grep -qF '#mermaid{overflow-x:auto}' "$CAST_PAGE" \
+  || { fail "cast narrow screen" "the mermaid block widens the page instead of scrolling"; S=1; }
+[ "$S" = 0 ] && ok "cast narrow screen"
 
 
 # --- cast skills ------------------------------------------------------------

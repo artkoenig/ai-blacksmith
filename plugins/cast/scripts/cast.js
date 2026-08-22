@@ -457,10 +457,10 @@ function layout(view) {
 // the layer, then every folder level of the module id, then the file. A node at
 // any depth opens in place, and every arrow runs between two closed ones.
 //
-// The same rule as `viewAt` holds for all four functions below: `html` inlines
-// them by `toString()`, so they close over nothing this module holds. A call
-// between them is fine - they travel together - but a reference to anything else
-// here would be undefined in the page.
+// The same rule as `viewAt` holds for every function below: `html` inlines them
+// by `toString()`, so they close over nothing this module holds. A call between
+// them is fine - they travel together - but a reference to anything else here
+// would be undefined in the page.
 
 // The id is the containment key with every character an html id or a `querySelector`
 // would trip over escaped to `_<hex>_`, reversibly: mapping them all to `_` would
@@ -516,9 +516,12 @@ function viewTree(data, open) {
   const isOpen = {}
   for (const id of open || []) isOpen[id] = true
   const root = treeOf(data)
+  // `hasChildren` outlives the closing: a closed node drops its children from the
+  // view, and without the flag nothing left in the page could tell a group from a
+  // file, which is the marker's whole question.
   const show = (n) => {
     const o = n.children.length > 0 && isOpen[n.id] === true
-    return { ...n, open: o, children: o ? n.children.map(show) : [] }
+    return { ...n, hasChildren: n.children.length > 0, open: o, children: o ? n.children.map(show) : [] }
   }
   const nodes = root.children.map(show)
   // Where a module is drawn: the deepest visible node holding it, which is by
@@ -564,8 +567,12 @@ function viewTree(data, open) {
 // vertical stack at every level: a closed node is one box of a fixed height, an
 // open one is a header and its children stacked inside it, so a box is only ever
 // as tall as what it shows. The arrows run in lanes down the right of the stack.
+// Every number a finger has to hit is `TAP`: the header of a node, the height of
+// a closed box, the lane an arrow runs down and the box around its label. 44 css
+// pixels is the smallest target a press lands on reliably, so it is the floor for
+// `H`, `HEAD`, `LANE` and `CHAN` rather than a value the page adds on top.
 function layoutTree(view) {
-  const M = { W: 220, H: 30, HEAD: 24, GAP: 8, PAD: 10, CHAN: 34, LANE: 22 }
+  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CHAN: 44, LANE: 44, TAP: 44 }
   const clone = (n) => ({ ...n, children: n.children.map(clone) })
   const size = (n) => {
     if (!n.open) {
@@ -578,9 +585,16 @@ function layoutTree(view) {
     n.h = M.HEAD + M.PAD + n.children.reduce((s, c) => s + c.h, 0) + M.GAP * (n.children.length - 1)
     return n
   }
+  // The header is a band of its own across the top of the box: the control that
+  // opens and closes the node. The children start below it, so the ground of an
+  // open box belongs to no control and a press there does nothing.
   const place = (n, x, y) => {
     n.x = x
     n.y = y
+    n.hx = x
+    n.hy = y
+    n.hw = n.w
+    n.hh = Math.min(M.HEAD, n.h)
     let cy = y + M.HEAD
     for (const c of n.children) {
       place(c, x + M.PAD, cy)
@@ -608,7 +622,10 @@ function layoutTree(view) {
     const y1 = a.y + a.h / 2
     const y2 = b.y + b.h / 2
     const mx = right + M.CHAN + i * M.LANE
-    return { ...e, x1: a.x + a.w, y1, x2: b.x + b.w, y2, mx, my: (y1 + y2) / 2 }
+    const my = (y1 + y2) / 2
+    // The label's own target, a `TAP` box around where it is drawn. The lane is
+    // `TAP` wide too, so two arrows never share one press.
+    return { ...e, x1: a.x + a.w, y1, x2: b.x + b.w, y2, mx, my, hx: mx + 5 - M.TAP / 2, hy: my - M.TAP / 2, hw: M.TAP, hh: M.TAP }
   })
   return {
     nodes: roots,
@@ -617,9 +634,39 @@ function layoutTree(view) {
     open: view.open,
     counts: view.counts,
     metrics: M,
-    width: Math.max(right, ...edges.map((e) => e.mx)) + M.PAD * 2,
+    width: Math.max(right, ...edges.map((e) => e.hx + e.hw)) + M.PAD * 2,
     height: Math.max(...flat.map((n) => n.y + n.h), 0) + M.PAD,
   }
+}
+
+// What a node's header says about itself: closed, open, or nothing at all where
+// there is nothing to open. A node without children carries no marker, so the
+// marker is the answer to "is this a group", not decoration on every box.
+function marker(n) {
+  if (!n.hasChildren) return ''
+  return n.open ? '▾' : '▸'
+}
+
+// The open set, changed by one node. Closing removes that id and nothing else:
+// what was open below it stays in the set, so opening it again shows what the
+// reader had opened before rather than a collapsed subtree.
+function toggleOpen(open, id) {
+  if (open[id] === true) delete open[id]
+  else open[id] = true
+  return open
+}
+
+// Every node that can be opened, deepest included - what "open all groups" sets
+// the state to, and the complement of the empty set "close all groups" leaves.
+function groupIds(data) {
+  const out = []
+  const walk = (n) => {
+    if (n.children.length === 0) return
+    out.push(n.id)
+    n.children.forEach(walk)
+  }
+  treeOf(data).children.forEach(walk)
+  return out
 }
 
 // The page's own script, written here and inlined by `html` through
@@ -653,36 +700,73 @@ function draw() {
     panel.appendChild(ul)
   }
   const toggle = (id) => {
-    if (open[id] === true) delete open[id]
-    else open[id] = true
+    toggleOpen(open, id)
     panel.textContent = ''
     render()
   }
+  // The two controls over the whole page: close every group, or open every one
+  // that has children. Both write the same state a header writes.
+  const setAll = (ids) => {
+    for (const k of Object.keys(open)) delete open[k]
+    for (const id of ids) open[id] = true
+    panel.textContent = ''
+    render()
+  }
+  document.getElementById('collapse-all').addEventListener('click', () => setAll([]))
+  document.getElementById('expand-all').addEventListener('click', () => setAll(groupIds(data)))
   function render() {
     const l = layoutTree(viewTree(data, Object.keys(open)))
+    const M = l.metrics
     svg.textContent = ''
     svg.setAttribute('viewBox', '0 0 ' + l.width + ' ' + l.height)
+    // The drawing keeps its own size in css pixels and the container around it
+    // scrolls. Fitting it to the screen instead would shrink a deep tree until
+    // no label and no target survives it.
+    svg.setAttribute('width', l.width)
+    svg.setAttribute('height', l.height)
     // A box is drawn before the children it holds, so an open node keeps its own
     // outline and they sit inside it. The click stops there: an inner box closes
     // itself, not the ancestor whose rectangle is behind it.
     const box = (n) => {
       const g = el('g', { class: 'node ' + n.kind + (n.open ? ' open' : ' closed'), id: n.id })
       g.appendChild(el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 6 }))
-      g.appendChild(el('text', { x: n.x + 8, y: n.y + 17 }, n.label))
-      g.addEventListener('click', (ev) => { ev.stopPropagation(); toggle(n.id) })
+      // The header carries the marker and the label, and it alone toggles: the
+      // rest of an open box is where the children sit, and a press there is a
+      // press on nothing.
+      const head = el('g', { class: 'head' })
+      head.appendChild(el('rect', { x: n.hx, y: n.hy, width: n.hw, height: n.hh, class: 'hit' }))
+      const m = marker(n)
+      const ty = n.hy + n.hh / 2 + 5
+      if (m) head.appendChild(el('text', { x: n.hx + 10, y: ty, class: 'marker' }, m))
+      head.appendChild(el('text', { x: n.hx + (m ? 28 : 10), y: ty }, n.label))
+      if (n.hasChildren) {
+        head.setAttribute('role', 'button')
+        head.setAttribute('tabindex', '0')
+        head.setAttribute('aria-expanded', n.open === true ? 'true' : 'false')
+        head.addEventListener('click', (ev) => { ev.stopPropagation(); toggle(n.id) })
+      }
+      g.appendChild(head)
       svg.appendChild(g)
       for (const c of n.children) box(c)
     }
     for (const n of l.nodes) box(n)
     for (const e of l.edges) {
+      const d = 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2
       const line = el('path', {
-        d: 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2,
-        fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
+        d, fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
         'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',
         class: 'edge',
       })
       line.addEventListener('click', () => sites(e))
       svg.appendChild(line)
+      // A line a pen can hit is thinner than a finger: the arrow's own target is
+      // an invisible stroke `TAP` wide over the same curve.
+      const grab = el('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': M.TAP, class: 'edge grab' })
+      grab.addEventListener('click', () => sites(e))
+      svg.appendChild(grab)
+      const hit = el('rect', { x: e.hx, y: e.hy, width: e.hw, height: e.hh, class: 'hit' })
+      hit.addEventListener('click', () => sites(e))
+      svg.appendChild(hit)
       const t = el('text', { x: e.mx + 5, y: e.my, fill: e.color, class: 'weight' }, e.label)
       t.addEventListener('click', () => sites(e))
       svg.appendChild(t)
@@ -716,18 +800,33 @@ function mermaid(graph, rules, expand, checkRules, baseline) {
   return lines.join('\n')
 }
 
+// `touch-action:manipulation` is what makes one press act once: without it a
+// phone waits for a second tap before it believes the first, and the wait is a
+// zoom. Nothing here reveals a control on `:hover` - there is no hover on a
+// phone, so a control that needs one does not exist there.
 const PAGE_CSS = [
-  'body{font:14px system-ui,sans-serif;margin:1.5rem;color:#222}',
-  'svg{max-width:100%;height:auto;border:1px solid #ddd;background:#fff}',
+  '*{box-sizing:border-box}',
+  'html,body{max-width:100%;overflow-x:hidden}',
+  'body{font:16px system-ui,sans-serif;margin:1rem;color:#222;touch-action:manipulation}',
+  '#controls{display:flex;flex-wrap:wrap;gap:8px}',
+  'button{font:inherit;min-height:44px;min-width:44px;padding:0 12px;cursor:pointer;touch-action:manipulation}',
+  // The graph scrolls inside its own box. It is never scaled to fit: a tree
+  // deep enough to need this is a tree too small to read once it has been.
+  '#graph-scroll{overflow-x:auto;max-width:100%;border:1px solid #ddd;background:#fff}',
+  '#graph{display:block;touch-action:manipulation}',
   '.node rect{fill:#eef3fb;stroke:#4a6fa5}',
   '.node.folder rect{fill:#f2f5ee;stroke:#6f8a5a}',
   '.node.file rect{fill:#f6f6f2;stroke:#8a8a70}',
   '.node.open>rect{fill:none;stroke-dasharray:4 3}',
-  '.node text{font-size:13px;pointer-events:none}',
-  '.node{cursor:pointer}',
+  '.node text{font-size:15px;pointer-events:none}',
+  '.node .head{cursor:pointer}',
+  // The target itself: painted with nothing, pressed like anything else.
+  '.hit,.node .hit{fill:transparent;pointer-events:all}',
   '.edge{cursor:pointer}',
-  '.weight{font-size:12px;text-anchor:middle;cursor:pointer}',
-  '#sites li{font-family:ui-monospace,monospace}',
+  '.edge.grab{pointer-events:stroke}',
+  '.weight{font-size:13px;text-anchor:middle;cursor:pointer}',
+  '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
+  '#mermaid{overflow-x:auto}',
 ].join('')
 
 // Self-contained on purpose: the data, the script and the style are in the file
@@ -755,17 +854,21 @@ function html(graph, rules, expand, checkRules, baseline) {
   // `--expand <layer>` opens that layer's node, the one state the command can
   // name; every deeper node is opened by clicking it.
   const embedded = JSON.stringify({ ...data, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
-  const script = [treeId, treeOf, viewTree, layoutTree, draw].map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
+  const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, draw]
+  const script = fns.map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
   return [
     '<!doctype html>',
     '<html lang="en">',
-    '<head><meta charset="utf-8"><title>cast</title>',
+    // Without this a phone lays the page out at a desktop width and scales the
+    // result down, which is how a 44 pixel target becomes a 15 pixel one.
+    '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>cast</title>',
     `<style>${PAGE_CSS}</style>`,
     '</head>',
     '<body>',
     '<h1>cast</h1>',
-    '<p>Click a node to open it in place, the same node again to close it, an arrow to list the imports behind it.</p>',
-    '<svg id="graph" role="img" aria-label="the module graph"></svg>',
+    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it.</p>',
+    '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
+    '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',
     '<h2>counts</h2>',
     `<ul id="counts">\n${counts}\n</ul>`,
@@ -1657,7 +1760,7 @@ function main(argv) {
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
-  viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree,
+  viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
   readRules, violations, check, preview, readBaseline, ratchet,
   readPlan, simulateGraph, simulate, layerMetrics,
 }
