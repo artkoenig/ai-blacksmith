@@ -602,4 +602,186 @@ const eq=(a,b,m)=>{if(JSON.stringify(a)!==JSON.stringify(b)){console.log(m,JSON.
 JS
 [ "$FAILED" = 0 ] && ok "workflow control flow"
 
+# --- cast: the module graph -------------------------------------------------
+# One fixture project, scanned once, six suites reading the one graph. It carries
+# a relative import, an alias import of the same module, a require, an export
+# from, a dynamic import, a statement type import, an external package, a broken
+# relative import, a broken alias, an a->b->c->a cycle, and two modules of a
+# language the engine has never heard of, described by an adapter the fixture
+# itself ships.
+CASTFIX="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX"' EXIT
+mkdir -p "$CASTFIX/src" "$CASTFIX/pkg" "$CASTFIX/.cast/adapters" "$CASTFIX/node_modules/react"
+cat > "$CASTFIX/tsconfig.json" <<'JSON'
+{ "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/*"] } } }
+JSON
+cat > "$CASTFIX/src/a.ts" <<'TS'
+import { b } from './b'
+import type { T } from '@app/t'
+import React from 'react'
+import './missing-file'
+import { g } from '@app/gone'
+export async function load() { return import('./c') }
+TS
+cat > "$CASTFIX/src/b.ts" <<'TS'
+const { c } = require('./c')
+module.exports = { c }
+TS
+printf "export { load } from './a'\n" > "$CASTFIX/src/c.ts"
+printf 'export type T = string\n' > "$CASTFIX/src/t.ts"
+printf "import type { T } from './t'\nexport type U = T\n" > "$CASTFIX/src/rel.ts"
+cat > "$CASTFIX/src/multi.ts" <<'TS'
+import {
+  T,
+} from './t'
+TS
+cat > "$CASTFIX/.cast/adapters/toy.js" <<'JS'
+'use strict'
+const p = require('path').posix
+module.exports = {
+  name: 'toy', extensions: ['.toy'], patterns: [{ kind: 'value', re: /use\s+"([^"]+)"/g }],
+  resolve(s, from, ctx) { const t = p.join(p.dirname(from), s + '.toy'); return ctx.isFile(t) ? { to: t } : null },
+}
+JS
+printf 'use "two"\n' > "$CASTFIX/pkg/one.toy"
+printf 'nothing here\n' > "$CASTFIX/pkg/two.toy"
+
+CAST_BIN="$PWD/plugins/cast/bin/cast"
+S=0
+(cd "$CASTFIX" && "$CAST_BIN" scan >/dev/null 2>&1) \
+  || { fail "cast graph" "cast scan did not run"; S=1; }
+CAST_REPORT="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"
+# Assert against the written graph, never against an in-process call: the file is
+# the contract, and a scan that computes the right answer without writing it is a
+# scan nothing downstream can read.
+graph() { CASTFIX="$CASTFIX" node -e '
+  const bad=(s)=>{console.log(s);process.exit(1)}
+  let g
+  try { g=JSON.parse(require("fs").readFileSync(process.env.CASTFIX+"/.cast/graph.json","utf8")) }
+  catch(e) { bad("no readable .cast/graph.json: "+e.message) }
+  const mod=(id)=>g.modules.find(x=>x.id===id)
+  const edge=(id,t)=>((mod(id)||{}).edges||[]).find(x=>x.target===t)
+  '"$1"'
+'; }
+
+# AC1 one entry per source module with its outgoing edges, driven by an adapter
+# break: dropping a module from the walk, or the edges from an entry
+O="$(graph '
+  for (const id of ["src/a.ts","src/b.ts","src/c.ts","src/t.ts","src/rel.ts","src/multi.ts"])
+    if (!mod(id)) bad("no entry for the source module "+id)
+  if (!(mod("src/a.ts").edges||[]).length) bad("a module with imports carries no outgoing edges")
+  if (mod("src/t.ts").edges.length) bad("a module with no imports was given edges")
+  if (mod("tsconfig.json")) bad("a file no adapter claims was scanned as a module")
+')" || { fail "cast graph" "$O"; S=1; }
+# the language knowledge is the adapter file, not the engine
+# break: hardcoding the javascript extensions, patterns or resolver into cast.js,
+# which leaves a project-supplied adapter with nothing to drive
+O="$(graph '
+  if (!mod("pkg/one.toy")) bad("a project adapter did not put its own modules in the graph")
+  const e=edge("pkg/one.toy","two")
+  if (!e) bad("a project adapter pattern produced no edge")
+  if (e.to!=="pkg/two.toy") bad("a project adapter resolver was not used: "+e.to)
+')" || { fail "cast graph" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast graph"
+
+# AC2 every edge carries its kind
+S=0
+# break: dropping the type pattern, which reclassifies `import type` as value
+O="$(graph '
+  const want={"src/a.ts":{"./b":"value","@app/t":"type","react":"value","./c":"dynamic"},
+              "src/b.ts":{"./c":"value"},"src/c.ts":{"./a":"value"},"src/rel.ts":{"./t":"type"}}
+  for (const [id,edges] of Object.entries(want))
+    for (const [t,k] of Object.entries(edges)) {
+      const e=edge(id,t)
+      if (!e) bad("no edge for "+t+" in "+id)
+      if (e.kind!==k) bad(id+" -> "+t+" is "+e.kind+", not "+k)
+    }
+  for (const m of g.modules) for (const e of m.edges)
+    if (!["value","type","dynamic"].includes(e.kind)) bad("an edge carries no kind: "+JSON.stringify(e))
+')" || { fail "cast edge kinds" "$O"; S=1; }
+# the same import counted once, not once per pattern that matches its text
+# break: dropping the (line, specifier) dedupe
+O="$(graph '
+  const seen=new Set()
+  for (const m of g.modules) for (const e of m.edges) {
+    const k=e.file+":"+e.line+" "+e.target
+    if (seen.has(k)) bad("one import produced two edges: "+k)
+    seen.add(k)
+  }
+')" || { fail "cast edge kinds" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast edge kinds"
+
+# AC3 every edge carries the file and the line of its import
+S=0
+# break: dropping file or line from the edge, or counting lines from the wrong end
+O="$(graph '
+  const at={"./b":1,"@app/t":2,"react":3,"./missing-file":4,"@app/gone":5,"./c":6}
+  for (const [t,line] of Object.entries(at)) {
+    const e=edge("src/a.ts",t)
+    if (!e) bad("no edge for "+t)
+    if (e.file!=="src/a.ts") bad(t+" names the file "+e.file)
+    if (e.line!==line) bad(t+" is at line "+e.line+", not "+line)
+  }
+  for (const m of g.modules) for (const e of m.edges) {
+    if (e.file!==m.id) bad("an edge of "+m.id+" names the file "+e.file)
+    if (!Number.isInteger(e.line)||e.line<1) bad("an edge of "+m.id+" carries no line")
+  }
+')" || { fail "cast edge sites" "$O"; S=1; }
+# an import spread over several lines is reported where it starts
+# break: taking the offset of the specifier instead of the start of the statement
+O="$(graph '
+  const e=edge("src/multi.ts","./t")
+  if (!e) bad("a multi-line import produced no edge")
+  if (e.line!==1) bad("a multi-line import is reported at line "+e.line+", not where it starts")
+')" || { fail "cast edge sites" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast edge sites"
+
+# AC4 an alias import lands on the node the relative import lands on
+S=0
+# break: dropping the tsconfig paths lookup, which makes @app/t external or unresolved
+O="$(graph '
+  const a=edge("src/a.ts","@app/t"), r=edge("src/rel.ts","./t")
+  if (!a) bad("an alias import produced no edge")
+  if (a.resolution!=="module") bad("an alias import resolved to "+a.resolution)
+  if (a.to!==r.to) bad("the alias landed on "+a.to+", the relative import on "+r.to)
+  if (a.to!=="src/t.ts") bad("the alias landed on "+a.to)
+')" || { fail "cast alias" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast alias"
+
+# AC5 an import that resolves to nothing is counted and named, never dropped
+S=0
+# break: dropping the edge when resolve answers nothing
+O="$(graph '
+  for (const t of ["./missing-file","@app/gone"]) {
+    const e=edge("src/a.ts",t)
+    if (!e) bad("an unresolvable import was dropped from the graph: "+t)
+    if (e.resolution!=="unresolved") bad(t+" was filed as "+e.resolution)
+  }
+  const ext=edge("src/a.ts","react")
+  if (ext.resolution!=="external") bad("an installed package was filed as "+ext.resolution)
+')" || { fail "cast unresolved" "$O"; S=1; }
+# break: reporting a count without the sites, which names nothing to go and fix
+printf '%s\n' "$CAST_REPORT" | grep -q '^unresolved 2$' \
+  || { fail "cast unresolved" "cast report did not count the unresolved imports: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q 'src/a.ts:4 \./missing-file' \
+  || { fail "cast unresolved" "cast report did not name an unresolved import"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep -q 'src/a.ts:5 @app/gone' \
+  || { fail "cast unresolved" "cast report did not name every unresolved import"; S=1; }
+[ "$S" = 0 ] && ok "cast unresolved"
+
+# AC6 a cycle is named by all of its modules
+S=0
+# break: reporting the module the walk entered the cycle through instead of the
+# whole strongly connected component
+printf '%s\n' "$CAST_REPORT" | grep -q '^cycles 1$' \
+  || { fail "cast cycles" "cast report did not count the cycle: $CAST_REPORT"; S=1; }
+printf '%s\n' "$CAST_REPORT" | grep '^  cycle:' \
+  | grep -q 'src/a\.ts.*src/b\.ts.*src/c\.ts' \
+  || { fail "cast cycles" "cast report did not name every module of the cycle: $CAST_REPORT"; S=1; }
+# a module outside the cycle is not swept into it - break: reporting every
+# reachable module rather than the component
+printf '%s\n' "$CAST_REPORT" | grep '^  cycle:' | grep -q 'src/t\.ts' \
+  && { fail "cast cycles" "a module outside the cycle was named in it"; S=1; }
+[ "$S" = 0 ] && ok "cast cycles"
+
 exit "$FAILED"

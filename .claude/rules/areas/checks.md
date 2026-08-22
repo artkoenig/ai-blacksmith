@@ -7,11 +7,12 @@ paths:
 
 - Every check that runs without a Claude Code session. `forge-test` wraps it: it counts the `ok`
   lines through `passingPattern` and reports the `FAIL` lines through `failingPattern`, so a suite
-  that prints neither is invisible to both. Seven suites: the manifest and syntax, the wrapper
+  that prints neither is invisible to both. The suites: the manifest and syntax, the wrapper
   contract against a fixture project, every hook decision, the startup measurement against a
   fixture agent and a synthetic transcript, that the project rules are tracked, that every area
   note parses and still globs something, and the workflow control flow against stubbed agents -
-  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id.
+  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id, and six
+  `cast *` suites over one scanned fixture project.
 - The manifest and syntax suite loops `for d in plugins/*/`: validate, `node --check`, `bash -n`
   and the executable-bit checks are derived from the plugin directories, each guarded by
   `[ -f "$f" ] || continue` so a plugin shipping no `bin/`, `scripts/` or `workflows/` is skipped.

@@ -1,10 +1,10 @@
 {
   "name": "cast",
   "displayName": "Cast",
-  "description": "Placeholder for the cast plugin - no runtime behaviour ships yet.",
+  "description": "The module graph of a project, and what is wrong with it - cast scan writes it, cast report reads it.",
   "author": {
     "name": "artkoenig"
   },
   "license": "MIT",
-  "keywords": ["cast"]
+  "keywords": ["cast", "dependency-graph", "javascript", "typescript"]
 }
