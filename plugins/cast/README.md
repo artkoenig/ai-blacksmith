@@ -6,8 +6,6 @@ The module graph of a project, and what is wrong with it.
 cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
 cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
-cast rules preview <rule json> [--root <dir>]
-                             one rule, tried before it is written down
 cast plan simulate <name> [--root <dir>]
                              applies <root>/.cast/plans/<name>.json to a copy of
                              the graph and says what it would change
@@ -58,8 +56,8 @@ module edges ui -> logic 3
 ```
 
 A count labelled `edges` is every import cast met - the one `cast report` prints. Every narrower
-count says so: `module edges` is the resolved ones, in `cast edges`, `cast plan simulate`, the
-preview and the check summary alike.
+count says so: `module edges` is the resolved ones, in `cast edges`, `cast plan simulate` and the
+check summary alike.
 
 Only edges that landed on a module have a far layer; an unresolved or external import is named by
 `cast report` instead.
@@ -98,13 +96,13 @@ and by layer edge, each site with its file and its line - and exit 2 where the c
 at all. `bin/cast-check` is that check as a check command: it scans, then checks, and takes no
 arguments.
 
-A rule is tried before it is written down: `cast rules preview '<rule json>'` takes one rule
-object - the same shape a `forbidden` entry has, read by the same validation - and reports the
-module edges it would flag today, grouped like the check and counted per edge, never per module.
-One module with three forbidden imports is three imports to move, so the count is 3 and the
-modules are named beside it. The exceptions in the project's `allowed` list are applied, so the
-number is what `cast check` would add. A preview reports and always exits 0; only a rule it cannot
-read at all is exit 2.
+A rule is tried before it is enforced by writing it down as a warning. `severity: "warn"` is
+listed like any other violation - grouped by rule and by layer edge, every site with its file and
+its line - and leaves the exit code alone, so `cast check` says what the rule would cost today
+without failing a build for it. Read the count, then decide: fix the sites and switch the rule to
+`error`, hold them in `.cast/baseline.json` and switch to `error` from today, or drop the rule
+again. The count is module edges, never modules - one module with three forbidden imports is three
+imports to move.
 
 ## Baseline
 

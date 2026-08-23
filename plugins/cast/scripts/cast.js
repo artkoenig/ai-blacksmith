@@ -6,9 +6,6 @@
 //   cast report [--root <dir>]   reads it and says what is wrong
 //   cast check [--root <dir>]    the rules of <root>/.cast/rules.json, evaluated
 //                                against the module graph; exit 1 on an error
-//   cast rules preview <rule json> [--root <dir>]
-//                                one rule, tried before it is written down: the
-//                                module edges it would flag today, per edge
 //   cast plan simulate <name> [--root <dir>]
 //                                a refactoring written down before it is done:
 //                                <root>/.cast/plans/<name>.json applied to a copy
@@ -35,27 +32,9 @@ const SHIPPED = path.join(__dirname, '..', 'adapters')
 const ALWAYS_IGNORED = ['.git', '.cast', '.claude', '.forge']
 
 // Exit 2 is "cast could not run", and every validation failure goes through it.
-// One caller cannot afford that - a preview of a command-line rule is still an
-// answer when the project's own rules file is broken - so `soft()` turns the
-// exit into a throw for the length of one call, and nothing else changes.
-let SOFT = 0
-
 function die(msg) {
-  if (SOFT) throw Object.assign(new Error(msg), { cast: true })
   process.stderr.write(msg + '\n')
   process.exit(2)
-}
-
-function soft(fn) {
-  SOFT++
-  try {
-    return { value: fn() }
-  } catch (e) {
-    if (!e || !e.cast) throw e
-    return { error: e.message }
-  } finally {
-    SOFT--
-  }
 }
 
 // --- adapters ---------------------------------------------------------------
@@ -1427,9 +1406,8 @@ function sideShape(r, key, at) {
     die(`${at} (${r.name}) has ${key} ${JSON.stringify(v)}, not a layer name or a path glob`)
 }
 
-// One rule object, validated. Every path into the evaluator goes through this -
-// the rules file and `cast rules preview` alike - so a rule tried on the command
-// line is read by exactly the rules the file is read by, unknown attribute
+// One rule object, validated. Every path into the evaluator goes through this,
+// so a rule is read the same way wherever it is written down, unknown attribute
 // report included.
 function readRule(r, at, names, notEvaluated) {
   if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${at} is not a rule object`)
@@ -1588,36 +1566,6 @@ function group(found, forbidden) {
     }
   })
   return lines
-}
-
-// A rule is tried before it is written down: one rule object, evaluated against
-// the scanned graph with the exceptions the project already writes down, so the
-// number is what `cast check` would add today and not a number from a project
-// with no `allowed` list. The count is edges, never modules - one module with
-// three forbidden imports is three imports to move, and a per-module count hides
-// two of them. The modules are named beside it, not instead of it.
-// A rules file that cannot be read stops `cast check`, but not a preview: the
-// rule under preview came from the command line, and the file only supplies the
-// exceptions. The preview answers without them and says so - a number quietly
-// missing the project's `allowed` list is the one thing this command must not
-// print, because it reads as what `cast check` would add today.
-function writtenAllowed(root, names) {
-  const read = soft(() => readRules(root, names))
-  if (read.error) return { allowed: [], unreadable: read.error }
-  return { allowed: read.value ? read.value.allowed : [] }
-}
-
-function preview(graph, of, rule, allowed, notEvaluated, unreadable) {
-  const found = violations(graph, of, { forbidden: [rule], allowed })
-  const mods = new Set(found.map((v) => v.file)).size
-  const lines = group(found, [rule])
-  for (const n of notEvaluated) lines.push(`not evaluated: ${n}`)
-  if (unreadable) lines.push(`the allowed list was not available: ${unreadable}`)
-  lines.push(
-    `${plural(found.length, 'edge')} flagged in ${plural(mods, 'module')} ` +
-      `of ${plural(moduleEdges(graph), 'module edge')}`
-  )
-  return lines.join('\n')
 }
 
 function check(graph, of, rules, baseline) {
@@ -1925,7 +1873,6 @@ function simulate(graph, after, rules, plan, ruleFile) {
 
 const USAGE =
   'usage: cast <scan|report|check> [--root <dir>]\n' +
-  '       cast rules preview <rule json> [--root <dir>]\n' +
   '       cast plan simulate <name> [--root <dir>]\n' +
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
@@ -1943,12 +1890,12 @@ function main(argv) {
   let asMermaid = false
   let update = false
   let planName = null
-  // `rules` and `plan` are the commands with a subcommand and a positional; both
-  // are taken before the flag loop, which knows only flags.
+  // `plan` is the one command with a subcommand and a positional; both are taken
+  // before the flag loop, which knows only flags.
   let sub = null
   let ruleArg = null
   let first = 1
-  if (cmd === 'rules' || cmd === 'plan') {
+  if (cmd === 'plan') {
     sub = argv[1]
     ruleArg = argv[2]
     first = 3
@@ -1992,26 +1939,6 @@ function main(argv) {
     const answer = check(graph, of, rules, readBaseline(root))
     process.stdout.write(answer.text + '\n')
     return answer.code
-  }
-  if (cmd === 'rules') {
-    if (sub !== 'preview' || !ruleArg) die(USAGE)
-    let parsed
-    try {
-      parsed = JSON.parse(ruleArg)
-    } catch (e) {
-      die(`the rule is not valid JSON: ${e.message}`)
-    }
-    const graph = readGraph(out)
-    const { of, names } = assign(graph, layerRules(root))
-    const notEvaluated = []
-    const rule = readRule(parsed, 'the rule', names, notEvaluated)
-    const written = writtenAllowed(root, names)
-    process.stdout.write(
-      preview(graph, of, rule, written.allowed, notEvaluated, written.unreadable) + '\n'
-    )
-    // A preview reports; it never fails a build. The rule it tried is not one
-    // the project has agreed to yet.
-    return 0
   }
   if (cmd === 'plan') {
     if (sub !== 'simulate' || !ruleArg) die(USAGE)
@@ -2104,6 +2031,6 @@ module.exports = {
   scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
   viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
   edgesAt, edgeLines,
-  readRules, violations, check, preview, readBaseline, ratchet,
+  readRules, violations, check, readBaseline, ratchet,
   readPlan, simulateGraph, simulate, layerMetrics,
 }

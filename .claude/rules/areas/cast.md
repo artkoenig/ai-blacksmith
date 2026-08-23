@@ -76,13 +76,13 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   The exit code comes from severity, not the count: `warn` is listed and leaves 0; the summary is
   the last line, the only one on a clean project.
 - `die()` is exit 2 throughout: an unreadable or invalid `rules.json` is "could not run", not a
-  violation or a pass; validation belongs in `readRules`, `soft(fn)` throws instead for preview.
+  violation or a pass; validation belongs in `readRules`.
 - An unknown rule attribute is `not evaluated: <rule>: <key>`: a new attribute means adding it to
-  `RULE_KEYS` in the same change. `readRule` validates one rule for both readers, `group()` renders
-  rule/edge/site for the check and the plan report alike, and `cast rules preview '<rule json>'`
-  counts flagged module edges, never modules, applies `allowed`, and exits 0 on a rule it flags.
+  `RULE_KEYS` in the same change. `readRule` validates one rule wherever it is written down, and
+  `group()` renders rule/edge/site for the check and the plan report alike. Trying a rule before
+  enforcing it is `severity: "warn"`, not a command of its own - there is no `rules` subcommand.
 - `bin/cast-check` scans before it checks: no arguments, never a stale graph, every `bin/*`
-  executable. `rules` and `plan` take a subcommand and a positional: `main` reads `argv[1]` and
+  executable. `plan` takes a subcommand and a positional: `main` reads `argv[1]` and
   `argv[2]` before the flag loop, which starts at 3. `.cast` is in `ALWAYS_IGNORED` - adapters are
   loaded, never scanned; walking skips dot dirs.
 - `.cast/baseline.json` holds inherited violations, read at check time like the rules: a held one

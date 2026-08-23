@@ -22,7 +22,8 @@ The graph, and only the graph. What depends on what, which imports resolve to no
 exist, how the layers fall, and what one layer edge is made of.
 
 Not yours: whether a dependency should be forbidden, and what a refactoring would cost. The first
-is one `cast rules preview` call the caller makes itself. The second is `refactor-planner`.
+is a `severity: "warn"` rule in `.cast/rules.json`, read off `cast check`. The second is
+`refactor-planner`.
 
 ## Follow the question, not the report
 

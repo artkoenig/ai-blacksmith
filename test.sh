@@ -1351,82 +1351,14 @@ CAST_W2="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
 [ "$RC" = 2 ] || { fail "cast check wrapper" "an unreadable rules file exited $RC, not 2: $CAST_W2"; S=1; }
 [ "$S" = 0 ] && ok "cast check wrapper"
 
-# AC10 cast rules preview <rule> reports how many module edges that rule would
-# flag today, counted per edge and not per module
-S=0
-# The rule under preview is written nowhere: rules.json holds an unrelated one,
-# so a preview that only looks up a written rule finds nothing to report.
-cat > "$CAST_RULES" <<'JSON'
-{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
-                   "kinds": ["value", "type", "dynamic"] } ] }
-JSON
-TRY='{ "name": "try-me", "severity": "error", "from": "ui", "to": "logic",
-       "kinds": ["value", "type", "dynamic"] }'
-CAST_PRE="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
-# src/a.ts is the only module in `ui` and carries three edges into `logic`
-# break: counting the modules that violate the rule, or the distinct layer
-# edges, either of which answers 1 where three imports have to move
-printf '%s\n' "$CAST_PRE" | grep -q '^3 edges flagged in 1 module of ' \
-  || { fail "cast preview" "the edges a rule would flag were not counted per edge: $CAST_PRE"; S=1; }
-# break: previewing only a rule already in rules.json, which cannot try one
-printf '%s\n' "$CAST_PRE" | grep -q '^try-me (error) ui -> logic 3$' \
-  || { fail "cast preview" "a rule that is written nowhere was not previewed: $CAST_PRE"; S=1; }
-# break: dropping the sites, which leaves a count nobody can act on
-printf '%s\n' "$CAST_PRE" | grep -q '^    src/a.ts:6 -> src/c.ts (dynamic)$' \
-  || { fail "cast preview" "the flagged edges were not named with their sites: $CAST_PRE"; S=1; }
-# break: routing the preview through the check's exit code, which fails a build
-# on a rule the project has not agreed to
-[ "$RC" = 0 ] || { fail "cast preview" "a preview of a violated error rule exited $RC, not 0: $CAST_PRE"; S=1; }
-# today, not in the abstract: the exceptions the project has already written
-# down are the ones a new rule lands beside
-cat > "$CAST_RULES" <<'JSON'
-{ "forbidden": [],
-  "allowed": [ { "name": "a-may-type-t", "severity": "error", "from": "src/a.ts", "to": "src/t.ts",
-                 "kinds": ["type"] } ] }
-JSON
-CAST_PRE2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"
-# break: previewing the rule alone, which counts an edge an allowed rule drops
-printf '%s\n' "$CAST_PRE2" | grep -q '^2 edges flagged in 1 module of ' \
-  || { fail "cast preview" "an edge the allowed list claims was still flagged: $CAST_PRE2"; S=1; }
-# break: dropping the unknown-key report on the preview path, which reads as a
-# rule the preview evaluated whole
-CAST_PRE3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview \
-  '{ "name": "guess", "from": "ui", "to": "logic", "unless": "friday" }' 2>&1)"
-printf '%s\n' "$CAST_PRE3" | grep -q 'not evaluated: guess: unless' \
-  || { fail "cast preview" "a previewed attribute the evaluator cannot decide was passed silently: $CAST_PRE3"; S=1; }
-# break: reading a malformed rule as a rule that flags nothing
-CAST_PRE4="$(cd "$CASTFIX" && "$CAST_BIN" rules preview 'not json' 2>&1)"; RC=$?
-[ "$RC" = 2 ] || { fail "cast preview" "an unreadable rule exited $RC, not 2: $CAST_PRE4"; S=1; }
-[ "$S" = 0 ] && ok "cast preview"
-
-# a preview still previews where the project's own rules.json cannot be read
-S=0
-printf '{ "forbidden": [ ' > "$CAST_RULES"
-CAST_PR="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
-# break: reading the exceptions with the same die() the check reads them with,
-# which kills a preview of a rule the broken file has nothing to do with
-[ "$RC" = 0 ] \
-  || { fail "cast preview robust" "a preview beside an unreadable rules.json exited $RC, not 0: $CAST_PR"; S=1; }
-printf '%s\n' "$CAST_PR" | grep -q '^3 edges flagged in 1 module of ' \
-  || { fail "cast preview robust" "the rule was not previewed: $CAST_PR"; S=1; }
-# break: falling back to an empty allowed list in silence, which prints a number
-# that is not what cast check would add today
-printf '%s\n' "$CAST_PR" | grep -q 'the allowed list was not available' \
-  || { fail "cast preview robust" "the missing allowed list was not reported: $CAST_PR"; S=1; }
-printf '%s\n' "$CAST_PR" | grep -q 'rules.json is not valid JSON' \
-  || { fail "cast preview robust" "the unreadable rules file was not named: $CAST_PR"; S=1; }
-# the same file still stops cast check: exit 2 is what a file cast cannot run on
-# break: making every rules read soft, which turns a broken file into a pass
-CAST_PRC="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
-[ "$RC" = 2 ] \
-  || { fail "cast preview robust" "cast check on an unreadable rules.json exited $RC, not 2: $CAST_PRC"; S=1; }
-[ "$S" = 0 ] && ok "cast preview robust"
-
 
 # AC3 a rule side that is present but is not a string is rejected for its shape,
 # never as a side that is absent
 S=0
-CAST_RSH="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","from":3,"to":"logic"}' 2>&1)"; RC=$?
+# the rule reaches readRule through rules.json - the one path there is since
+# `cast rules preview` was dropped for `severity: "warn"`
+try_rule() { printf '{ "forbidden": [ %s ] }\n' "$1" > "$CAST_RULES"; (cd "$CASTFIX" && "$CAST_BIN" check 2>&1); }
+CAST_RSH="$(try_rule '{"name":"r","from":3,"to":"logic"}')"; RC=$?
 [ "$RC" = 2 ] \
   || { fail "cast rule shape" "a rule with a non-string from exited $RC, not 2: $CAST_RSH"; S=1; }
 # break: letting side() answer null for a wrong shape and a missing key alike,
@@ -1435,14 +1367,14 @@ printf '%s\n' "$CAST_RSH" | grep -qF 'has from 3, not a layer name or a path glo
   || { fail "cast rule shape" "the shape that was expected was not named: $CAST_RSH"; S=1; }
 printf '%s\n' "$CAST_RSH" | grep -q 'carries no from' \
   && { fail "cast rule shape" "a present from was reported as absent: $CAST_RSH"; S=1; }
-CAST_RSH2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","from":"ui","to":["logic"]}' 2>&1)"; RC=$?
+CAST_RSH2="$(try_rule '{"name":"r","from":"ui","to":["logic"]}')"; RC=$?
 [ "$RC" = 2 ] \
   || { fail "cast rule shape" "a rule with a non-string to exited $RC, not 2: $CAST_RSH2"; S=1; }
 printf '%s\n' "$CAST_RSH2" | grep -qF 'has to ["logic"], not a layer name or a path glob' \
   || { fail "cast rule shape" "the shape expected of to was not named: $CAST_RSH2"; S=1; }
 # a side that really is absent still says so - break: reporting every side by its
 # shape, which leaves a forgotten key describing itself as undefined
-CAST_RSH3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","to":"logic"}' 2>&1)"; RC=$?
+CAST_RSH3="$(try_rule '{"name":"r","to":"logic"}')"; RC=$?
 [ "$RC" = 2 ] \
   || { fail "cast rule shape" "a rule with no from exited $RC, not 2: $CAST_RSH3"; S=1; }
 printf '%s\n' "$CAST_RSH3" | grep -q 'carries no from' \
@@ -2666,7 +2598,7 @@ grep -qF 'html,body{max-width:100%;overflow-x:hidden}' "$CAST_PAGE" \
 # the prompt, so the model never has to know the flags - a skill that only
 # describes the command is the failure these exist to prevent.
 S=0
-for s in map rules plan; do
+for s in map plan; do
   F="plugins/cast/skills/$s/SKILL.md"
   if [ ! -f "$F" ]; then fail "cast skills" "$F is missing"; S=1; continue; fi
   # break: dropping allowed-tools, which hands the skill the whole tool surface
@@ -2695,7 +2627,6 @@ skill_runs() {
     || { fail "cast skills" "$F does not run '$2' in the prompt"; S=1; }
 }
 skill_runs map 'report'
-skill_runs rules 'rules preview'
 # The plan skill simulates a plan it has not drafted yet, so the prompt line
 # reports the graph it drafts against; `plan simulate` is run per loop, and the
 # `cast plan skill` suite below is what holds it there.
@@ -2708,7 +2639,7 @@ skill_runs plan 'report'
 # The prompt line resolves that root once, echoes it so the model can pass it on,
 # and carries it on every call it makes - with no argument, the working directory.
 S=0
-for s in map rules plan; do
+for s in map plan; do
   F="plugins/cast/skills/$s/SKILL.md"
   [ -f "$F" ] || { fail "cast skill root" "$F is missing"; S=1; continue; }
   L="$(grep '^!' "$F" | head -1)"
@@ -2734,14 +2665,13 @@ for s in map rules plan; do
   grep -qF -- '--root <root>' "$F" \
     || { fail "cast skill root" "$F never asks for --root <root> on the calls it hands on"; S=1; }
 done
-# break: the two skills whose argument is not the directory taking the trailing
-# word blindly, so a rule object or a goal is read as a root
-for s in rules plan; do
-  F="plugins/cast/skills/$s/SKILL.md"
-  [ -f "$F" ] || continue
+# break: the skill whose argument is not the directory taking the trailing word
+# blindly, so a goal is read as a root
+F="plugins/cast/skills/plan/SKILL.md"
+if [ -f "$F" ]; then
   grep '^!' "$F" | grep -qF '[ -d "$L" ]' \
     || { fail "cast skill root" "$F takes its trailing word as a root without testing it is a directory"; S=1; }
-done
+fi
 [ "$S" = 0 ] && ok "cast skill root"
 
 
@@ -2946,7 +2876,7 @@ run_pre() {
   ( cd "$2" && CLAUDE_PLUGIN_ROOT="$PWD_ROOT/plugins/cast" ARGUMENTS="$3" bash -c "$4" 2>&1 )
 }
 PWD_ROOT="$PWD"
-for k in map plan rules; do
+for k in map plan; do
   L="$(preamble_of "$k")"
   [ -n "$L" ] || { fail "cast skill preamble" "the $k skill carries no preamble to run"; S=1; continue; }
   # break: `ls .cast/plans` with nothing to list, or `scan && report` passing a
@@ -2957,15 +2887,6 @@ for k in map plan rules; do
   printf '%s\n' "$OUT" | grep -q '^cast root: ' \
     || { fail "cast skill preamble" "the $k preamble does not name the root it read: $OUT"; S=1; }
 done
-# a rule cast cannot read is the answer the skill exists to explain, so the
-# explanation loads and the message reaches the caller
-# break: `&&`-chaining the preview, whose exit 2 then stands for the skill
-RULES_PRE="$(preamble_of rules)"
-OUT="$(run_pre rules "$PRE/empty" '{"nope":1}' "$RULES_PRE")"; RC=$?
-[ "$RC" = 0 ] \
-  || { fail "cast skill preamble" "the rules preamble exited $RC on a rule cast cannot read"; S=1; }
-printf '%s\n' "$OUT" | grep -qF 'the rule carries no name' \
-  || { fail "cast skill preamble" "the rules preamble swallowed what was wrong with the rule: $OUT"; S=1; }
 # where there is something to list, it is still listed
 # break: silencing the listing along with its exit code
 mkdir -p "$PRE/withplan/.cast/plans" && printf '{"operations":[]}\n' > "$PRE/withplan/.cast/plans/cut.json"
