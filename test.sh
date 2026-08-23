@@ -1090,12 +1090,13 @@ done
 # break: reaching for a mermaid library once a host is drawing the block
 printf '%s\n' "$CAST_FRAG" | grep -qE 'src="https?:|href="https?:' \
   && { fail "cast artifact page" "the fragment loads an external asset"; S=1; }
-# AC5 the mermaid block is drawn where a host draws mermaid, and stays its own
-# source where nothing does
-# break: leaving the block with its id alone, so a host never finds it
+# the mermaid block is the source and nothing else: the page has drawn the graph
+# already, and a host that draws mermaid natively would draw it a second time,
+# below the first and at an altitude that says less
+# break: marking the block `class="mermaid"`, which is what such a host looks for
 for f in "$CASTFIX/frag.html" "$CASTFIX/view.html"; do
   grep -qF 'class="mermaid"' "$f" \
-    || { fail "cast artifact page" "$f does not mark the mermaid block for a host that draws it"; S=1; }
+    && { fail "cast artifact page" "$f has a host draw the graph a second time"; S=1; }
   grep -qF 'graph LR' "$f" \
     || { fail "cast artifact page" "$f no longer carries the mermaid source"; S=1; }
 done

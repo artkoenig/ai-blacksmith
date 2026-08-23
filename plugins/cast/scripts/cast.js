@@ -1078,10 +1078,10 @@ function html(graph, rules, expand, checkRules, baseline, fragment) {
     '<h2>layers</h2>',
     `<ul id="layers">\n${layers}\n</ul>`,
     '<h2>mermaid</h2>',
-    // `class="mermaid"` is what a host that draws mermaid natively looks for.
-    // Where nothing does - the standalone page in a browser - the same element is
-    // the source, readable as the text it always was.
-    `<pre id="mermaid" class="mermaid">${esc(mermaid(graph, rules, expand, checkRules, baseline))}</pre>`,
+    // The block is the source and never a second drawing: `class="mermaid"` would
+    // have a host that draws mermaid natively draw the same graph again, under the
+    // one the page draws itself, at an altitude that says less.
+    `<pre id="mermaid">${esc(mermaid(graph, rules, expand, checkRules, baseline))}</pre>`,
     `<script id="cast-data" type="application/json">${embedded}</script>`,
     `<script>\n${script}</script>`,
   ]
