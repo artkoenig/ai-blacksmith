@@ -568,10 +568,6 @@ function viewTree(data, open) {
     for (const s of g.sites) g.kindCounts[s.kind] = (g.kindCounts[s.kind] || 0) + 1
     g.kinds = Object.keys(g.kindCounts).sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : x > y ? 1 : 0))
     g.kindLabel = g.kinds.map((k) => g.kindCounts[k] + ' ' + k).join(', ')
-    // The arrowhead is the arrow's own: one marker per colour and state, so a
-    // breaking edge points in its severity's colour and an inherited one in the
-    // inherited grey. A single shared head would say the same thing everywhere.
-    g.marker = 'arrow-' + (g.state || 'plain') + '-' + g.color.slice(1)
   }
   return { nodes, flat, edges, open: (open || []).slice(), counts: data.counts }
 }
@@ -579,13 +575,15 @@ function viewTree(data, open) {
 // Where every box and every arrow sits, in numbers alone. The layout is one
 // vertical stack at every level: a closed node is one box of a fixed height, an
 // open one is a header and its children stacked inside it, so a box is only ever
-// as tall as what it shows. The arrows run in lanes down the right of the stack.
-// Every number a finger has to hit is `TAP`: the header of a node, the height of
-// a closed box and the lane an arrow runs down. 44 css
-// pixels is the smallest target a press lands on reliably, so it is the floor for
-// `H`, `HEAD`, `LANE` and `CHAN` rather than a value the page adds on top.
+// as tall as what it shows. An arrow runs beside the stack, on the side its
+// direction gives it: down the right of the boxes, up the left of them.
+// Every number a finger has to hit is `TAP`: the header of a node and the height
+// of a closed box. 44 css pixels is the smallest target a press lands on
+// reliably, so it is the floor for `H` and `HEAD` rather than a value the page
+// adds on top. `CLEAR` is not one of them - it is how far an arrow stands off the
+// boxes, and a curve is not pressed by aiming at the gap beside it.
 function layoutTree(view) {
-  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CHAN: 44, LANE: 44, TAP: 44 }
+  const M = { W: 220, H: 44, HEAD: 44, GAP: 8, PAD: 10, CLEAR: 16, TAP: 44 }
   const clone = (n) => ({ ...n, children: n.children.map(clone) })
   const size = (n) => {
     if (!n.open) {
@@ -618,7 +616,10 @@ function layoutTree(view) {
   let y = M.PAD
   for (const n of roots) {
     size(n)
-    place(n, M.PAD, y)
+    // The stack starts one `CLEAR` in from the edge: an arrow running up passes
+    // to the left of the outermost box, and that is the only room it needs -
+    // every box it could stand off is at this x or further in.
+    place(n, M.PAD + M.CLEAR, y)
     y += n.h + M.GAP
   }
   const flat = []
@@ -629,39 +630,53 @@ function layoutTree(view) {
   roots.forEach(collect)
   const at = new Map(flat.map((n) => [n.id, n]))
   const right = Math.max(...flat.map((n) => n.x + n.w), 0)
-  // An arrow is a curve down a lane of its own and nothing else: no box, no
-  // digits, no backing. What it carries travels with it as data - `weight`,
-  // `label`, `kinds`, `rule`, `sites` - and is read out on demand, by pressing
-  // the arrow or by pointing at one of the nodes it joins. The labels of both
-  // ends come along so the panel can name a neighbour without the drawing.
-  const edges = view.edges.map((e, i) => {
+  // An arrow is a curve and nothing else: no box, no digits, no backing, no head.
+  // What it carries travels with it as data - `weight`, `label`, `kinds`, `rule`,
+  // `sites` - and is read out on demand, by pressing the arrow or by pointing at
+  // one of the nodes it joins. The labels of both ends come along so the panel
+  // can name a neighbour without the drawing.
+  //
+  // The side is the direction. An import of something further down the stack
+  // leaves and arrives on the right of the boxes, one of something further up on
+  // the left, so which way a dependency runs is read off the drawing without a
+  // head on every curve - and it stays readable where a page full of modules
+  // would be a page full of arrowheads.
+  //
+  // No arrow reserves a lane. `mx` is the far side of what the arrow actually
+  // passes - the boxes its span crosses, one `CLEAR` beyond the outermost of
+  // them - so a curve between neighbours is nearly flat and only one that spans
+  // the page stands far off it. Two arrows over the same stretch share that
+  // column: they are told apart by their ends and their colour, not by a lane
+  // each, which is what made the drawing sprawl.
+  const spans = (n, y1, y2) => n.y < Math.max(y1, y2) && n.y + n.h > Math.min(y1, y2)
+  const holds = (n, m) => n.key === m.key || m.key.indexOf(n.key + '/') === 0
+  const edges = view.edges.map((e) => {
     const a = at.get(e.from)
     const b = at.get(e.to)
-    return {
-      ...e,
-      x1: a.x + a.w, y1: a.y + a.h / 2,
-      x2: b.x + b.w, y2: b.y + b.h / 2,
-      mx: right + M.CHAN + i * M.LANE,
-      fromLabel: a.label, toLabel: b.label,
-    }
+    const y1 = a.y + a.h / 2
+    const y2 = b.y + b.h / 2
+    const down = y2 >= y1
+    const x1 = down ? a.x + a.w : a.x
+    const x2 = down ? b.x + b.w : b.x
+    // A box the arrow only passes stands in its way. A box holding both ends is
+    // the room it runs in: clearing that one would send an arrow between two
+    // children out around their parent, which is the sprawl again.
+    const past = flat.filter((n) => n !== a && n !== b && !(holds(n, a) && holds(n, b)) && spans(n, y1, y2))
+    const mx = down
+      ? Math.max(x1, x2, ...past.map((n) => n.x + n.w)) + M.CLEAR
+      : Math.min(x1, x2, ...past.map((n) => n.x)) - M.CLEAR
+    return { ...e, x1, y1, x2, y2, mx, down, fromLabel: a.label, toLabel: b.label }
   })
-  // One marker definition per colour and state, referenced by every arrow that
-  // wears it: the head is the arrow's, not the page's.
-  const markers = []
-  for (const e of edges) {
-    if (!markers.some((m) => m.id === e.marker)) markers.push({ id: e.marker, color: e.color, state: e.state })
-  }
   return {
     nodes: roots,
     flat,
     edges,
-    markers,
     open: view.open,
     counts: view.counts,
     metrics: M,
-    // The drawing ends at the last lane and at the last box: nothing beside an
-    // arrow widens it and nothing under one makes it taller.
-    width: Math.max(right, ...edges.map((e) => e.mx)) + M.PAD * 2,
+    // The drawing ends at the furthest arrow and at the last box: nothing beside
+    // an arrow widens it and nothing under one makes it taller.
+    width: Math.max(right, ...edges.map((e) => e.mx)) + M.PAD,
     height: Math.max(...flat.map((n) => n.y + n.h), 0) + M.PAD,
   }
 }
@@ -893,35 +908,22 @@ function draw() {
       for (const c of n.children) box(c)
     }
     for (const n of l.nodes) box(n)
-    // An arrowhead is a marker, and a marker has to be defined before it is
-    // referenced. One per colour and state: `marker-end` alone is what tells the
-    // reader which way the dependency runs.
-    const defs = el('defs', {})
-    for (const m of l.markers) {
-      const mk = el('marker', {
-        id: m.id, markerWidth: 10, markerHeight: 8, refX: 9, refY: 4,
-        orient: 'auto', markerUnits: 'userSpaceOnUse', class: 'arrowhead ' + (m.state || 'plain'),
-      })
-      mk.appendChild(el('path', { d: 'M 0 0 L 10 4 L 0 8 z', fill: m.color }))
-      defs.appendChild(mk)
-    }
-    svg.appendChild(defs)
-    // Boxes and pointed lines, and nothing else. What an arrow carries is read
-    // by pressing it or by pointing at a node it joins, so no digits are drawn
-    // over the lanes and no arrow needs a backing to stay legible.
+    // Boxes and bare curves, and nothing else. What an arrow carries is read by
+    // pressing it or by pointing at a node it joins, so no digits are drawn
+    // beside it and no arrow needs a backing to stay legible. There is no head
+    // either: the side the curve runs on is what says which way the dependency
+    // runs, and it says it on a drawing too crowded for a hundred heads.
     for (const e of l.edges) {
       const d = 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2
       const line = el('path', {
         d, fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
         'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',
-        'marker-end': 'url(#' + e.marker + ')',
         class: 'edge',
       })
       line.addEventListener('click', () => sites(e))
       svg.appendChild(line)
       // A line a pen can hit is thinner than a finger: the arrow's own target is
-      // an invisible stroke `TAP` wide over the same curve. It carries no head -
-      // the head belongs to the curve the reader sees.
+      // an invisible stroke `TAP` wide over the same curve.
       const grab = el('path', { d, fill: 'none', stroke: 'transparent', 'stroke-width': M.TAP, class: 'edge grab' })
       grab.addEventListener('click', () => sites(e))
       svg.appendChild(grab)
@@ -981,8 +983,8 @@ const PAGE_CSS = [
   '.edge{cursor:pointer}',
   '.edge.grab{pointer-events:stroke}',
   // The one thing a highlight does to an arrow it did not name: fade it. The
-  // arrows it does name are left alone, so their colour, width, dash and head
-  // are the ones they carry at rest.
+  // arrows it does name are left alone, so their colour, width and dash are the
+  // ones they carry at rest.
   '.edge.dim{opacity:.15}',
   '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
   '#mermaid{overflow-x:auto}',
@@ -1025,7 +1027,7 @@ function html(graph, rules, expand, checkRules, baseline) {
     '</head>',
     '<body>',
     '<h1>cast</h1>',
-    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow points at the module being imported, in its own colour, and carries no number on the page. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
+    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow carries no head and no number: it runs to the right of the boxes where it imports something further down, to the left where it imports something further up, in its own colour. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
     '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
     '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',

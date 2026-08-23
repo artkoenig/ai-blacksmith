@@ -41,17 +41,17 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   holding it, drops one inside a node; `open` is ids, `--expand` seeds it.
 - `layoutTree` stacks vertically at every level, an open box `HEAD + PAD + Σ children + GAP*(k-1)`:
   as tall as what it shows, never as its subtree (`cast compact layout`); `M` returns as `metrics`.
-  `M.TAP` (44) floors `H`, `HEAD`, `LANE`, `CHAN`: `place` gives a node a header band `hx/hy/hw/hh`
-  and only that band toggles - the ground of an open box answers no press. Transparent `hit`/`grab`
-  shapes widen what is too thin to press; `marker` is the glyph, on a node with children alone;
-  `toggleOpen` deletes one id and nothing below it, so reopening restores it. Phone: viewport meta,
-  a self-sized svg in `#graph-scroll`, `overflow-x:hidden`, no `svg{max-width:100%}`.
-- An arrow is drawn alone: a curve down its lane, an arrowhead, a transparent `TAP`-wide grab. No
-  label, no backing - `width`/`height` end at the last lane and the last box, while `weight`,
-  `label`, `kinds`, `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on the edge as data,
-  read by a press (`sites`) or by the highlight. Direction is a `<defs>` marker per colour and
-  state, `arrow-<state>-<colour>`, deduped into `markers`; the kinds separate an edge a rule's
-  `kinds` spares from one no rule names.
+  `M.TAP` (44) floors `H` and `HEAD`: `place` gives a node a header band `hx/hy/hw/hh` and only that
+  band toggles - the ground of an open box answers no press. Transparent `hit`/`grab` shapes widen
+  what is too thin to press; `marker` is the glyph, on a node with children alone; `toggleOpen`
+  deletes one id and nothing below it, so reopening restores it. Phone: viewport meta, a self-sized
+  svg in `#graph-scroll`, `overflow-x:hidden`, no `svg{max-width:100%}`.
+- An arrow is a bare curve and a `TAP`-wide transparent grab: no head, no label, no backing, and
+  `width`/`height` end at the furthest `mx` and the last box. `weight`, `label`, `kinds`,
+  `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data, read by a press or the
+  highlight. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
+  left, `mx` one `M.CLEAR` (16) past the boxes the span crosses (`flat`, less the ends and any box
+  holding both, overlapping by y) - flat between neighbours, no lane, the stack at `PAD + CLEAR`.
 - The count is asked for: `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges,
   id)` the panel's lines - both pure, both tested in node. Highlighting only subtracts: `.edge.dim`
   outside the set, nothing inside it. `pointerenter`/`pointerleave` are bound for `pointerType ===
