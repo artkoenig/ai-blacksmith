@@ -2737,6 +2737,36 @@ for a in graph-analyst refactor-planner; do
   grep -q "$a" plugins/cast/rules/cast.md \
     || { fail "cast agents" "the cast rule never names $a"; S=1; }
 done
+# Everything an agent writes is throwaway and belongs outside the checkout - the
+# caller publishes the page and never wants it back.
+for a in graph-analyst refactor-planner; do
+  F="plugins/cast/agents/$a.md"
+  [ -f "$F" ] || continue
+  # break: rendering into the tree - `.cast/render/<slug>.html` was the first
+  # version of both agents, and left a page behind on every run
+  grep -qF -- '--html "$SCRATCH/' "$F" \
+    || { fail "cast agents" "$F does not render into the scratch directory"; S=1; }
+  grep -qF -- '--html <root>/' "$F" \
+    && { fail "cast agents" "$F still renders into the checkout"; S=1; }
+  # break: naming a scratch directory and never saying where it comes from, so
+  # an agent whose task names none writes $SCRATCH/... into its working directory
+  grep -qF 'mktemp -d' "$F" \
+    || { fail "cast agents" "$F has no scratch directory where its task names none"; S=1; }
+  # break: returning a relative path, which the caller cannot resolve - it does
+  # not share the agent's working directory
+  grep -qi 'absolute path' "$F" \
+    || { fail "cast agents" "$F does not return absolute paths"; S=1; }
+done
+# The plan is the one file that stays in the checkout, because cast reads it
+# nowhere else. break: drafting it into scratch along with the page, which
+# leaves `cast plan simulate` with no plan to simulate at all.
+grep -qF '$SCRATCH/<name>.json' plugins/cast/agents/refactor-planner.md \
+  && { fail "cast agents" "the planner drafts the plan where cast cannot read it"; S=1; }
+grep -qF '<root>/.cast/plans/' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner no longer drafts where cast reads the plan"; S=1; }
+# break: moving readPlan's resolution, which silently makes the line above false
+grep -qF "path.join(root, '.cast', 'plans'" plugins/cast/scripts/cast.js \
+  || { fail "cast agents" "readPlan no longer resolves the plan the planner writes"; S=1; }
 [ "$S" = 0 ] && ok "cast agents"
 
 

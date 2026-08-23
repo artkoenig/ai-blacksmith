@@ -4,4 +4,3 @@
 .forge/context/
 .forge/context.jsonl
 **/.cast/graph.json
-**/.cast/render/

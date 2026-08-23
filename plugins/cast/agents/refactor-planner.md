@@ -26,10 +26,23 @@ arrived at. Go round as many times as the goal needs; nothing you read is paid f
 
 No source file. Not a rename, not an import, not one line ahead of the plan.
 
-`<root>/.cast/plans/<name>.json` is the only file you write. `cast plan simulate` writes nothing
-itself - no source, no `.cast/graph.json` - so a simulation is always safe to repeat.
+`<root>/.cast/plans/<name>.json` is the only file you write inside the checkout, and it has to be
+there: `cast plan simulate <name>` resolves the plan as `<root>/.cast/plans/<name>.json` and reads
+nowhere else (`scripts/cast.js:1667`). It is the record of the refactoring, not scratch.
+
+`cast plan simulate` writes nothing itself - no source, no `.cast/graph.json` - so a simulation is
+always safe to repeat.
 
 Where a simulation is accepted, stop. The edits are the caller's next piece of work.
+
+## Where everything else goes
+
+Every other file you write - a rendered page above all - goes in the scratch directory, never in
+the checkout.
+
+- Your task names the directory. Where it names none, make one: `SCRATCH="$(mktemp -d)"`.
+- Create it before you write into it, and return absolute paths. The caller does not share your
+  working directory and cannot find a relative one.
 
 ## When the goal will not give
 
@@ -48,7 +61,7 @@ Your final message is a return value. In this order, nothing else:
 4. The operations in order, one line each, so the caller can execute them without reading the file.
 
 Where the caller asked for the picture, add `cast render --mermaid --plan <name> --root <root>` in a
-fenced `mermaid` block; for a page, `cast render --html <root>/.cast/render/<name>.html --fragment
---plan <name> --root <root>` and return the path instead. Never paste the page markup.
+fenced `mermaid` block; for a page, `cast render --html "$SCRATCH/<name>.html" --fragment --plan
+<name> --root <root>` and return the path instead. Never paste the page markup.
 
 Never ask a question - nobody is there.

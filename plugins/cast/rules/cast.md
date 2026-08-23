@@ -15,7 +15,9 @@ The architecture is read from the graph, not from memory.
   `cast:refactor-planner` runs the draft-simulate-judge loop and edits no file. Each returns a few
   sentences and a path - the report, the edge listings and the rounds of simulation stay in the
   agent. Where the plugin is developed in place they lose the prefix too: `graph-analyst`,
-  `refactor-planner`. Run `/map` or `/plan` inline only where one look answers it.
+  `refactor-planner`. Hand each one the session's scratch directory in its task - every file they
+  write but the plan goes there, never into the checkout. Run `/map` or `/plan` inline only where
+  one look answers it.
 - Every call resolves the binary the way the skills do - `command -v cast`, else
   `${CLAUDE_PLUGIN_ROOT}/bin/cast` - and passes the same `--root`.
 - A refactoring is judged on the simulation before it is executed: `cast plan simulate <name>`

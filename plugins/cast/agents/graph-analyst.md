@@ -35,16 +35,25 @@ is a `severity: "warn"` rule in `.cast/rules.json`, read off `cast check`. The s
   `offset` and `limit`.
 - Never re-run `cast scan`. The first call of the skill line already ran it.
 
+## Where your files go
+
+Every file you write goes in the scratch directory, never in the checkout. Nothing you produce is
+a source file, and a page left in the tree is one more thing someone has to delete.
+
+- Your task names the directory. Where it names none, make one: `SCRATCH="$(mktemp -d)"`.
+- Create it before you write into it, and return absolute paths. The caller does not share your
+  working directory and cannot find a relative one.
+
 ## The page
 
 Render on every run, before you answer:
 
 ```
-cast render --html <root>/.cast/render/<slug>.html --fragment --root <root>
+cast render --html "$SCRATCH/<slug>.html" --fragment --root <root>
 ```
 
-`<slug>` is the question in two or three words. Create the directory first. `--fragment` is what
-makes the file publishable by the caller; never drop it, and never open the file.
+`<slug>` is the question in two or three words. `--fragment` is what makes the file publishable by
+the caller; never drop it, and never open the file.
 
 ## Return
 
