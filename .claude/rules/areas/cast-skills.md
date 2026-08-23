@@ -5,7 +5,7 @@ paths:
 
 # cast skills
 
-The three ways a session reaches cast: `map`, `rules`, `plan`. They are prompts, not documentation
+The two ways a session reaches cast: `map` and `plan`. They are prompts, not documentation
 - each runs its wrapper with a `!` line, so the model reads an answer instead of a command it has
 to compose. `cast check` deliberately has none: it answers through its exit code and needs no model.
 
@@ -19,10 +19,9 @@ to compose. `cast check` deliberately has none: it answers through its exit code
   defaulting to `.`; every call on that line carries `--root "$R"`, and the line echoes
   `cast root: $R` so the model passes the same root to the calls the body asks for. The
   `cast skill root` suite counts `"$CAST"` against `--root "$R"` on that line - they must match.
-- `map`'s whole argument is the directory. `rules` and `plan` carry an argument of their own, so
-  the root is the trailing word and only where `[ -d "$L" ]`; the rest stays quoted as
-  `"$A"` - the rule is a JSON object with spaces and braces, and an unquoted expansion splits it
-  into a usage error.
+- `map`'s whole argument is the directory. `plan` carries a goal of its own, so the root is the
+  trailing word and only where `[ -d "$L" ]`; the rest stays quoted as `"$A"`, since an unquoted
+  expansion splits a goal with spaces into a usage error.
 - `plan` drafts `<root>/.cast/plans/<name>.json` itself and loops draft -> simulate -> judge ->
   redraft, so it needs `Write` in `allowed-tools` and its `!` line reports the graph rather than
   simulating a plan that does not exist yet. `cast plan simulate` is run per loop from the body.
@@ -36,7 +35,7 @@ to compose. `cast check` deliberately has none: it answers through its exit code
 - `.claude/skills/<name>` is a symlink into here, so an edit is live in the session; never edit
   through the symlink, and never copy instead of linking - the suite checks the link target.
 - A new skill directory is not watched until the next session, unlike an edit to an existing one.
-- The suite greps the `!` lines for the subcommand (`report`, `rules preview`, `plan simulate`), so
-  a rewrite that keeps the prose and drops the execution goes red; `plan`'s is `report`.
+- The suite greps the `!` lines for the command they run (`report`), so a rewrite that keeps the
+  prose and drops the execution goes red.
 - `claude plugin validate ./plugins/cast --strict` is run by the manifest suite over every
   `plugins/*/`; no manifest lists the skills, they are discovered from `skills/`.

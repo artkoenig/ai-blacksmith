@@ -1351,82 +1351,14 @@ CAST_W2="$(cd "$CASTFIX" && "$CAST_CHECK_BIN" 2>&1)"; RC=$?
 [ "$RC" = 2 ] || { fail "cast check wrapper" "an unreadable rules file exited $RC, not 2: $CAST_W2"; S=1; }
 [ "$S" = 0 ] && ok "cast check wrapper"
 
-# AC10 cast rules preview <rule> reports how many module edges that rule would
-# flag today, counted per edge and not per module
-S=0
-# The rule under preview is written nowhere: rules.json holds an unrelated one,
-# so a preview that only looks up a written rule finds nothing to report.
-cat > "$CAST_RULES" <<'JSON'
-{ "forbidden": [ { "name": "ui-off-pkg", "severity": "error", "from": "ui", "to": "unassigned",
-                   "kinds": ["value", "type", "dynamic"] } ] }
-JSON
-TRY='{ "name": "try-me", "severity": "error", "from": "ui", "to": "logic",
-       "kinds": ["value", "type", "dynamic"] }'
-CAST_PRE="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
-# src/a.ts is the only module in `ui` and carries three edges into `logic`
-# break: counting the modules that violate the rule, or the distinct layer
-# edges, either of which answers 1 where three imports have to move
-printf '%s\n' "$CAST_PRE" | grep -q '^3 edges flagged in 1 module of ' \
-  || { fail "cast preview" "the edges a rule would flag were not counted per edge: $CAST_PRE"; S=1; }
-# break: previewing only a rule already in rules.json, which cannot try one
-printf '%s\n' "$CAST_PRE" | grep -q '^try-me (error) ui -> logic 3$' \
-  || { fail "cast preview" "a rule that is written nowhere was not previewed: $CAST_PRE"; S=1; }
-# break: dropping the sites, which leaves a count nobody can act on
-printf '%s\n' "$CAST_PRE" | grep -q '^    src/a.ts:6 -> src/c.ts (dynamic)$' \
-  || { fail "cast preview" "the flagged edges were not named with their sites: $CAST_PRE"; S=1; }
-# break: routing the preview through the check's exit code, which fails a build
-# on a rule the project has not agreed to
-[ "$RC" = 0 ] || { fail "cast preview" "a preview of a violated error rule exited $RC, not 0: $CAST_PRE"; S=1; }
-# today, not in the abstract: the exceptions the project has already written
-# down are the ones a new rule lands beside
-cat > "$CAST_RULES" <<'JSON'
-{ "forbidden": [],
-  "allowed": [ { "name": "a-may-type-t", "severity": "error", "from": "src/a.ts", "to": "src/t.ts",
-                 "kinds": ["type"] } ] }
-JSON
-CAST_PRE2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"
-# break: previewing the rule alone, which counts an edge an allowed rule drops
-printf '%s\n' "$CAST_PRE2" | grep -q '^2 edges flagged in 1 module of ' \
-  || { fail "cast preview" "an edge the allowed list claims was still flagged: $CAST_PRE2"; S=1; }
-# break: dropping the unknown-key report on the preview path, which reads as a
-# rule the preview evaluated whole
-CAST_PRE3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview \
-  '{ "name": "guess", "from": "ui", "to": "logic", "unless": "friday" }' 2>&1)"
-printf '%s\n' "$CAST_PRE3" | grep -q 'not evaluated: guess: unless' \
-  || { fail "cast preview" "a previewed attribute the evaluator cannot decide was passed silently: $CAST_PRE3"; S=1; }
-# break: reading a malformed rule as a rule that flags nothing
-CAST_PRE4="$(cd "$CASTFIX" && "$CAST_BIN" rules preview 'not json' 2>&1)"; RC=$?
-[ "$RC" = 2 ] || { fail "cast preview" "an unreadable rule exited $RC, not 2: $CAST_PRE4"; S=1; }
-[ "$S" = 0 ] && ok "cast preview"
-
-# a preview still previews where the project's own rules.json cannot be read
-S=0
-printf '{ "forbidden": [ ' > "$CAST_RULES"
-CAST_PR="$(cd "$CASTFIX" && "$CAST_BIN" rules preview "$TRY" 2>&1)"; RC=$?
-# break: reading the exceptions with the same die() the check reads them with,
-# which kills a preview of a rule the broken file has nothing to do with
-[ "$RC" = 0 ] \
-  || { fail "cast preview robust" "a preview beside an unreadable rules.json exited $RC, not 0: $CAST_PR"; S=1; }
-printf '%s\n' "$CAST_PR" | grep -q '^3 edges flagged in 1 module of ' \
-  || { fail "cast preview robust" "the rule was not previewed: $CAST_PR"; S=1; }
-# break: falling back to an empty allowed list in silence, which prints a number
-# that is not what cast check would add today
-printf '%s\n' "$CAST_PR" | grep -q 'the allowed list was not available' \
-  || { fail "cast preview robust" "the missing allowed list was not reported: $CAST_PR"; S=1; }
-printf '%s\n' "$CAST_PR" | grep -q 'rules.json is not valid JSON' \
-  || { fail "cast preview robust" "the unreadable rules file was not named: $CAST_PR"; S=1; }
-# the same file still stops cast check: exit 2 is what a file cast cannot run on
-# break: making every rules read soft, which turns a broken file into a pass
-CAST_PRC="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)"; RC=$?
-[ "$RC" = 2 ] \
-  || { fail "cast preview robust" "cast check on an unreadable rules.json exited $RC, not 2: $CAST_PRC"; S=1; }
-[ "$S" = 0 ] && ok "cast preview robust"
-
 
 # AC3 a rule side that is present but is not a string is rejected for its shape,
 # never as a side that is absent
 S=0
-CAST_RSH="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","from":3,"to":"logic"}' 2>&1)"; RC=$?
+# the rule reaches readRule through rules.json - the one path there is since
+# `cast rules preview` was dropped for `severity: "warn"`
+try_rule() { printf '{ "forbidden": [ %s ] }\n' "$1" > "$CAST_RULES"; (cd "$CASTFIX" && "$CAST_BIN" check 2>&1); }
+CAST_RSH="$(try_rule '{"name":"r","from":3,"to":"logic"}')"; RC=$?
 [ "$RC" = 2 ] \
   || { fail "cast rule shape" "a rule with a non-string from exited $RC, not 2: $CAST_RSH"; S=1; }
 # break: letting side() answer null for a wrong shape and a missing key alike,
@@ -1435,14 +1367,14 @@ printf '%s\n' "$CAST_RSH" | grep -qF 'has from 3, not a layer name or a path glo
   || { fail "cast rule shape" "the shape that was expected was not named: $CAST_RSH"; S=1; }
 printf '%s\n' "$CAST_RSH" | grep -q 'carries no from' \
   && { fail "cast rule shape" "a present from was reported as absent: $CAST_RSH"; S=1; }
-CAST_RSH2="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","from":"ui","to":["logic"]}' 2>&1)"; RC=$?
+CAST_RSH2="$(try_rule '{"name":"r","from":"ui","to":["logic"]}')"; RC=$?
 [ "$RC" = 2 ] \
   || { fail "cast rule shape" "a rule with a non-string to exited $RC, not 2: $CAST_RSH2"; S=1; }
 printf '%s\n' "$CAST_RSH2" | grep -qF 'has to ["logic"], not a layer name or a path glob' \
   || { fail "cast rule shape" "the shape expected of to was not named: $CAST_RSH2"; S=1; }
 # a side that really is absent still says so - break: reporting every side by its
 # shape, which leaves a forgotten key describing itself as undefined
-CAST_RSH3="$(cd "$CASTFIX" && "$CAST_BIN" rules preview '{"name":"r","to":"logic"}' 2>&1)"; RC=$?
+CAST_RSH3="$(try_rule '{"name":"r","to":"logic"}')"; RC=$?
 [ "$RC" = 2 ] \
   || { fail "cast rule shape" "a rule with no from exited $RC, not 2: $CAST_RSH3"; S=1; }
 printf '%s\n' "$CAST_RSH3" | grep -q 'carries no from' \
@@ -1558,6 +1490,44 @@ printf '%s\n' "$CAST_PLAN" | grep -q 'no module src/bc.ts' \
 printf '%s\n' "$CAST_PLAN" | grep -q '^module edges 8 -> 7' \
   || { fail "cast plan" "the operations did not reach the copied graph: $CAST_PLAN"; S=1; }
 [ "$S" = 0 ] && ok "cast plan"
+
+# a plan is a name or a path, so a draft never has to be written into the
+# checkout to be simulated - the agents keep theirs in a scratch directory
+S=0
+PLANDIR="$(mktemp -d)"
+cp "$CASTFIX/.cast/plans/cut.json" "$PLANDIR/cut.json"
+# break: resolving every argument under <root>/.cast/plans, which makes a plan
+# outside the checkout unreadable and the scratch draft impossible
+CAST_PP="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate "$PLANDIR/cut.json" 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan path" "a plan given by path exited $RC: $CAST_PP"; S=1; }
+printf '%s\n' "$CAST_PP" | grep -q '^module edges 8 -> 7' \
+  || { fail "cast plan path" "the plan at a path was not applied: $CAST_PP"; S=1; }
+# break: naming the plan by its whole path, which puts a scratch directory in
+# every line of the report
+printf '%s\n' "$CAST_PP" | grep -q '^plan cut ' \
+  || { fail "cast plan path" "the plan at a path is not named by its basename: $CAST_PP"; S=1; }
+# --plan resolves the same way, or the page and the simulation disagree on what
+# a plan argument means
+# break: teaching only `plan simulate` about paths and leaving render behind
+CAST_PR2="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan "$PLANDIR/cut.json" 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan path" "rendering a plan given by path exited $RC: $CAST_PR2"; S=1; }
+printf '%s\n' "$CAST_PR2" | grep -q '^graph LR' \
+  || { fail "cast plan path" "the plan at a path drew no graph: $CAST_PR2"; S=1; }
+# a bare name still means the project's own plan
+# break: reading every argument as a path, which breaks `plan simulate <name>`
+CAST_PN="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan path" "a plan given by name exited $RC: $CAST_PN"; S=1; }
+# and a name that is nowhere says where it looked, relatively - break: printing
+# the absolute path of a file inside the root, or `../..` for one outside it
+CAST_PM="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate nosuch 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast plan path" "a missing plan exited $RC, not 2: $CAST_PM"; S=1; }
+printf '%s\n' "$CAST_PM" | grep -qxF 'no plan at .cast/plans/nosuch.json' \
+  || { fail "cast plan path" "a missing plan did not say where it looked: $CAST_PM"; S=1; }
+CAST_PM2="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate "$PLANDIR/nosuch.json" 2>&1)"; RC=$?
+printf '%s\n' "$CAST_PM2" | grep -qxF "no plan at $PLANDIR/nosuch.json" \
+  || { fail "cast plan path" "a missing plan outside the root was not named absolutely: $CAST_PM2"; S=1; }
+rm -rf "$PLANDIR"
+[ "$S" = 0 ] && ok "cast plan path"
 
 # every edge the simulation produces names a site in the module that holds it
 S=0
@@ -2666,7 +2636,7 @@ grep -qF 'html,body{max-width:100%;overflow-x:hidden}' "$CAST_PAGE" \
 # the prompt, so the model never has to know the flags - a skill that only
 # describes the command is the failure these exist to prevent.
 S=0
-for s in map rules plan; do
+for s in map plan; do
   F="plugins/cast/skills/$s/SKILL.md"
   if [ ! -f "$F" ]; then fail "cast skills" "$F is missing"; S=1; continue; fi
   # break: dropping allowed-tools, which hands the skill the whole tool surface
@@ -2695,7 +2665,6 @@ skill_runs() {
     || { fail "cast skills" "$F does not run '$2' in the prompt"; S=1; }
 }
 skill_runs map 'report'
-skill_runs rules 'rules preview'
 # The plan skill simulates a plan it has not drafted yet, so the prompt line
 # reports the graph it drafts against; `plan simulate` is run per loop, and the
 # `cast plan skill` suite below is what holds it there.
@@ -2708,7 +2677,7 @@ skill_runs plan 'report'
 # The prompt line resolves that root once, echoes it so the model can pass it on,
 # and carries it on every call it makes - with no argument, the working directory.
 S=0
-for s in map rules plan; do
+for s in map plan; do
   F="plugins/cast/skills/$s/SKILL.md"
   [ -f "$F" ] || { fail "cast skill root" "$F is missing"; S=1; continue; }
   L="$(grep '^!' "$F" | head -1)"
@@ -2734,15 +2703,115 @@ for s in map rules plan; do
   grep -qF -- '--root <root>' "$F" \
     || { fail "cast skill root" "$F never asks for --root <root> on the calls it hands on"; S=1; }
 done
-# break: the two skills whose argument is not the directory taking the trailing
-# word blindly, so a rule object or a goal is read as a root
-for s in rules plan; do
-  F="plugins/cast/skills/$s/SKILL.md"
-  [ -f "$F" ] || continue
+# break: the skill whose argument is not the directory taking the trailing word
+# blindly, so a goal is read as a root
+F="plugins/cast/skills/plan/SKILL.md"
+if [ -f "$F" ]; then
   grep '^!' "$F" | grep -qF '[ -d "$L" ]' \
     || { fail "cast skill root" "$F takes its trailing word as a root without testing it is a directory"; S=1; }
-done
+fi
 [ "$S" = 0 ] && ok "cast skill root"
+
+
+# --- cast agents ------------------------------------------------------------
+# The two subagents a session delegates the graph to. Each is a context boundary
+# around a skill that already exists, and what it buys is the report, the edge
+# listings and the rounds of simulation staying out of the caller - so a
+# definition that hands those back anyway has paid a dispatch for nothing.
+S=0
+for a in graph-analyst refactor-planner; do
+  F="plugins/cast/agents/$a.md"
+  if [ ! -f "$F" ]; then fail "cast agents" "$F is missing"; S=1; continue; fi
+  FM="$(sed -n '2,/^---$/p' "$F")"
+  # break: dropping description, which is the only thing routing reads - an
+  # agent nothing routes to is never dispatched and the session runs cast itself
+  for k in name description model tools skills; do
+    printf '%s\n' "$FM" | grep -q "^$k:" \
+      || { fail "cast agents" "$F carries no $k in its frontmatter"; S=1; }
+  done
+  # break: copying one agent's file to the other and leaving the name behind
+  printf '%s\n' "$FM" | grep -qx "name: $a" \
+    || { fail "cast agents" "$F does not name itself $a"; S=1; }
+  # break: copying the agent into .claude/agents, where an edit to the source in
+  # plugins/cast is not live in the session
+  [ -L ".claude/agents/$a.md" ] \
+    || { fail "cast agents" ".claude/agents/$a.md is not a symbolic link"; S=1; }
+  [ "$(readlink -f ".claude/agents/$a.md")" = "$PWD/plugins/cast/agents/$a.md" ] \
+    || { fail "cast agents" ".claude/agents/$a.md does not point at plugins/cast/agents/$a.md"; S=1; }
+  # break: handing the agent Edit, so it can change the source it was dispatched
+  # to read about - neither of the two edits a file
+  printf '%s\n' "$FM" | grep -q '^tools:.*Edit' \
+    && { fail "cast agents" "$F may edit source files"; S=1; }
+  # break: returning the report itself, which pays the dispatch and lands the
+  # whole graph in the caller's context anyway
+  grep -q '^## Return$' "$F" \
+    || { fail "cast agents" "$F states no return contract"; S=1; }
+  grep -qi 'never paste the page markup' "$F" \
+    || { fail "cast agents" "$F does not keep the page markup out of its return"; S=1; }
+  # break: leaving Artifact out, which sends the page back as a path and makes
+  # the caller publish a file it did not write - the one handling the boundary
+  # exists to keep out of its context
+  printf '%s\n' "$FM" | grep -q '^tools:.*Artifact' \
+    || { fail "cast agents" "$F cannot publish the page it renders"; S=1; }
+  grep -qF 'page: <url>' "$F" \
+    || { fail "cast agents" "$F does not return the link it published"; S=1; }
+done
+# break: dropping the skill the agent's procedure lives in, so it rediscovers the
+# cast flags on every run - the duplication the boundary exists to avoid
+agent_declares() {
+  F="plugins/cast/agents/$1.md"
+  [ -f "$F" ] || return 0
+  sed -n '2,/^---$/p' "$F" | grep -qx "  - $2" \
+    || { fail "cast agents" "$F does not declare the $2 skill"; S=1; }
+}
+agent_declares graph-analyst cast:map
+agent_declares graph-analyst map
+agent_declares refactor-planner cast:plan
+agent_declares refactor-planner plan
+# break: letting the planner edit ahead of an accepted simulation, which is the
+# one thing the draft-simulate-judge loop exists to prevent
+grep -qi 'no source file' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner does not forbid itself a source edit"; S=1; }
+# break: rendering the page without --fragment, which the caller then cannot
+# publish as an Artifact
+grep -qF -- '--fragment' plugins/cast/agents/graph-analyst.md \
+  || { fail "cast agents" "the analyst does not render a publishable fragment"; S=1; }
+# break: adding the agents and routing nothing to them, so the session keeps
+# reading the graph in its own context
+for a in graph-analyst refactor-planner; do
+  grep -q "$a" plugins/cast/rules/cast.md \
+    || { fail "cast agents" "the cast rule never names $a"; S=1; }
+done
+# Everything an agent writes is throwaway and belongs outside the checkout - the
+# caller publishes the page and never wants it back.
+for a in graph-analyst refactor-planner; do
+  F="plugins/cast/agents/$a.md"
+  [ -f "$F" ] || continue
+  # break: rendering into the tree - `.cast/render/<slug>.html` was the first
+  # version of both agents, and left a page behind on every run
+  grep -qF -- '--html "$SCRATCH/' "$F" \
+    || { fail "cast agents" "$F does not render into the scratch directory"; S=1; }
+  grep -qF -- '--html <root>/' "$F" \
+    && { fail "cast agents" "$F still renders into the checkout"; S=1; }
+  # break: naming a scratch directory and never saying where it comes from, so
+  # an agent whose task names none writes $SCRATCH/... into its working directory
+  grep -qF 'mktemp -d' "$F" \
+    || { fail "cast agents" "$F has no scratch directory where its task names none"; S=1; }
+  # break: returning a relative path, which the caller cannot resolve - it does
+  # not share the agent's working directory
+  grep -qi 'absolute path' "$F" \
+    || { fail "cast agents" "$F does not return absolute paths"; S=1; }
+done
+# The plan goes to scratch with everything else - `cast plan simulate` takes a
+# path. break: sending it back to `.cast/plans/` by default, which leaves a draft
+# in the tree on every run, accepted or not.
+grep -qF '$SCRATCH/<name>.json' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner does not draft into the scratch directory"; S=1; }
+# break: dropping the one case that does belong in the checkout, so a plan the
+# caller asked to keep is written where nothing looks for it
+grep -qF '<root>/.cast/plans/<name>.json' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner never keeps a plan beside the code"; S=1; }
+[ "$S" = 0 ] && ok "cast agents"
 
 
 # --- cast plan skill --------------------------------------------------------
@@ -2881,7 +2950,7 @@ run_pre() {
   ( cd "$2" && CLAUDE_PLUGIN_ROOT="$PWD_ROOT/plugins/cast" ARGUMENTS="$3" bash -c "$4" 2>&1 )
 }
 PWD_ROOT="$PWD"
-for k in map plan rules; do
+for k in map plan; do
   L="$(preamble_of "$k")"
   [ -n "$L" ] || { fail "cast skill preamble" "the $k skill carries no preamble to run"; S=1; continue; }
   # break: `ls .cast/plans` with nothing to list, or `scan && report` passing a
@@ -2892,15 +2961,6 @@ for k in map plan rules; do
   printf '%s\n' "$OUT" | grep -q '^cast root: ' \
     || { fail "cast skill preamble" "the $k preamble does not name the root it read: $OUT"; S=1; }
 done
-# a rule cast cannot read is the answer the skill exists to explain, so the
-# explanation loads and the message reaches the caller
-# break: `&&`-chaining the preview, whose exit 2 then stands for the skill
-RULES_PRE="$(preamble_of rules)"
-OUT="$(run_pre rules "$PRE/empty" '{"nope":1}' "$RULES_PRE")"; RC=$?
-[ "$RC" = 0 ] \
-  || { fail "cast skill preamble" "the rules preamble exited $RC on a rule cast cannot read"; S=1; }
-printf '%s\n' "$OUT" | grep -qF 'the rule carries no name' \
-  || { fail "cast skill preamble" "the rules preamble swallowed what was wrong with the rule: $OUT"; S=1; }
 # where there is something to list, it is still listed
 # break: silencing the listing along with its exit code
 mkdir -p "$PRE/withplan/.cast/plans" && printf '{"operations":[]}\n' > "$PRE/withplan/.cast/plans/cut.json"

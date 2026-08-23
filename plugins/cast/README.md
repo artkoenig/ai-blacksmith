@@ -6,9 +6,7 @@ The module graph of a project, and what is wrong with it.
 cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
 cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
-cast rules preview <rule json> [--root <dir>]
-                             one rule, tried before it is written down
-cast plan simulate <name> [--root <dir>]
+cast plan simulate <name|file> [--root <dir>]
                              applies <root>/.cast/plans/<name>.json to a copy of
                              the graph and says what it would change
 cast baseline [--update] [--root <dir>]
@@ -16,8 +14,8 @@ cast baseline [--update] [--root <dir>]
                              holds, and the ratchet that rewrites it
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
-cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
-cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]
+cast render --mermaid [--expand <layer>] [--plan <name|file>] [--root <dir>]
+cast render --html <file> [--fragment] [--expand <layer>] [--plan <name|file>] [--root <dir>]
                              the graph at layer altitude, one layer resolved;
                              --plan draws the graph <name> would leave instead
                              of the scanned one
@@ -58,8 +56,8 @@ module edges ui -> logic 3
 ```
 
 A count labelled `edges` is every import cast met - the one `cast report` prints. Every narrower
-count says so: `module edges` is the resolved ones, in `cast edges`, `cast plan simulate`, the
-preview and the check summary alike.
+count says so: `module edges` is the resolved ones, in `cast edges`, `cast plan simulate` and the
+check summary alike.
 
 Only edges that landed on a module have a far layer; an unresolved or external import is named by
 `cast report` instead.
@@ -98,13 +96,13 @@ and by layer edge, each site with its file and its line - and exit 2 where the c
 at all. `bin/cast-check` is that check as a check command: it scans, then checks, and takes no
 arguments.
 
-A rule is tried before it is written down: `cast rules preview '<rule json>'` takes one rule
-object - the same shape a `forbidden` entry has, read by the same validation - and reports the
-module edges it would flag today, grouped like the check and counted per edge, never per module.
-One module with three forbidden imports is three imports to move, so the count is 3 and the
-modules are named beside it. The exceptions in the project's `allowed` list are applied, so the
-number is what `cast check` would add. A preview reports and always exits 0; only a rule it cannot
-read at all is exit 2.
+A rule is tried before it is enforced by writing it down as a warning. `severity: "warn"` is
+listed like any other violation - grouped by rule and by layer edge, every site with its file and
+its line - and leaves the exit code alone, so `cast check` says what the rule would cost today
+without failing a build for it. Read the count, then decide: fix the sites and switch the rule to
+`error`, hold them in `.cast/baseline.json` and switch to `error` from today, or drop the rule
+again. The count is module edges, never modules - one module with three forbidden imports is three
+imports to move.
 
 ## Baseline
 
@@ -131,8 +129,13 @@ can only shrink, so a rule cannot quietly stop meaning anything.
 
 ## Plans
 
-`<root>/.cast/plans/<name>.json` is a refactoring written down before anyone edits a file: an
-ordered list of operations, applied by `cast plan simulate <name>` to a copy of the graph.
+A plan is a refactoring written down before anyone edits a file: an ordered list of operations,
+applied by `cast plan simulate` to a copy of the graph.
+
+The argument is a name or a path. A bare name is the project's own plan, `<root>/.cast/plans/<name>.json`
+- the one that is worth keeping beside the code. An argument carrying a `/` or a `.json` is a path,
+resolved against the working directory, so a draft can be simulated out of a scratch directory
+without being written into the checkout at all. `--plan` on `cast render` reads the same two forms.
 
 ```json
 {
@@ -180,8 +183,8 @@ graph LR
 `--expand <layer>` resolves that one layer to its modules, in a subgraph, and leaves every other
 layer a single node; an edge into it lands on the module, not on the layer.
 
-`--plan <name>` draws the graph `cast plan simulate <name>` produces instead of the scanned one:
-`<root>/.cast/plans/<name>.json` applied to a copy of the graph, so a refactoring can be looked at
+`--plan <name|file>` draws the graph `cast plan simulate` produces instead of the scanned one: the
+plan applied to a copy of the graph, so a refactoring can be looked at
 before a single source file is edited. Both `--mermaid` and `--html` take it, and both draw the
 simulated graph the same way they draw the scanned one - layers, rules and the baseline are read
 at render time against the graph the plan leaves. Rendering a plan writes no `.cast/graph.json`
