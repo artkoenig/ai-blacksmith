@@ -2381,9 +2381,11 @@ grep -qE "pointer(up|cancel)', \(ev\) => \{ if \(ev.pointerType !== 'mouse'\) \{
   && { fail "cast highlight touch" "lifting the finger clears the highlight the press asked for"; S=1; }
 [ "$S" = 0 ] && ok "cast highlight touch"
 
-# AC8 (of #47) the highlight ends: on leaving with the mouse, on a press
+# AC8 (of #47) the highlight ends: on leaving with the mouse, on a tap
 # elsewhere, and on the render that opening or closing a group brings. Not on the
-# release of the long press - the finger lifts and the numbers stay readable.
+# release of the long press - the finger lifts and the numbers stay readable -
+# and not on a scroll: the touch that scrolls the page is how a phone reaches the
+# panel the highlight wrote.
 S=0
 # break: fading the arrows and never restoring them, or leaving the panel full
 O="$(pagejs '
@@ -2398,8 +2400,27 @@ O="$(pagejs '
 # drawing faded with no way back
 grep -qF "document.addEventListener('pointerdown', (ev) => {" "$CAST_PAGE" \
   || { fail "cast highlight ends" "a press away from the highlighted node never clears it"; S=1; }
-grep -qF "if (!g || g.id !== held) unhighlight()" "$CAST_PAGE" \
-  || { fail "cast highlight ends" "a press away from the highlighted node does not clear it"; S=1; }
+grep -qF "away = (!g || g.id !== held) ? { x: ev.clientX, y: ev.clientY, held } : null" "$CAST_PAGE" \
+  || { fail "cast highlight ends" "a press away from the highlighted node does not propose the end"; S=1; }
+# break: clearing on the release whatever the highlight is now, so a long press
+# on a second node highlights it and its own release takes it straight away again
+grep -qF "if (away && away.held === held) unhighlight()" "$CAST_PAGE" \
+  || { fail "cast highlight ends" "the release of a press away from the highlighted node does not clear it"; S=1; }
+# the touch that begins a scroll must not clear anything: the reader scrolls to
+# read the panel the highlight wrote
+# break: calling unhighlight() from the document pointerdown, which wipes the
+# highlight in the moment the finger touches down to scroll
+AW="$(sed -n "/^  document.addEventListener('pointerdown', (ev) => {/,/^  })/p" "$CAST_PAGE")"
+printf '%s\n' "$AW" | grep -qF 'unhighlight()' \
+  && { fail "cast highlight ends" "the touch that starts a scroll clears the highlight before it is a tap"; S=1; }
+# break: taking the release for a tap wherever it lands, so a scroll that ends
+# off the node clears the highlight it scrolled to read
+grep -qF "if (away && (Math.abs(ev.clientX - away.x) > SLOP || Math.abs(ev.clientY - away.y) > SLOP)) cancelAway()" "$CAST_PAGE" \
+  || { fail "cast highlight ends" "a gesture that travels still counts as the tap that dismisses"; S=1; }
+# break: leaving the proposal standing when the browser takes the gesture over
+# for a scroll, so the next release elsewhere clears a highlight nobody dismissed
+grep -qF "document.addEventListener('pointercancel', cancelAway)" "$CAST_PAGE" \
+  || { fail "cast highlight ends" "a cancelled gesture leaves the dismissal standing"; S=1; }
 # break: rebuilding the drawing and leaving the old highlight state behind
 RB="$(sed -n '/^  function render() {/,/^    svg.textContent/p' "$CAST_PAGE")"
 printf '%s\n' "$RB" | grep -qF 'unhighlight()' \
