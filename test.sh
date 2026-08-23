@@ -1090,16 +1090,20 @@ done
 # break: reaching for a mermaid library once a host is drawing the block
 printf '%s\n' "$CAST_FRAG" | grep -qE 'src="https?:|href="https?:' \
   && { fail "cast artifact page" "the fragment loads an external asset"; S=1; }
-# the mermaid block is the source and nothing else: the page has drawn the graph
-# already, and a host that draws mermaid natively would draw it a second time,
-# below the first and at an altitude that says less
-# break: marking the block `class="mermaid"`, which is what such a host looks for
+# the page draws the graph once: the mermaid source is `render --mermaid`, and a
+# copy of it below a drawing that opens every node said less than the drawing did
+# break: putting the block back, marked or bare
 for f in "$CASTFIX/frag.html" "$CASTFIX/view.html"; do
-  grep -qF 'class="mermaid"' "$f" \
-    && { fail "cast artifact page" "$f has a host draw the graph a second time"; S=1; }
-  grep -qF 'graph LR' "$f" \
-    || { fail "cast artifact page" "$f no longer carries the mermaid source"; S=1; }
+  for t in '<h2>mermaid</h2>' '<pre id="mermaid"' 'class="mermaid"' 'graph LR'; do
+    grep -qF "$t" "$f" \
+      && { fail "cast artifact page" "$f still carries the mermaid block: $t"; S=1; }
+  done
 done
+# the source itself is unchanged where it is asked for
+# break: taking the block off the page by taking the render with it
+CAST_MM_STILL="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"
+printf '%s\n' "$CAST_MM_STILL" | grep -q '^graph LR$' \
+  || { fail "cast artifact page" "cast render --mermaid no longer draws: $CAST_MM_STILL"; S=1; }
 # AC3, AC4 every colour is a token on bare `:root`, redefined both ways a theme
 # is asked for, and the ground is painted rather than inherited
 # break: putting `.node rect{fill:#eef3fb}` back as a literal, or defining a
@@ -2604,9 +2608,6 @@ grep -qF "svg.setAttribute('height', l.height)" "$CAST_PAGE" \
 # the reader every time they scroll the graph
 grep -qF 'html,body{max-width:100%;overflow-x:hidden}' "$CAST_PAGE" \
   || { fail "cast narrow screen" "the page body can scroll sideways"; S=1; }
-# the other wide block on the page scrolls in place too
-grep -qF '#mermaid{overflow-x:auto}' "$CAST_PAGE" \
-  || { fail "cast narrow screen" "the mermaid block widens the page instead of scrolling"; S=1; }
 [ "$S" = 0 ] && ok "cast narrow screen"
 
 

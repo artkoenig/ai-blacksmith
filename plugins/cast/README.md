@@ -223,9 +223,10 @@ host that supplies its own skeleton and its own theme - a Claude Code artifact i
 a second set of those tags. Every colour the page paints is a custom property defined on bare
 `:root`, redefined for `prefers-color-scheme: dark` and again for a root marked
 `data-theme="dark"`, and `body` paints its own background, so the page reads the same whichever
-theme the host is in. The mermaid block stays the source it always was, marked for no host to
-draw: the page has already drawn the graph, and a second drawing of it under the first says less
-than the one above it. Both forms fetch nothing at view time.
+theme the host is in. Neither form carries a mermaid block: the page has drawn the graph itself, at
+an altitude that opens every node, and a copy of the same graph below it said less than the drawing
+above. The source is `render --mermaid`, where a page is not what is wanted. Both forms fetch
+nothing at view time.
 
 ## Adapters
 

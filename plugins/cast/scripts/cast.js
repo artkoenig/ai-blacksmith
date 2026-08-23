@@ -1031,12 +1031,14 @@ const PAGE_CSS = [
   // ones they carry at rest.
   '.edge.dim{opacity:.15}',
   '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
-  '#mermaid{overflow-x:auto}',
 ].join('')
 
 // Self-contained on purpose: the data, the script and the style are in the file
 // and nothing is fetched at view time. What the page draws it computes from the
-// embedded description, through the functions the commands use.
+// embedded description, through the functions the commands use. It draws that
+// graph once: the mermaid source is `render --mermaid`, for an issue or a
+// document, and repeating it below a drawing that opens every node said less
+// than the drawing already did.
 //
 // `fragment` drops the document around that content and nothing else. A host
 // that supplies its own `<!doctype>`, `<head>` and `<body>` - an artifact page
@@ -1077,11 +1079,6 @@ function html(graph, rules, expand, checkRules, baseline, fragment) {
     `<ul id="counts">\n${counts}\n</ul>`,
     '<h2>layers</h2>',
     `<ul id="layers">\n${layers}\n</ul>`,
-    '<h2>mermaid</h2>',
-    // The block is the source and never a second drawing: `class="mermaid"` would
-    // have a host that draws mermaid natively draw the same graph again, under the
-    // one the page draws itself, at an altitude that says less.
-    `<pre id="mermaid">${esc(mermaid(graph, rules, expand, checkRules, baseline))}</pre>`,
     `<script id="cast-data" type="application/json">${embedded}</script>`,
     `<script>\n${script}</script>`,
   ]
