@@ -3,7 +3,7 @@ name: refactor-planner
 description: Turns a restructuring goal into a cast plan and judges it on the simulation - draft, simulate, judge, redraft until one is accepted or the goal is shown to be unreachable. Writes only the plan file, edits no source file, and returns the verdict with the numbers that moved. Use before any file is edited for a restructuring, so the rounds of simulation output stay out of the caller's context.
 model: inherit
 effort: medium
-tools: Bash, Read, Write
+tools: Bash, Read, Write, Artifact
 skills:
   - cast:plan
   - plan
@@ -61,6 +61,7 @@ Your final message is a return value. In this order, nothing else:
 
 Where the caller asked for the picture, add `cast render --mermaid --plan <name> --root <root>` in a
 fenced `mermaid` block; for a page, `cast render --html "$SCRATCH/<name>.html" --fragment --plan
-<name> --root <root>` and return the path instead. Never paste the page markup.
+<name> --root <root>`, published with `Artifact` - the file and `favicon: "🧭"`, no title, the page
+carries its own - and return `page: <url>`. Never paste the page markup.
 
 Never ask a question - nobody is there.

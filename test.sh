@@ -2748,6 +2748,13 @@ for a in graph-analyst refactor-planner; do
     || { fail "cast agents" "$F states no return contract"; S=1; }
   grep -qi 'never paste the page markup' "$F" \
     || { fail "cast agents" "$F does not keep the page markup out of its return"; S=1; }
+  # break: leaving Artifact out, which sends the page back as a path and makes
+  # the caller publish a file it did not write - the one handling the boundary
+  # exists to keep out of its context
+  printf '%s\n' "$FM" | grep -q '^tools:.*Artifact' \
+    || { fail "cast agents" "$F cannot publish the page it renders"; S=1; }
+  grep -qF 'page: <url>' "$F" \
+    || { fail "cast agents" "$F does not return the link it published"; S=1; }
 done
 # break: dropping the skill the agent's procedure lives in, so it rediscovers the
 # cast flags on every run - the duplication the boundary exists to avoid
