@@ -19,7 +19,7 @@
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
 //   cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
-//   cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]
+//   cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]
 //                                the graph at layer altitude, one layer resolved;
 //                                --plan draws the graph the plan would leave,
 //                                writing nothing but the page that was asked for
@@ -376,6 +376,10 @@ function viewAt(data, expand) {
     // The severity is the colour and the rule name is the label, in both views:
     // an edge nobody flagged keeps the label it always had, the bare weight.
     g.color = !g.state ? '#666' : g.state === 'inherited' ? '#888' : g.severity === 'warn' ? '#e08b00' : '#d32f2f'
+    // The tone is the name of the severity's colour, and the page takes the
+    // colour itself from the sheet: an arrow drawn with a literal would keep a
+    // light theme's red on a dark ground.
+    g.tone = !g.state ? 'plain' : g.state === 'inherited' ? 'inherited' : g.severity === 'warn' ? 'warn' : 'error'
     g.label = g.rule ? g.weight + ' ' + g.rule + (g.state === 'inherited' ? ' (inherited)' : '') : String(g.weight)
   }
   return { nodes, edges, expand: expand || null, counts: data.counts }
@@ -560,6 +564,10 @@ function viewTree(data, open) {
   const edges = [...by.keys()].sort().map((k) => by.get(k))
   for (const g of edges) {
     g.color = !g.state ? '#666' : g.state === 'inherited' ? '#888' : g.severity === 'warn' ? '#e08b00' : '#d32f2f'
+    // The tone is the name of the severity's colour, and the page takes the
+    // colour itself from the sheet: an arrow drawn with a literal would keep a
+    // light theme's red on a dark ground.
+    g.tone = !g.state ? 'plain' : g.state === 'inherited' ? 'inherited' : g.severity === 'warn' ? 'warn' : 'error'
     g.label = g.rule ? g.weight + ' ' + g.rule + (g.state === 'inherited' ? ' (inherited)' : '') : String(g.weight)
     // The kinds behind the arrow, counted. Without them a type import a rule's
     // `kinds` deliberately spares looks exactly like a value import no rule
@@ -918,7 +926,7 @@ function draw() {
     for (const e of l.edges) {
       const d = 'M ' + e.x1 + ' ' + e.y1 + ' C ' + e.mx + ' ' + e.y1 + ' ' + e.mx + ' ' + e.y2 + ' ' + e.x2 + ' ' + e.y2
       const line = el('path', {
-        d, fill: 'none', stroke: e.color, 'stroke-width': e.state ? 3 : 1.5,
+        d, fill: 'none', stroke: 'var(--edge-' + e.tone + ')', 'stroke-width': e.state ? 3 : 1.5,
         'stroke-dasharray': e.state === 'inherited' ? '6 4' : 'none',
         class: 'edge',
       })
@@ -964,21 +972,100 @@ function mermaid(graph, rules, expand, checkRules, baseline) {
 // phone waits for a second tap before it believes the first, and the wait is a
 // zoom. Nothing here reveals a control on `:hover` - there is no hover on a
 // phone, so a control that needs one does not exist there.
+// The page is an instrument, not a document: a project's name in the type of a
+// path, the counts as a panel that says at a glance which of them should have
+// been zero, and one drawing under them. Two faces carry it - a sans for the
+// chrome, a mono everywhere the page shows something the project itself named:
+// the project, a module, a file and line, a count. No face is fetched: the page
+// loads nothing at view time, which rules a webfont out and leaves the stacks
+// below, each ending in a family every platform has.
+//
+// Every colour is a custom property on bare `:root`, so one sheet answers three
+// ways of asking for a theme: the page's own light default, a viewer that only
+// reports `prefers-color-scheme`, and a host that stamps `data-theme` on the
+// root element. A colour defined only inside one of those blocks is missing in
+// the other two, so none is.
+const THEME_LIGHT = [
+  'color-scheme:light',
+  '--bg:#f7f9fb', '--surface:#ffffff', '--fg:#141a21', '--muted:#5d6b7a', '--line:#e3e9ef',
+  '--accent:#2f5d8c',
+  '--bad:#b3261e', '--bad-bg:#fdf1f0', '--warn:#8a5a00', '--warn-bg:#fdf6e7',
+  '--btn-bg:#ffffff', '--btn-line:#d3dbe3',
+  // Depth reads as recession, not as three unrelated hues: one family, the layer
+  // carrying the accent and each level inside it quieter than the one holding it.
+  '--node-bg:#e8eff8', '--node-line:#2f5d8c',
+  '--folder-bg:#eff3f7', '--folder-line:#93a4b8',
+  '--file-bg:#f7f9fb', '--file-line:#c3ccd7',
+  '--edge-plain:#666666', '--edge-inherited:#888888',
+  '--edge-warn:#e08b00', '--edge-error:#d32f2f',
+].join(';')
+const THEME_DARK = [
+  'color-scheme:dark',
+  '--bg:#0e1216', '--surface:#161c23', '--fg:#e7ecf1', '--muted:#96a3b2', '--line:#242d37',
+  '--accent:#7fa9d8',
+  '--bad:#ff8a80', '--bad-bg:#2a1618', '--warn:#f0b45a', '--warn-bg:#2a2113',
+  '--btn-bg:#1c232b', '--btn-line:#313b46',
+  '--node-bg:#18242f', '--node-line:#7fa9d8',
+  '--folder-bg:#171d25', '--folder-line:#5a6979',
+  '--file-bg:#111721', '--file-line:#3a4552',
+  '--edge-plain:#9aa0a6', '--edge-inherited:#6e747a',
+  '--edge-warn:#f0a830', '--edge-error:#ff6b6b',
+].join(';')
+
+const SANS = 'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif'
+const MONO = 'ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace'
+const LABEL = 'font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)'
+
 const PAGE_CSS = [
+  `:root{${THEME_LIGHT}}`,
+  `@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){${THEME_DARK}}}`,
+  `:root[data-theme="dark"]{${THEME_DARK}}`,
   '*{box-sizing:border-box}',
   'html,body{max-width:100%;overflow-x:hidden}',
-  'body{font:16px system-ui,sans-serif;margin:1rem;color:#222;touch-action:manipulation}',
-  '#controls{display:flex;flex-wrap:wrap;gap:8px}',
-  'button{font:inherit;min-height:44px;min-width:44px;padding:0 12px;cursor:pointer;touch-action:manipulation}',
+  // The ground is painted, never inherited: a transparent body borrows the
+  // background of whatever embeds the page, and a drawing built for one theme
+  // lands on the other.
+  `body{font:16px/1.5 ${SANS};margin:0;padding:clamp(16px,4vw,40px);color:var(--fg);background:var(--bg);touch-action:manipulation}`,
+  // Every gap is the layout's, never a margin's: two of those collapse into one
+  // and the spacing stops being the number it says it is.
+  '.page{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:28px}',
+  'section{display:flex;flex-direction:column;gap:10px}',
+  // The project is a directory the reader knows by its path, so it is set in the
+  // face a path is set in.
+  `h1{margin:0;font:600 clamp(26px,4vw,38px)/1.15 ${MONO};letter-spacing:-.01em;text-wrap:balance;overflow-wrap:anywhere}`,
+  `h2{margin:0;${LABEL};font-weight:600}`,
+  `.eyebrow{margin:0;${LABEL}}`,
+  // Each cell carries its own outline and the grid only spaces them: a track the
+  // last row leaves empty then shows the page's own ground, not a panel with a
+  // hole in it.
+  '.stats{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}',
+  '.stat{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:6px}',
+  `.stat .k{${LABEL}}`,
+  `.stat .v{font:400 21px/1.1 ${MONO};font-variant-numeric:tabular-nums}`,
+  // A count that should have been zero says so in its own colour, so the panel
+  // is read at a glance and not summed by the reader.
+  '.stat.bad{background:var(--bad-bg);border-color:var(--bad)}',
+  '.stat.bad .k,.stat.bad .v{color:var(--bad)}',
+  '.stat.warn{background:var(--warn-bg);border-color:var(--warn)}',
+  '.stat.warn .k,.stat.warn .v{color:var(--warn)}',
+  '#controls{display:flex;flex-wrap:wrap;gap:8px;margin:0}',
+  // Nothing on this page answers a hover: there is none on a phone, so a state
+  // only a pointer can reach is a state half the readers never see.
+  'button{font:inherit;min-height:44px;min-width:44px;padding:0 14px;cursor:pointer;touch-action:manipulation;color:var(--fg);background:var(--btn-bg);border:1px solid var(--btn-line);border-radius:6px}',
+  'button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}',
   // The graph scrolls inside its own box. It is never scaled to fit: a tree
   // deep enough to need this is a tree too small to read once it has been.
-  '#graph-scroll{overflow-x:auto;max-width:100%;border:1px solid #ddd;background:#fff}',
+  '#graph-scroll{overflow-x:auto;max-width:100%;width:max-content;border:1px solid var(--line);background:var(--surface);border-radius:6px}',
   '#graph{display:block;touch-action:manipulation}',
-  '.node rect{fill:#eef3fb;stroke:#4a6fa5}',
-  '.node.folder rect{fill:#f2f5ee;stroke:#6f8a5a}',
-  '.node.file rect{fill:#f6f6f2;stroke:#8a8a70}',
+  '.node rect{fill:var(--node-bg);stroke:var(--node-line)}',
+  '.node.folder rect{fill:var(--folder-bg);stroke:var(--folder-line)}',
+  '.node.file rect{fill:var(--file-bg);stroke:var(--file-line)}',
   '.node.open>rect{fill:none;stroke-dasharray:4 3}',
-  '.node text{font-size:15px;pointer-events:none}',
+  // svg text carries its own `fill` and never the `color` around it: without
+  // this the labels stay black wherever the ground goes dark. A node's label is
+  // a file name, so it is set in the mono; 14px keeps the longest of them inside
+  // a box whose width is fixed, never measured.
+  `.node text{font:14px ${MONO};pointer-events:none;fill:var(--fg)}`,
   '.node .head{cursor:pointer}',
   // The target itself: painted with nothing, pressed like anything else.
   '.hit,.node .hit{fill:transparent;pointer-events:all}',
@@ -988,30 +1075,64 @@ const PAGE_CSS = [
   // arrows it does name are left alone, so their colour, width and dash are the
   // ones they carry at rest.
   '.edge.dim{opacity:.15}',
-  '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
-  '#mermaid{overflow-x:auto}',
+  // Nothing was pressed yet, so the panel is not a box of air.
+  '#sites:empty{display:none}',
+  '#sites{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px}',
+  '#sites h3{margin:0 0 8px;font-size:15px;font-weight:600}',
+  '#sites ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}',
+  `#sites li{font-family:${MONO};font-size:13px;overflow-wrap:anywhere;color:var(--muted)}`,
+  '.chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}',
+  `.chip{font:13px ${MONO};padding:5px 10px;border:1px solid var(--line);border-radius:4px;background:var(--surface)}`,
+  '.chip b{font-weight:400;color:var(--muted)}',
+  // What the drawing answers to, kept where it does not open the page: shut, at
+  // the foot, for the reader who wants it.
+  '.legend{border-top:1px solid var(--line);padding-top:16px;color:var(--muted);font-size:14px}',
+  `.legend summary{cursor:pointer;${LABEL}}`,
+  '.legend summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}',
+  '.legend p{margin:10px 0 0;max-width:66ch}',
 ].join('')
 
 // Self-contained on purpose: the data, the script and the style are in the file
 // and nothing is fetched at view time. What the page draws it computes from the
-// embedded description, through the functions the commands use.
-function html(graph, rules, expand, checkRules, baseline) {
+// embedded description, through the functions the commands use. It draws that
+// graph once: the mermaid source is `render --mermaid`, for an issue or a
+// document, and repeating it below a drawing that opens every node said less
+// than the drawing already did.
+//
+// `fragment` drops the document around that content and nothing else. A host
+// that supplies its own `<!doctype>`, `<head>` and `<body>` - an artifact page
+// is one - rejects a second set, so the same style, drawing and script are
+// written with no skeleton of their own. The `<title>` stays first: it is what
+// names the page, and a host that reads one reads only the head of the file.
+function html(graph, rules, expand, checkRules, baseline, fragment) {
   const data = viewData(graph, rules, checkRules, baseline)
   const all = data.layers.map((l) => l.name)
   if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const c = data.counts
-  const counts = [
-    ['modules', c.modules], ['edges', c.edges], ['module edges', c.moduleEdges],
-    ['layers', c.layers], ['unassigned', c.unassigned], ['unresolved', c.unresolved],
-    ['opaque', c.opaque], ['cycles', c.cycles], ['violations', c.violations],
-    ['errors', c.errors], ['baselined', c.baselined], ['rules', c.rules],
-  ]
-    .map(([k, v]) => `<li>${esc(k)} ${v}</li>`)
-    .join('\n')
+  // The two panels are the two commands: what `cast report` counts about the
+  // graph, and what `cast check` counts against the rules. A count that is a
+  // finding rather than a size carries its severity, and only where it is not
+  // zero - a project with nothing wrong shows no colour at all.
+  const stat = (k, v, tone) =>
+    `<li class="stat${tone && v > 0 ? ' ' + tone : ''}"><span class="k">${esc(k)}</span><span class="v">${v}</span></li>`
+  const graphStats = [
+    stat('modules', c.modules), stat('edges', c.edges), stat('module edges', c.moduleEdges),
+    stat('layers', c.layers), stat('unassigned', c.unassigned, 'warn'),
+    stat('unresolved', c.unresolved, 'bad'), stat('opaque', c.opaque, 'warn'),
+    stat('cycles', c.cycles, 'bad'),
+  ].join('\n')
+  const ruleStats = [
+    stat('rules', c.rules), stat('violations', c.violations, 'bad'),
+    stat('errors', c.errors, 'bad'), stat('baselined', c.baselined, 'warn'),
+  ].join('\n')
   const layers = all
-    .map((l) => `<li>${esc(l)} (${data.layers.find((x) => x.name === l).modules.length})</li>`)
+    .map((l) => `<li class="chip">${esc(l)} <b>${data.layers.find((x) => x.name === l).modules.length}</b></li>`)
     .join('\n')
+  // The page is named after the project it read, because that is the one thing
+  // that tells two of these pages apart in a list of them.
+  const project = String(graph.root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop()
+  const title = project ? `${project} module graph` : 'module graph'
   // `</` inside the JSON would end the script element early, whatever it means
   // to JSON: the escape is the only thing between the data and a broken page.
   // `--expand <layer>` opens that layer's node, the one state the command can
@@ -1019,28 +1140,54 @@ function html(graph, rules, expand, checkRules, baseline) {
   const embedded = JSON.stringify({ ...data, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
   const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, edgesAt, edgeLines, draw]
   const script = fns.map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
+  // The drawing opens the page: nothing is introduced, because the counts above
+  // it and the controls beside it are what an introduction would have said. What
+  // is left - which press does what - is shut at the foot, for the reader who
+  // goes looking.
+  const content = [
+    '<div class="page">',
+    '<header class="head">',
+    '<p class="eyebrow">module graph</p>',
+    `<h1>${esc(project || 'cast')}</h1>`,
+    '</header>',
+    '<section>',
+    '<h2>graph</h2>',
+    `<ul class="stats" id="counts">\n${graphStats}\n</ul>`,
+    '</section>',
+    '<section>',
+    '<h2>rules</h2>',
+    `<ul class="stats" id="rule-counts">\n${ruleStats}\n</ul>`,
+    '</section>',
+    '<section>',
+    '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
+    '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
+    '<div id="sites"></div>',
+    '</section>',
+    '<section>',
+    '<h2>layers</h2>',
+    `<ul class="chips" id="layers">\n${layers}\n</ul>`,
+    '</section>',
+    '<details class="legend">',
+    '<summary>reading the graph</summary>',
+    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow runs to the right of the boxes where it imports something further down, to the left where it imports something further up. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
+    '</details>',
+    '</div>',
+    `<script id="cast-data" type="application/json">${embedded}</script>`,
+    `<script>\n${script}</script>`,
+  ]
+  if (fragment) {
+    return [`<title>${esc(title)}</title>`, `<style>${PAGE_CSS}</style>`, ...content, ''].join('\n')
+  }
   return [
     '<!doctype html>',
     '<html lang="en">',
     // Without this a phone lays the page out at a desktop width and scales the
     // result down, which is how a 44 pixel target becomes a 15 pixel one.
-    '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>cast</title>',
+    `<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>`,
     `<style>${PAGE_CSS}</style>`,
     '</head>',
     '<body>',
-    '<h1>cast</h1>',
-    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow runs to the right of the boxes where it imports something further down, to the left where it imports something further up. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
-    '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
-    '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
-    '<div id="sites"></div>',
-    '<h2>counts</h2>',
-    `<ul id="counts">\n${counts}\n</ul>`,
-    '<h2>layers</h2>',
-    `<ul id="layers">\n${layers}\n</ul>`,
-    '<h2>mermaid</h2>',
-    `<pre id="mermaid">${esc(mermaid(graph, rules, expand, checkRules, baseline))}</pre>`,
-    `<script id="cast-data" type="application/json">${embedded}</script>`,
-    `<script>\n${script}</script>`,
+    ...content,
     '</body>',
     '</html>',
     '',
@@ -1764,7 +1911,7 @@ const USAGE =
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
   '       cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]\n' +
-  '       cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]'
+  '       cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]'
 
 function main(argv) {
   const cmd = argv[0]
@@ -1773,6 +1920,7 @@ function main(argv) {
   let to = null
   let expand = null
   let htmlOut = null
+  let fragment = false
   let asMermaid = false
   let update = false
   let planName = null
@@ -1793,6 +1941,7 @@ function main(argv) {
     else if (cmd === 'edges' && argv[i] === '--to' && argv[i + 1]) to = argv[++i]
     else if (cmd === 'render' && argv[i] === '--mermaid') asMermaid = true
     else if (cmd === 'render' && argv[i] === '--html' && argv[i + 1]) htmlOut = argv[++i]
+    else if (cmd === 'render' && argv[i] === '--fragment') fragment = true
     else if (cmd === 'render' && argv[i] === '--expand' && argv[i + 1]) expand = argv[++i]
     else if (cmd === 'render' && argv[i] === '--plan' && argv[i + 1]) planName = argv[++i]
     else die(USAGE)
@@ -1901,6 +2050,9 @@ function main(argv) {
   }
   if (cmd === 'render') {
     if (!asMermaid && !htmlOut) die(USAGE)
+    // `--fragment` says what a page is written into, so it is an answer only
+    // `--html` has a question for.
+    if (fragment && !htmlOut) die(USAGE)
     const scanned = readGraph(out)
     // `--plan` renders the graph the plan would leave, never the scanned one:
     // the same picture `cast plan simulate` counts, so a refactoring is looked
@@ -1918,7 +2070,7 @@ function main(argv) {
     if (htmlOut) {
       const file = path.resolve(root, htmlOut)
       fs.mkdirSync(path.dirname(file), { recursive: true })
-      fs.writeFileSync(file, html(graph, rules, expand, checkRules, baseline))
+      fs.writeFileSync(file, html(graph, rules, expand, checkRules, baseline, fragment))
       process.stdout.write(`${path.relative(root, file) || file}\n`)
       return 0
     }

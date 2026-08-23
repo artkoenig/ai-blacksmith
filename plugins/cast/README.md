@@ -17,7 +17,7 @@ cast baseline [--update] [--root <dir>]
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
 cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
-cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]
+cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]
                              the graph at layer altitude, one layer resolved;
                              --plan draws the graph <name> would leave instead
                              of the scanned one
@@ -215,7 +215,23 @@ and the rule where one names it. Leaving the node with the mouse, pressing elsew
 group ends it; lifting the finger after a long press does not - the numbers stay until the next
 press, because a phone has no pointer to leave with. Clicking an arrow still lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
-The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
+The counts above the drawing are the ones `cast report` and `cast check` print for the same graph,
+in those two groups: what the graph is, and what the rules say about it. A count that is a finding
+rather than a size - a cycle, an unresolved import, a violation - carries its severity where it is
+not zero, so the panel is read at a glance. The page is named after the project it read, and opens
+on those counts and the drawing: what a press does is written at the foot, shut, for the reader who
+goes looking. Nothing is fetched, and no state hides behind a hover - there is none on a phone.
+
+`--fragment` writes the same page without the document around it: no `<!doctype>`, no `<html>`,
+no `<head>` and no `<body>`, only the `<title>`, the style, the drawing and the script. It is for a
+host that supplies its own skeleton and its own theme - a Claude Code artifact is one - and rejects
+a second set of those tags. Every colour the page paints is a custom property defined on bare
+`:root`, redefined for `prefers-color-scheme: dark` and again for a root marked
+`data-theme="dark"`, and `body` paints its own background, so the page reads the same whichever
+theme the host is in. Neither form carries a mermaid block: the page has drawn the graph itself, at
+an altitude that opens every node, and a copy of the same graph below it said less than the drawing
+above. The source is `render --mermaid`, where a page is not what is wanted. Both forms fetch
+nothing at view time.
 
 ## Adapters
 
