@@ -10,7 +10,7 @@ allowed-tools: Bash, Read
 The argument is the directory to read, and there is nothing else to pass. Without one the working
 directory is the project.
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; R="$ARGUMENTS"; [ -n "$R" ] || R=.; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"`
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; R="$ARGUMENTS"; [ -n "$R" ] || R=.; echo "cast root: $R"; { "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; } 2>&1 || :`
 
 That is the graph as the code is right now - the scan ran first, so nothing above was read from a
 `graph.json` written before the last edit. `cast root:` is the root every further call needs:

@@ -2817,6 +2817,80 @@ grep -qF 'cast render --mermaid' plugins/cast/rules/cast.md \
   || { fail "cast rule" "the rule no longer names mermaid as what an issue carries"; S=1; }
 [ "$S" = 0 ] && ok "cast rule"
 
+# --- cast reads this repository ---------------------------------------------
+# #58: an import written as an expression is one cast counts and never resolves,
+# so a project whose own imports are all expressions has a graph with no edge in
+# it - and nothing built on edges says anything about it.
+S=0
+# break: writing an internal require as `require(path.join(__dirname,'lib.js'))`
+# again, which takes the file back out of the graph
+CAST_SELF_BAD="$(grep -rln "require(require('path')\.join(__dirname\|require(path\.join(__dirname" plugins/forge/scripts plugins/cast/scripts 2>/dev/null)"
+[ -z "$CAST_SELF_BAD" ] \
+  || { fail "cast reads itself" "an internal require is written as an expression in: $CAST_SELF_BAD"; S=1; }
+"$CAST_BIN" scan --root . >/dev/null 2>&1 \
+  || { fail "cast reads itself" "cast scan did not run on this repository"; S=1; }
+CAST_SELF="$("$CAST_BIN" report --root . 2>&1)"
+CAST_SELF_N="$(printf '%s\n' "$CAST_SELF" | sed -n 's/^  module \([0-9]*\),.*$/\1/p' | head -1)"
+[ -n "$CAST_SELF_N" ] \
+  || { fail "cast reads itself" "the report names no module edge count: $CAST_SELF"; S=1; }
+# every forge script that reads lib.js is one edge, and they are what the graph
+# was missing entirely
+[ "${CAST_SELF_N:-0}" -ge 6 ] \
+  || { fail "cast reads itself" "cast finds $CAST_SELF_N module edges in its own repository"; S=1; }
+# the imports that cannot be literal stay opaque, and stay counted
+# break: teaching the adapter to guess at an expression, which invents an edge
+printf '%s\n' "$CAST_SELF" | grep -q '^opaque [1-9]' \
+  || { fail "cast reads itself" "no import is opaque any more, so an expression was guessed at: $CAST_SELF"; S=1; }
+# the drawing has something to draw: one layer holds every module here, so the
+# arrows are at module altitude
+# break: the same expressions, which leave the graph a single box
+"$CAST_BIN" render --mermaid --expand plugins --root . 2>&1 | grep -q ' -->|' \
+  || { fail "cast reads itself" "the drawing of this repository carries no arrow"; S=1; }
+[ "$S" = 0 ] && ok "cast reads itself"
+
+# --- a skill's preamble never decides whether the skill loads ---------------
+# #59: the shell block at the top of a cast skill is read for its exit code, and
+# a non-zero one costs the caller the skill itself - the body never loads. None
+# of the states below is a failure, so none of them may exit non-zero.
+S=0
+PRE="$(mktemp -d)"
+mkdir -p "$PRE/empty"
+preamble_of() { sed -n 's/^!`\(.*\)`$/\1/p' "plugins/cast/skills/$1/SKILL.md"; }
+run_pre() {
+  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$PWD_ROOT/plugins/cast" ARGUMENTS="$3" bash -c "$4" 2>&1 )
+}
+PWD_ROOT="$PWD"
+for k in map plan rules; do
+  L="$(preamble_of "$k")"
+  [ -n "$L" ] || { fail "cast skill preamble" "the $k skill carries no preamble to run"; S=1; continue; }
+  # break: `ls .cast/plans` with nothing to list, or `scan && report` passing a
+  # scan's exit 2 on - either one loses the skill on its first run in a project
+  OUT="$(run_pre "$k" "$PRE/empty" "" "$L")"; RC=$?
+  [ "$RC" = 0 ] \
+    || { fail "cast skill preamble" "the $k preamble exited $RC in a project with nothing to look at: $OUT"; S=1; }
+  printf '%s\n' "$OUT" | grep -q '^cast root: ' \
+    || { fail "cast skill preamble" "the $k preamble does not name the root it read: $OUT"; S=1; }
+done
+# a rule cast cannot read is the answer the skill exists to explain, so the
+# explanation loads and the message reaches the caller
+# break: `&&`-chaining the preview, whose exit 2 then stands for the skill
+RULES_PRE="$(preamble_of rules)"
+OUT="$(run_pre rules "$PRE/empty" '{"nope":1}' "$RULES_PRE")"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast skill preamble" "the rules preamble exited $RC on a rule cast cannot read"; S=1; }
+printf '%s\n' "$OUT" | grep -qF 'the rule carries no name' \
+  || { fail "cast skill preamble" "the rules preamble swallowed what was wrong with the rule: $OUT"; S=1; }
+# where there is something to list, it is still listed
+# break: silencing the listing along with its exit code
+mkdir -p "$PRE/withplan/.cast/plans" && printf '{"operations":[]}\n' > "$PRE/withplan/.cast/plans/cut.json"
+OUT="$(run_pre plan "$PRE/withplan" "" "$(preamble_of plan)")"
+printf '%s\n' "$OUT" | grep -qF 'cut.json' \
+  || { fail "cast skill preamble" "the plan preamble no longer lists the plans it found: $OUT"; S=1; }
+printf '%s\n' "$OUT" | grep -qF 'no plan written yet' \
+  && { fail "cast skill preamble" "the plan preamble says there is no plan while listing one: $OUT"; S=1; }
+rm -rf "$PRE"
+[ "$S" = 0 ] && ok "cast skill preamble"
+
 # --- the cast rule reaches a project that installs cast ---------------------
 # The rule is injected at SessionStart, never copied into the project: a copy
 # ages the moment the plugin is updated and nothing notices.

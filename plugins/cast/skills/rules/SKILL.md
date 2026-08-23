@@ -12,7 +12,7 @@ has - optionally followed by the directory to try it against. A trailing word th
 existing directory is that root; without one the working directory is the project. Without a rule,
 ask for the rule; never invent a `from` and `to` from the last file read.
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; A="${A%"$L"}"; fi; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null && "$CAST" rules preview "$A" --root "$R"`
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; A="${A%"$L"}"; fi; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null; "$CAST" rules preview "$A" --root "$R" 2>&1 || :`
 
 `cast root:` is the root the preview ran against, and the one every further call takes as
 `--root <root>`.

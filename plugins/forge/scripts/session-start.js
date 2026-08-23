@@ -5,7 +5,7 @@
 const path = require('path')
 const fs = require('fs')
 const { execFileSync } = require('child_process')
-const { readInput, config, emit } = require(path.join(__dirname, 'lib.js'))
+const { readInput, config, emit } = require('./lib.js')
 
 // The staleness check.
 //

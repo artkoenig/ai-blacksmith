@@ -9,7 +9,7 @@
 // false assumption, which costs far more than the tokens it saves.
 const fs = require('fs')
 const path = require('path')
-const { readInput, projectRoot, config, emit } = require(require('path').join(__dirname, 'lib.js'))
+const { readInput, projectRoot, config, emit } = require('./lib.js')
 
 const input = readInput()
 const response = input.tool_response

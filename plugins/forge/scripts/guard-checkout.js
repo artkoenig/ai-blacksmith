@@ -13,7 +13,7 @@
 // the boundary is the checkout itself, not a directory inside it. Anything
 // outside passes.
 const path = require('path')
-const { readInput, projectRoot, emit } = require(require('path').join(__dirname, 'lib.js'))
+const { readInput, projectRoot, emit } = require('./lib.js')
 
 const input = readInput()
 if (input.agent_type !== 'forge:reviewer') emit(null)

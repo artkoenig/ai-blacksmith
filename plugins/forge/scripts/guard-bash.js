@@ -6,7 +6,7 @@
 // The rewrite is deliberately conservative: only a bare invocation is rewritten.
 // A command carrying its own flags could mean something the wrapper does not,
 // so it is refused with the wrapper named rather than silently reinterpreted.
-const { readInput, config, emit } = require(require('path').join(__dirname, 'lib.js'))
+const { readInput, config, emit } = require('./lib.js')
 
 const DEFAULT_RULES = [
   { match: '(npm|pnpm|yarn|bun) (run )?test', wrapper: 'forge-test' },
