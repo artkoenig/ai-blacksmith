@@ -624,7 +624,8 @@ JS
 # itself ships.
 CASTFIX="$(mktemp -d)"
 CASTIDS="$(mktemp -d)"
-trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS"' EXIT
+CMTFIX="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS" "$CMTFIX"' EXIT
 mkdir -p "$CASTFIX/src" "$CASTFIX/pkg" "$CASTFIX/.cast/adapters" "$CASTFIX/node_modules/react"
 cat > "$CASTFIX/tsconfig.json" <<'JSON'
 { "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/*"] } } }
@@ -642,6 +643,7 @@ const { c } = require('./c')
 module.exports = { c }
 const lib = require(path.join(__dirname, 'lib.js'))
 const load = (n) => import(BASE + n)
+const tag = `${require('react')}`
 TS
 printf "export { load } from './a'\n" > "$CASTFIX/src/c.ts"
 printf 'export type T = string\n' > "$CASTFIX/src/t.ts"
@@ -659,7 +661,9 @@ module.exports = {
   resolve(s, from, ctx) { const t = p.join(p.dirname(from), s + '.toy'); return ctx.isFile(t) ? { to: t } : null },
 }
 JS
-printf 'use "two"\n' > "$CASTFIX/pkg/one.toy"
+# The toy adapter says nothing about comments, so its text is matched whole: a
+# `//` is no comment in a language that never said it was one.
+printf '// in toy this is no comment: use "two"\n' > "$CASTFIX/pkg/one.toy"
 printf 'nothing here\n' > "$CASTFIX/pkg/two.toy"
 # The layers the fixture is read at: one module in its own layer, the rest of src
 # below it, and pkg claimed by no glob at all.
@@ -703,6 +707,9 @@ O="$(graph '
 O="$(graph '
   if (!mod("pkg/one.toy")) bad("a project adapter did not put its own modules in the graph")
   const e=edge("pkg/one.toy","two")
+  // AC5 the toy adapter declares no comments, so the whole text is matched
+  // break: masking every adapter with the javascript comment syntax, which eats
+  // this line and with it the only edge the project adapter has
   if (!e) bad("a project adapter pattern produced no edge")
   if (e.to!=="pkg/two.toy") bad("a project adapter resolver was not used: "+e.to)
 ')" || { fail "cast graph" "$O"; S=1; }
@@ -785,6 +792,21 @@ O="$(graph '
   for (const m of g.modules) for (const e of m.edges)
     if (!["value","type","dynamic"].includes(e.kind)) bad("an edge carries no kind: "+JSON.stringify(e))
 ')" || { fail "cast edge kinds" "$O"; S=1; }
+# AC4 a require inside a template literal's ${} is code, and keeps its edge
+# break: blanking string literals along with the comments - the specifier lives
+# in one, and a template literal is where that is easiest to get wrong
+O="$(graph '
+  const e=edge("src/b.ts","react")
+  if (!e) bad("a require inside a template literal produced no edge")
+  if (e.kind!=="value") bad("a require inside a template literal is "+e.kind+", not value")
+')" || { fail "cast edge kinds" "$O"; S=1; }
+# the opaque imports keep their kinds too - break: dropping the kind from an
+# opaque edge, which leaves half the graph unclassified
+O="$(graph '
+  const op=(mod("src/b.ts").edges||[]).filter(x=>x.resolution==="opaque")
+  const kinds=op.map(x=>x.kind).sort().join(",")
+  if (kinds!=="dynamic,value") bad("the opaque edges carry the kinds "+kinds+", not dynamic,value")
+')" || { fail "cast edge kinds" "$O"; S=1; }
 # the same import counted once, not once per pattern that matches its text
 # break: dropping the (line, specifier) dedupe
 O="$(graph '
@@ -796,6 +818,116 @@ O="$(graph '
   }
 ')" || { fail "cast edge kinds" "$O"; S=1; }
 [ "$S" = 0 ] && ok "cast edge kinds"
+
+# --- cast comments ----------------------------------------------------------
+# An import written in a comment is no import. Its own fixture: the shared one is
+# read by a dozen suites on fixed counts, and a comment case belongs where it can
+# be read next to what it asserts.
+S=0
+mkdir -p "$CMTFIX/src"
+# Every mention of another module here is an annotation or a commented-out line.
+cat > "$CMTFIX/src/annotated.ts" <<'TS'
+/** @type {import('./b').B} */
+/**
+ * @param {import('./c').C} c
+ * @returns {import('./d').D}
+ * @typedef {import('./e').E} E
+ */
+export function f(c) { return c }
+// import('./g')
+// import { h } from './h'
+/* require('./i') */
+export const z = `${/* import('./j') */ 1}`
+TS
+# A `//` or a `/*` inside a string literal opens no comment.
+cat > "$CMTFIX/src/strings.ts" <<'TS'
+const u = 'http://example.com'; import('./dyn')
+const g = '/* not a comment'; const r = require('./req')
+const s = "// not a comment"; import { v } from './val'
+const t = `${require('./tpl')}`
+export { u, g, s, t, r, v }
+TS
+# A regex literal is no string: a quote inside its character class opens nothing,
+# and a `/` that divides opens no literal.
+cat > "$CMTFIX/src/regex.ts" <<'TS'
+const re = /[^'"\s)]/g
+// import('./gone')
+/** @type {import('./vanished').V} */
+const slash = /\/\//
+const half = 6 / 2; import('./after'); const t = half / 1
+const r = require('./req')
+export { re, slash, half, t, r }
+TS
+# A block comment spans lines: what follows it is reported where it is written.
+cat > "$CMTFIX/src/lines.ts" <<'TS'
+/*
+ * import('./skip')
+ */
+import { k } from './keep'
+TS
+CMT_SCAN="$(cd "$CMTFIX" && "$CAST_BIN" scan 2>&1)" \
+  || { fail "cast comments" "cast scan did not run: $CMT_SCAN"; S=1; }
+CMT_FILE="$(printf '%s\n' "$CMT_SCAN" | sed -n 's/^[0-9]* modules scanned into //p')"
+cgraph() { CAST_GRAPH_FILE="$CMT_FILE" node -e '
+  const bad=(s)=>{console.log(s);process.exit(1)}
+  let g
+  try { g=JSON.parse(require("fs").readFileSync(process.env.CAST_GRAPH_FILE,"utf8")) }
+  catch(e) { bad("no readable graph at "+process.env.CAST_GRAPH_FILE+": "+e.message) }
+  const mod=(id)=>g.modules.find(x=>x.id===id)
+  const edge=(id,t)=>((mod(id)||{}).edges||[]).find(x=>x.target===t)
+  '"$1"'
+'; }
+# AC1 a jsdoc annotation naming a module is no import
+# AC2 a commented-out import is no import, line comment and block comment alike
+# break: matching the patterns over the raw text, which reads every annotation
+# and every commented-out line as an edge; and, for the one inside a `${}`,
+# reading a template literal as one run of string that never returns to code
+O="$(cgraph '
+  const m=mod("src/annotated.ts")
+  if (!m) bad("the annotated module was not scanned")
+  if (m.edges.length)
+    bad("a comment produced edges: "+m.edges.map(e=>e.target+":"+e.line).join(", "))
+')" || { fail "cast comments" "$O"; S=1; }
+# AC3 a comment token inside a string literal opens no comment
+# break: blanking comments without reading string literals, which lets the `//`
+# of a url or the `/*` of a string swallow the code after it
+O="$(cgraph '
+  const want={"./dyn":"dynamic","./req":"value","./val":"value","./tpl":"value"}
+  for (const [t,k] of Object.entries(want)) {
+    const e=edge("src/strings.ts",t)
+    if (!e) bad("an import after a comment token in a string produced no edge: "+t)
+    if (e.kind!==k) bad(t+" is "+e.kind+", not "+k)
+  }
+')" || { fail "cast comments" "$O"; S=1; }
+# AC1/AC2 a quote inside a regex literal opens no string, so a jsdoc annotation
+# and a commented-out import after one are still comments
+# break: dropping the regex-literal span from mask(), which enters string state
+# at the quote in the character class and leaves nothing after it blanked
+O="$(cgraph '
+  for (const t of ["./gone","./vanished"]) {
+    const e=edge("src/regex.ts",t)
+    if (e) bad("a comment after a regex literal produced the edge "+t+":"+e.line)
+  }
+')" || { fail "cast comments" "$O"; S=1; }
+# a `/` that divides opens no literal, and the code between two of them is code
+# break: opening a regex literal on any `/`, which swallows the import after it
+O="$(cgraph '
+  const a=edge("src/regex.ts","./after")
+  if (!a) bad("the import after a division produced no edge")
+  if (a.line!==5) bad("the import after a division is reported at line "+a.line+", not 5")
+  const r=edge("src/regex.ts","./req")
+  if (!r) bad("the require after a regex literal produced no edge")
+')" || { fail "cast comments" "$O"; S=1; }
+# the line an import is reported at does not move
+# break: deleting the comments instead of blanking them, which shifts every line
+# after a block comment
+O="$(cgraph '
+  if (edge("src/lines.ts","./skip")) bad("an import inside a block comment made an edge")
+  const e=edge("src/lines.ts","./keep")
+  if (!e) bad("the import after a block comment produced no edge")
+  if (e.line!==4) bad("the import after a block comment is reported at line "+e.line+", not 4")
+')" || { fail "cast comments" "$O"; S=1; }
+[ "$S" = 0 ] && ok "cast comments"
 
 # AC3 every edge carries the file and the line of its import
 S=0

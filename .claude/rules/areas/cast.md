@@ -10,12 +10,19 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
 
 - The engine holds no language knowledge: extensions, import patterns, edge kinds and resolution
   come from an adapter, and anything language-specific in `scripts/cast.js` breaks `cast graph`.
-- Adapters load from `adapters/*.js` and `<root>/.cast/adapters/*.js`, exporting `{name, extensions,
-  patterns, opaque?, ignore?, init?, resolve}`; `init`'s return is `ctx.state` on every `resolve`,
+- Adapters load from `adapters/*.js` and `<root>/.cast/adapters/*.js`: `{name, extensions, patterns,
+  opaque?, comments?, ignore?, init?, resolve}`; `init`'s return is `ctx.state` on every `resolve`,
   which answers `{to}`, `{external: true}` or `null` - never a dropped edge, but `unresolved`.
-- An adapter's optional `opaque` patterns capture an import whose target is no literal string:
-  `resolution: "opaque"`, `resolve` never called, named by `cast report`; a second pattern list
-  through `imports()`, capture excluding a leading quote.
+  `opaque` patterns capture an import whose target is no literal string: `resolution: "opaque"`,
+  `resolve` never called, named by `cast report`; a second list through `imports()`, capture past
+  the quote.
+- `comments` (`{line, block, strings, regex}`) drives `mask()`: comments blanked before the
+  patterns run, offsets and newlines kept so no line moves; a string (`{open, close, escape?,
+  interpolate?}`) is only skipped - the specifier lives in one - and `interpolate` reads a template
+  hole as code. `regex` (plus `class?`, `notAfter`) is a delimiter that is also an operator: without
+  it a quote in `/[^'"]/` opens a string that never closes and every comment after it stands. It is
+  blanked in one span, opened where `notAfter` misses the last code character (`last()` reads the
+  blanked `out`) and `span()` closes on the line. No `comments` is raw text.
 - A count labelled `edges` is every import met - `cast report`'s line, with its resolution
   breakdown. Every narrower one says `module edges`: `cast edges`, the check summary, the page.
 - Patterns match in order, one `(line, specifier)` makes one edge and the first kind wins - the
@@ -34,7 +41,7 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
 - One description, `viewData`: layers, module-edge sites, rule marks, the counts `report`/`check`
   print. Mermaid reads it at two altitudes via `viewAt(data, expand)`, the page as a tree: `treeId`
   -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`, with `marker`, `toggleOpen`, `groupIds`,
-  `edgesAt`, `edgeLines`; `html` inlines them all and `draw` by `toString()`, closing over nothing.
+  `edgesAt`, `edgeLines`; `html` inlines them and `draw` by `toString()`, closing over nothing.
 - The tree is layer / folder level / file, keyed by containment path (`logic/src/b.ts`), each node
   carrying `modules`, its whole subtree. `viewTree` ends an arrow on the deepest *closed* node
   holding it, drops one inside a node; `open` is ids, `--expand` seeds it.
@@ -47,25 +54,19 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   svg in `#graph-scroll`, `overflow-x:hidden`, no `svg{max-width:100%}`.
 - An arrow is a bare curve and a `TAP`-wide transparent grab: no head, no label, no backing, and
   `width`/`height` end at the furthest `mx` and the last box. `weight`, `label`, `kinds`,
-  `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data, read by a press or the
-  highlight. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
+  `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
   left, `mx` one `M.CLEAR` (16) past the boxes the span crosses (`flat`, less the ends and any box
   holding both, overlapping by y) - flat between neighbours, no lane, the stack at `PAD + CLEAR`.
-- The count is asked for: `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges,
-  id)` the panel's lines - both pure, both tested in node. Highlighting only subtracts: `.edge.dim`
-  outside the set, nothing inside it. `pointerenter`/`pointerleave` are bound for `pointerType ===
+- `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges, id)` the panel's lines -
+  both pure, both tested in node. Highlighting only subtracts: `.edge.dim` outside the set. `pointerenter`/`pointerleave` are bound for `pointerType ===
   'mouse'` alone or a touch screen highlights on every tap; touch is a `HOLD` timer from
   `pointerdown`, cancelled by `SLOP`/release/cancel, its `click` eaten once by `suppress`.
-- `test.sh` greps the page source with `grep -F` on substrings: `"g.addEventListener('click'"` hits
-  any local ending in `g` (`bg`), failing an unrelated suite - name around it. A multi-line `-F`
-  pattern is alternatives, not a block: cut the block out with `sed -n '/a/,/b/p'` first. `grep -c`
-  counts lines, and a comment naming the symbol counts too - match the call, not the word.
 - `render` reads rules.json and baseline.json like `check`: severity colours and the rule label an
   arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, only a flagged one is
   styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node
   holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
-- `README.md`'s `--html` paragraph is the page's prose spec: a change to what a press hits, or to
-  what an arrow or a node shows, leaves it false until that paragraph is edited in the same commit.
+  `README.md`'s `--html` paragraph is its prose spec: a change to what a press hits or what an arrow
+  or a node shows leaves it false until that paragraph is edited in the same commit.
 - The graph leaves no file in the checkout: `graphFile(root)` is `os.tmpdir()/cast/<base>-<sha1>/`,
   `CAST_GRAPH` overrides it, `scan` prints it, every reader rederives it from `--root`.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
@@ -74,9 +75,8 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   a rule inside one layer must name the files.
 - `cast check` reads every resolved module edge, never mermaid's aggregate (`cast check altitude`).
   The exit code comes from severity, not the count: `warn` is listed and leaves 0; the summary is
-  the last line, the only one on a clean project.
-- `die()` is exit 2 throughout: an unreadable or invalid `rules.json` is "could not run", not a
-  violation or a pass; validation belongs in `readRules`.
+  the last line, the only one on a clean project. `die()` is exit 2 throughout: an unreadable or
+  invalid `rules.json` is "could not run", not a violation or a pass; validate in `readRules`.
 - An unknown rule attribute is `not evaluated: <rule>: <key>`: a new attribute means adding it to
   `RULE_KEYS` in the same change. `readRule` validates one rule wherever it is written down, and
   `group()` renders rule/edge/site for the check and the plan report alike. Trying a rule before
