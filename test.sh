@@ -2817,6 +2817,37 @@ grep -qF 'cast render --mermaid' plugins/cast/rules/cast.md \
   || { fail "cast rule" "the rule no longer names mermaid as what an issue carries"; S=1; }
 [ "$S" = 0 ] && ok "cast rule"
 
+# --- cast reads this repository ---------------------------------------------
+# #58: an import written as an expression is one cast counts and never resolves,
+# so a project whose own imports are all expressions has a graph with no edge in
+# it - and nothing built on edges says anything about it.
+S=0
+# break: writing an internal require as `require(path.join(__dirname,'lib.js'))`
+# again, which takes the file back out of the graph
+CAST_SELF_BAD="$(grep -rln "require(require('path')\.join(__dirname\|require(path\.join(__dirname" plugins/forge/scripts plugins/cast/scripts 2>/dev/null)"
+[ -z "$CAST_SELF_BAD" ] \
+  || { fail "cast reads itself" "an internal require is written as an expression in: $CAST_SELF_BAD"; S=1; }
+"$CAST_BIN" scan --root . >/dev/null 2>&1 \
+  || { fail "cast reads itself" "cast scan did not run on this repository"; S=1; }
+CAST_SELF="$("$CAST_BIN" report --root . 2>&1)"
+CAST_SELF_N="$(printf '%s\n' "$CAST_SELF" | sed -n 's/^  module \([0-9]*\),.*$/\1/p' | head -1)"
+[ -n "$CAST_SELF_N" ] \
+  || { fail "cast reads itself" "the report names no module edge count: $CAST_SELF"; S=1; }
+# every forge script that reads lib.js is one edge, and they are what the graph
+# was missing entirely
+[ "${CAST_SELF_N:-0}" -ge 6 ] \
+  || { fail "cast reads itself" "cast finds $CAST_SELF_N module edges in its own repository"; S=1; }
+# the imports that cannot be literal stay opaque, and stay counted
+# break: teaching the adapter to guess at an expression, which invents an edge
+printf '%s\n' "$CAST_SELF" | grep -q '^opaque [1-9]' \
+  || { fail "cast reads itself" "no import is opaque any more, so an expression was guessed at: $CAST_SELF"; S=1; }
+# the drawing has something to draw: one layer holds every module here, so the
+# arrows are at module altitude
+# break: the same expressions, which leave the graph a single box
+"$CAST_BIN" render --mermaid --expand plugins --root . 2>&1 | grep -q ' -->|' \
+  || { fail "cast reads itself" "the drawing of this repository carries no arrow"; S=1; }
+[ "$S" = 0 ] && ok "cast reads itself"
+
 # --- a skill's preamble never decides whether the skill loads ---------------
 # #59: the shell block at the top of a cast skill is read for its exit code, and
 # a non-zero one costs the caller the skill itself - the body never loads. None

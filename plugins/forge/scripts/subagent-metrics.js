@@ -5,7 +5,7 @@
 // number next to what the start hook estimated. Never blocks, never fails a run.
 const fs = require('fs')
 const path = require('path')
-const { readInput, projectRoot, emit } = require(require('path').join(__dirname, 'lib.js'))
+const { readInput, projectRoot, emit } = require('./lib.js')
 
 const input = readInput()
 const agentType = input.agent_type || ''

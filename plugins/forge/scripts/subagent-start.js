@@ -7,7 +7,7 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
-const { readInput, projectRoot, emit } = require(require('path').join(__dirname, 'lib.js'))
+const { readInput, projectRoot, emit } = require('./lib.js')
 
 const DUMP_MAX_BYTES = 256 * 1024 // one source larger than this is measured, not copied
 const KEEP_RUNS = 20 // dumps of older runs are pruned
