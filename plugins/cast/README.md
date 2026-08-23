@@ -16,9 +16,11 @@ cast baseline [--update] [--root <dir>]
                              holds, and the ratchet that rewrites it
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
-cast render --mermaid [--expand <layer>] [--root <dir>]
-cast render --html <file> [--expand <layer>] [--root <dir>]
-                             the graph at layer altitude, one layer resolved
+cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
+cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]
+                             the graph at layer altitude, one layer resolved;
+                             --plan draws the graph <name> would leave instead
+                             of the scanned one
 ```
 
 `scan` writes one entry per source module with its outgoing edges. Every edge carries the
@@ -177,6 +179,15 @@ graph LR
 
 `--expand <layer>` resolves that one layer to its modules, in a subgraph, and leaves every other
 layer a single node; an edge into it lands on the module, not on the layer.
+
+`--plan <name>` draws the graph `cast plan simulate <name>` produces instead of the scanned one:
+`<root>/.cast/plans/<name>.json` applied to a copy of the graph, so a refactoring can be looked at
+before a single source file is edited. Both `--mermaid` and `--html` take it, and both draw the
+simulated graph the same way they draw the scanned one - layers, rules and the baseline are read
+at render time against the graph the plan leaves. Rendering a plan writes no `.cast/graph.json`
+and no source file; the only file it writes is the page `--html` was asked for. A plan that cannot
+be applied - no such plan file, an unknown operation, a module it cannot find - exits 2 and draws
+nothing, so no half-page is left behind.
 
 An edge that breaks a rule in `.cast/rules.json` is drawn in the colour of its severity and
 labelled with the rule name; one held by `.cast/baseline.json` is labelled `(inherited)` and drawn

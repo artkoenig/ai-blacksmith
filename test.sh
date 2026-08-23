@@ -1527,6 +1527,77 @@ printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
   || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
 [ "$S" = 0 ] && ok "cast plan rules"
 
+# --- cast: the simulated graph, rendered ------------------------------------
+# The same fixture and the same plan `cut`, drawn instead of counted. Every case
+# here renders only: the fixture is never rescanned and never edited.
+
+# AC1 --plan draws the graph cast plan simulate produces, not the scanned one,
+# and without it both renderers draw the current graph exactly as they do today
+S=0
+CAST_RM_NOW="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast render plan" "cast render --mermaid exited $RC: $CAST_RM_NOW"; S=1; }
+CAST_RM_PLAN="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan cut 2>&1)"; RC=$?
+# break: dying on --plan, or never accepting the flag at all
+[ "$RC" = 0 ] || { fail "cast render plan" "cast render --mermaid --plan exited $RC: $CAST_RM_PLAN"; S=1; }
+# the plan merges two modules of logic into one and moves a third out of it, so
+# the layer the plan leaves holds four modules where the scanned one holds five
+# break: ignoring --plan and rendering the scanned graph
+printf '%s\n' "$CAST_RM_PLAN" | grep -qF 'logic (4)' \
+  || { fail "cast render plan" "the mermaid render did not draw the graph the plan leaves: $CAST_RM_PLAN"; S=1; }
+# break: rendering a plan whether or not one was asked for
+printf '%s\n' "$CAST_RM_NOW" | grep -qF 'logic (5)' \
+  || { fail "cast render plan" "the plain mermaid render did not draw the graph as scanned: $CAST_RM_NOW"; S=1; }
+CAST_RH_PLAN="$CASTFIX/plan.html"
+CAST_RH_NOW="$CASTFIX/now.html"
+(cd "$CASTFIX" && "$CAST_BIN" render --html plan.html --plan cut >/dev/null 2>&1); RC=$?
+[ "$RC" = 0 ] || { fail "cast render plan" "cast render --html --plan exited $RC"; S=1; }
+(cd "$CASTFIX" && "$CAST_BIN" render --html now.html >/dev/null 2>&1) \
+  || { fail "cast render plan" "cast render --html did not run"; S=1; }
+# the merge names a module that exists in no scan of the fixture
+# break: the page describing the scanned graph while mermaid describes the plan
+grep -qF 'src/bc.ts' "$CAST_RH_PLAN" \
+  || { fail "cast render plan" "the page did not draw the graph the plan leaves"; S=1; }
+grep -qF 'src/bc.ts' "$CAST_RH_NOW" \
+  && { fail "cast render plan" "the plain page drew the plan"; S=1; }
+
+# AC2 rendering a plan writes no graph and no source file, and a plan that
+# cannot be applied exits 2 having drawn nothing
+rm -f "$CAST_RH_PLAN" "$CAST_RH_NOW"
+CAST_RSUMS="$(cd "$CASTFIX" && find . -type f | sort | xargs cksum)"
+CAST_RM2="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan cut 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast render plan" "the plan render exited $RC: $CAST_RM2"; S=1; }
+# break: applying the plan to the loaded graph and writing it back to
+# .cast/graph.json, or executing the moves against the source tree
+[ "$CAST_RSUMS" = "$(cd "$CASTFIX" && find . -type f | sort | xargs cksum)" ] \
+  || { fail "cast render plan" "rendering a plan changed the project"; S=1; }
+# the page a plan render is asked for is the only file it writes
+(cd "$CASTFIX" && "$CAST_BIN" render --html plan.html --plan cut >/dev/null 2>&1) \
+  || { fail "cast render plan" "cast render --html --plan did not run"; S=1; }
+CAST_RSUMS2="$(cd "$CASTFIX" && find . -type f ! -name plan.html | sort | xargs cksum)"
+[ "$CAST_RSUMS" = "$CAST_RSUMS2" ] \
+  || { fail "cast render plan" "rendering a plan to a page wrote more than the page"; S=1; }
+rm -f "$CAST_RH_PLAN"
+# a plan that cannot be applied stops the render: no such plan file
+cat > "$CASTFIX/.cast/plans/broken.json" <<'JSON'
+{ "operations": [ { "op": "move", "module": "src/gone.ts", "to": "pkg/gone.ts" } ] }
+JSON
+for bad in nope broken; do
+  CAST_RBAD="$(cd "$CASTFIX" && "$CAST_BIN" render --html bad.html --plan $bad 2>&1)"; RC=$?
+  # break: reading the plan after the page is written, or falling back to the
+  # scanned graph when the plan cannot be applied
+  [ "$RC" = 2 ] \
+    || { fail "cast render plan" "an unapplicable plan $bad exited $RC, not 2: $CAST_RBAD"; S=1; }
+  [ -e "$CASTFIX/bad.html" ] \
+    && { fail "cast render plan" "an unapplicable plan $bad still drew a page"; S=1; }
+  CAST_RBAD_M="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan $bad 2>/dev/null)"; RC=$?
+  [ "$RC" = 2 ] \
+    || { fail "cast render plan" "an unapplicable plan $bad exited $RC from mermaid, not 2"; S=1; }
+  [ -z "$CAST_RBAD_M" ] \
+    || { fail "cast render plan" "an unapplicable plan $bad still drew a graph: $CAST_RBAD_M"; S=1; }
+done
+rm -f "$CASTFIX/.cast/plans/broken.json" "$CASTFIX/bad.html"
+[ "$S" = 0 ] && ok "cast render plan"
+
 # AC4 a count labelled edges counts the same thing everywhere: the report's is
 # every import met, and every narrower count says it counts module edges
 S=0
@@ -2488,7 +2559,131 @@ skill_runs() {
 }
 skill_runs map 'report'
 skill_runs rules 'rules preview'
-skill_runs plan 'plan simulate'
+# The plan skill simulates a plan it has not drafted yet, so the prompt line
+# reports the graph it drafts against; `plan simulate` is run per loop, and the
+# `cast plan skill` suite below is what holds it there.
+skill_runs plan 'report'
 [ "$S" = 0 ] && ok "cast skills"
+
+
+# --- cast skill root --------------------------------------------------------
+# AC6 every skill takes an optional target directory and runs cast against it.
+# The prompt line resolves that root once, echoes it so the model can pass it on,
+# and carries it on every call it makes - with no argument, the working directory.
+S=0
+for s in map rules plan; do
+  F="plugins/cast/skills/$s/SKILL.md"
+  [ -f "$F" ] || { fail "cast skill root" "$F is missing"; S=1; continue; }
+  L="$(grep '^!' "$F" | head -1)"
+  # break: dropping --root from one of the calls on the line, so the scan reads
+  # the working directory and the command reads the directory that was asked for
+  C="$(printf '%s\n' "$L" | grep -o '"\$CAST"' | wc -l | tr -d ' ')"
+  R="$(printf '%s\n' "$L" | grep -o -- '--root "\$R"' | wc -l | tr -d ' ')"
+  [ "$C" -ge 2 ] || { fail "cast skill root" "$F runs fewer than two cast calls in its prompt"; S=1; }
+  [ "$C" = "$R" ] || { fail "cast skill root" "$F makes $C cast calls but passes --root on $R of them"; S=1; }
+  # break: leaving the root empty when no argument is given, which is a usage
+  # error instead of a run against the working directory
+  printf '%s\n' "$L" | grep -q 'R=\.' \
+    || { fail "cast skill root" "$F does not fall back to the working directory"; S=1; }
+  # break: resolving the root and never telling the model, so every command it
+  # runs afterwards answers about a different project
+  printf '%s\n' "$L" | grep -q 'echo "cast root: \$R"' \
+    || { fail "cast skill root" "$F never reports the root it resolved"; S=1; }
+  # break: documenting the argument as the plan name or the rule alone, so the
+  # directory is never passed
+  grep -q 'working directory' "$F" \
+    || { fail "cast skill root" "$F does not say what happens without a directory"; S=1; }
+  # break: telling the model the root and not that its own calls need it
+  grep -qF -- '--root <root>' "$F" \
+    || { fail "cast skill root" "$F never asks for --root <root> on the calls it hands on"; S=1; }
+done
+# break: the two skills whose argument is not the directory taking the trailing
+# word blindly, so a rule object or a goal is read as a root
+for s in rules plan; do
+  F="plugins/cast/skills/$s/SKILL.md"
+  [ -f "$F" ] || continue
+  grep '^!' "$F" | grep -qF '[ -d "$L" ]' \
+    || { fail "cast skill root" "$F takes its trailing word as a root without testing it is a directory"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast skill root"
+
+
+# --- cast plan skill --------------------------------------------------------
+# AC4/AC5 the plan skill drafts the plan itself and loops on the simulation, and
+# it says what a simulation has to say before anyone is allowed to edit a file.
+S=0
+F="plugins/cast/skills/plan/SKILL.md"
+if [ ! -f "$F" ]; then fail "cast plan skill" "$F is missing"; S=1; else
+  # break: leaving allowed-tools at Bash, Read, so the skill cannot write the
+  # plan file it is told to draft
+  sed -n '2,/^---$/p' "$F" | grep -q '^allowed-tools:.*Write' \
+    || { fail "cast plan skill" "the plan skill cannot write the plan it drafts"; S=1; }
+  # break: requiring a plan file someone else wrote - the old behaviour, which
+  # stopped and asked instead of drafting
+  grep -qiE 'ask (which|for a) plan|never simulate a plan you wrote' "$F" \
+    && { fail "cast plan skill" "the plan skill still asks for a plan instead of drafting one"; S=1; }
+  grep -qF 'The plan is yours to write' "$F" \
+    || { fail "cast plan skill" "the plan skill does not claim the drafting as its own"; S=1; }
+  # break: naming the plan file without saying the skill writes it
+  grep -qF '<root>/.cast/plans/<name>.json' "$F" \
+    || { fail "cast plan skill" "the plan skill does not name the file it drafts"; S=1; }
+  # break: dropping an operation from the shape, so a draft is guesswork
+  for o in move merge invert split; do
+    grep -qF "\"op\":\"$o\"" "$F" \
+      || { fail "cast plan skill" "the plan skill does not give the shape of a $o operation"; S=1; }
+  done
+  # break: describing one pass instead of a loop, so a rejected plan is reported
+  # rather than redrafted
+  for h in 'Draft' 'Simulate' 'Judge' 'Redraft'; do
+    grep -qE "^[0-9]+\. \*\*$h\.\*\*" "$F" \
+      || { fail "cast plan skill" "the plan skill has no $h step"; S=1; }
+  done
+  grep -qF 'until a simulation is accepted' "$F" \
+    || { fail "cast plan skill" "the plan skill does not loop until a simulation is accepted"; S=1; }
+  # break: the loop that never runs the simulator
+  grep -qF 'cast plan simulate <name> --root <root>' "$F" \
+    || { fail "cast plan skill" "the plan skill never runs the simulation on the root it resolved"; S=1; }
+  # AC5 break: dropping either half of the judgement, which leaves accepted to taste
+  grep -q '^## What accepts a simulation$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not say what accepts a simulation"; S=1; }
+  grep -q '^## What rejects it$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not say what rejects a simulation"; S=1; }
+  # break: accepting a plan that adds a cycle or a violation
+  grep -qF 'any cycle, any violation' "$F" \
+    || { fail "cast plan skill" "a plan that adds a cycle or a violation is not rejected"; S=1; }
+  # break: letting the edits start before the simulation is accepted, which is
+  # the whole point of planning first
+  grep -q '^## Edit nothing until it is accepted$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not forbid editing before a simulation is accepted"; S=1; }
+  grep -qF 'No source file is touched while this loop runs' "$F" \
+    || { fail "cast plan skill" "the plan skill does not forbid touching a source file during the loop"; S=1; }
+fi
+[ "$S" = 0 ] && ok "cast plan skill"
+
+
+# --- cast render skill ------------------------------------------------------
+# AC7 a skill reaches the renderer: the plan's mermaid is what a refactoring
+# issue carries, and the page is the manual look - at the plan and at today.
+S=0
+P="plugins/cast/skills/plan/SKILL.md"
+M="plugins/cast/skills/map/SKILL.md"
+if [ ! -f "$P" ] || [ ! -f "$M" ]; then fail "cast render skill" "a cast skill is missing"; S=1; else
+  # break: leaving --plan to the command line, so the picture in the issue is
+  # the graph as it is today and not the one the plan would leave
+  grep -qF 'cast render --mermaid --plan <name> --root <root>' "$P" \
+    || { fail "cast render skill" "no skill draws the plan as mermaid"; S=1; }
+  grep -A2 'cast render --mermaid --plan' "$P" | grep -qi 'issue' \
+    || { fail "cast render skill" "the plan mermaid is not named as the picture an issue carries"; S=1; }
+  # break: dropping the page, leaving a mermaid block as the only way to look
+  grep -qF 'cast render --html <file> --plan <name> --root <root>' "$P" \
+    || { fail "cast render skill" "no skill opens the plan as a page"; S=1; }
+  # break: a page of the plan and no page of the current state to compare it to
+  grep -qF 'cast render --html <file> --root <root>' "$M" \
+    || { fail "cast render skill" "no skill opens the current state as a page"; S=1; }
+  # break: rendering a plan and letting it be mistaken for a scan that wrote
+  grep -qF 'exits 2 having drawn nothing' "$P" \
+    || { fail "cast render skill" "the plan skill does not say an unapplicable plan draws nothing"; S=1; }
+fi
+[ "$S" = 0 ] && ok "cast render skill"
 
 exit "$FAILED"

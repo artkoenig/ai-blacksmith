@@ -1,16 +1,20 @@
 ---
 name: map
 description: Show the module graph of this project - the modules and edges, the imports that resolve to nothing, the dependency cycles, and the layers every module falls in. Use to answer what depends on what, where a cycle is, or how the code is layered.
-argument-hint: "[no arguments]"
+argument-hint: "[optional target directory, default the working directory]"
 allowed-tools: Bash, Read
 ---
 
 # The module graph
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; "$CAST" scan >/dev/null && "$CAST" report`
+The argument is the directory to read, and there is nothing else to pass. Without one the working
+directory is the project.
+
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; R="$ARGUMENTS"; [ -n "$R" ] || R=.; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"`
 
 That is the graph as the code is right now - the scan ran first, so nothing above was read from a
-`graph.json` written before the last edit.
+`graph.json` written before the last edit. `cast root:` is the root every further call needs:
+pass it as `--root <root>` to each one, or you will answer about a different project.
 
 Read it in this order, and report only what it actually says.
 
@@ -22,8 +26,13 @@ Read it in this order, and report only what it actually says.
   modules `<root>/.cast/layers.json` claims for nothing - or the absence of that file, in which
   case the first directory level was the layer.
 
-Follow one layer edge down with `cast edges --from <layer> --to <layer>`, which lists the module
-edges behind it with the file and line of each import. Draw it with
-`cast render --mermaid [--expand <layer>]` only when asked for a picture.
+Follow one layer edge down with `cast edges --from <layer> --to <layer> --root <root>`, which lists
+the module edges behind it with the file and line of each import.
+
+Draw it only when asked for a picture:
+
+- `cast render --mermaid --root <root>` for a diagram in the answer.
+- `cast render --html <file> --root <root>` for a manual look at the current state - a page to open
+  and press through, where a mermaid block is already too big to read.
 
 Answer in prose with the numbers from the report. Never restate a count the report did not give.

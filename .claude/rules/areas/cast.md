@@ -67,7 +67,7 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
 - `README.md`'s `--html` paragraph is the page's prose spec: a change to what a press hits, or to
   what an arrow or a node shows, leaves it false until that paragraph is edited in the same commit.
-- Control characters in `scripts/cast.js` are escapes (`'\0'`): a literal NUL reads as binary.
+- Never commit `.cast/graph.json`: scan output, absolute `root`, ignored as `**/.cast/graph.json`.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
   `forbidden` names an edge that must not exist, `allowed` drops it. A side is a layer name where
   `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise; layer wins a tie, so
@@ -90,11 +90,11 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   by rule, file, imported module and edge kind, never by line, which churns (`baselineKey`).
   `--update` refuses (exit 1, no write) a baseline holding more violations than the one it replaces
   - the ratchet; no baseline yet accepts any count.
-- Plans are read at simulate time from `<root>/.cast/plans/<name>.json`, like the rules, applied in
-  order to a deep copy - `cast plan simulate` writes no source file and no `graph.json` - each on
-  the graph the one before left, so one may name a module an earlier one created; `apply()` dies on
-  a module it cannot find, `readPlan` on an unknown op or key.
-- An edge's `file` is the id of the module holding it after the operation too: `move`/`merge` go
-  through `resite()`, `split` sites each edge on its part, `invert` the new edge at `line` 0. Plan
-  metrics are at layer altitude, counting only edges crossing a layer boundary: `I = fan-out /
-  (fan-in + fan-out)`, 0 when a layer has neither, and the baseline is not applied.
+- Plans are read at simulate time from `<root>/.cast/plans/<name>.json`; `cast plan simulate`
+  writes nothing, the ops applying in order to a deep copy, each on the graph the one before left;
+  `apply()` dies on an unknown module, `readPlan` on an unknown op or key. An op resites its edges:
+  `move`/`merge` through `resite()`, `split` per part, `invert` at `line` 0.
+- Plan metrics count edges crossing a layer boundary alone: `I = fan-out / (fan-in + fan-out)`, 0
+  when a layer has neither, no baseline. `cast render --plan <name>` draws `simulateGraph(scan,
+  readPlan(...))` in `main`'s render branch before any write: an unapplicable plan exits 2 with no
+  page, and layers, rules and the baseline read against the simulated graph.
