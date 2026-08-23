@@ -25,9 +25,8 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
 - Layers are read at report time from `<root>/.cast/layers.json`, never baked into `graph.json`:
   re-layering needs no rescan. Glob to layer name, first match wins, engine `globToRe` (`**` spans
   segments, `*`/`?` stay in one). No file means the first directory level is the layer, on `ENOENT`
-  alone: unreadable, invalid or not a layer name is exit 2. A module no glob claims is
-  `unassigned`: counted and named by `cast report`, never swept into a declared layer; `assign()`
-  keys placement by module id.
+  alone: unreadable, invalid or not a layer name is exit 2. A module no glob claims is `unassigned`:
+  counted and named by `cast report`, never swept into a layer; `assign()` keys it by module id.
 - `cast render` reads the layers at render time and never rewrites the graph: layer nodes
   `L_<name>`, module nodes `M_<id>`, every character mermaid rejects escaped to `_<hex>_`
   (`M_src_2f_b_2e_ts`), name only in the label - reversible, or `src/a-b.ts` and `src/a_b.ts`
@@ -67,7 +66,8 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
 - `README.md`'s `--html` paragraph is the page's prose spec: a change to what a press hits, or to
   what an arrow or a node shows, leaves it false until that paragraph is edited in the same commit.
-- Never commit `.cast/graph.json`: scan output, absolute `root`, ignored as `**/.cast/graph.json`.
+- The graph leaves no file in the checkout: `graphFile(root)` is `os.tmpdir()/cast/<base>-<sha1>/`,
+  `CAST_GRAPH` overrides it, `scan` prints it, every reader rederives it from `--root`.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
   `forbidden` names an edge that must not exist, `allowed` drops it. A side is a layer name where
   `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise; layer wins a tie, so
@@ -82,9 +82,9 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   `group()` renders rule/edge/site for the check and the plan report alike. Trying a rule before
   enforcing it is `severity: "warn"`, not a command of its own - there is no `rules` subcommand.
 - `bin/cast-check` scans before it checks: no arguments, never a stale graph, every `bin/*`
-  executable. `plan` takes a subcommand and a positional: `main` reads `argv[1]` and
-  `argv[2]` before the flag loop, which starts at 3. `.cast` is in `ALWAYS_IGNORED` - adapters are
-  loaded, never scanned; walking skips dot dirs.
+  executable. `plan` takes a subcommand and a positional: `main` reads `argv[1]` and `argv[2]`
+  before the flag loop, which starts at 3; a `--root` that is no directory is exit 2 there. `.cast`
+  is in `ALWAYS_IGNORED` - adapters are loaded, never scanned; walking skips dot dirs.
 - `.cast/baseline.json` holds inherited violations, read at check time like the rules: a held one
   drops out of the listing and the exit code, counted as the summary suffix `, N baselined`, keyed
   by rule, file, imported module and edge kind, never by line, which churns (`baselineKey`).

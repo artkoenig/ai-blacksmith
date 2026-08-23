@@ -8,24 +8,24 @@ paths:
 - Every check that runs without a Claude Code session. `forge-test` wraps it: it counts the `ok`
   lines through `passingPattern` and reports the `FAIL` lines through `failingPattern`, so a suite
   that prints neither is invisible to both. The suites: the manifest and syntax, the wrapper
-  contract against a fixture project, every hook decision, the startup measurement against a
-  fixture agent and a synthetic transcript, that the project rules are tracked, that every area
-  note parses and still globs something, and the workflow control flow against stubbed agents -
-  wave order, stall detection, skipped dependents, merge conflicts, a missing issue id, and the
-  `cast *` suites over one scanned fixture project (51 of them; count with
-  `bash test.sh | grep -c '^ok   cast'` rather than trusting a number written here). They assert
-  against the written `.cast/graph.json`, the contract, unless the command writes no file. The page
-  suites read `page.html`, its embedded data block and the pure functions `cast.js` exports - never
-  a browser, on a phone or anywhere else: markup and css are read by `grep` over the page, and a
-  function the page needs (`marker`, `toggleOpen`, `groupIds`) is tested in node and grepped for in
-  the page, which is how a claim about a press is checked without one. The cast fixture ships its
-  own
-  `.cast/layers.json`, so every `cast report` assertion sees the layer sections too, and the
-  `cast check` suites rewrite its `.cast/rules.json` per case - rules are read at check time, so
-  none of them rescans. The `cast baseline` and `cast ratchet` suites also write and remove its
-  `.cast/baseline.json`; the last one deletes it, so a suite added after them starts unbaselined.
-  The `cast skills` suite reads no fixture at all: it asserts the frontmatter, the `!` line and the
-  `.claude/skills/<name>` symlink of each cast skill in the repository itself.
+  contract against a fixture project, every hook decision, the startup measurement against a fixture
+  agent and a synthetic transcript, that the project rules are tracked, that every area note parses
+  and still globs something, and the workflow control flow against stubbed agents - wave order,
+  stall detection, skipped dependents, merge conflicts, a missing issue id, and the `cast *` suites
+  over one scanned fixture project (70 of them; count with `bash test.sh | grep -c '^ok   cast'`
+  rather than trusting a number written here). They assert against the written graph, the contract,
+  unless the command writes no file - and it is no longer in the fixture: `$CAST_GRAPH_FILE` is
+  parsed out of what `cast scan` printed, not a fixed path. The page suites read `page.html`, its
+  embedded data block and the pure functions `cast.js` exports - never a browser, on a phone or
+  anywhere else: markup and css are read by `grep` over the page, and a function the page needs
+  (`marker`, `toggleOpen`, `groupIds`) is tested in node and grepped for in the page, which is how a
+  claim about a press is checked without one. The cast fixture ships its own `.cast/layers.json`, so
+  every `cast report` assertion sees the layer sections too, and the `cast check` suites rewrite its
+  `.cast/rules.json` per case - rules are read at check time, so none of them rescans. The `cast
+  baseline` and `cast ratchet` suites also write and remove its `.cast/baseline.json`; the last one
+  deletes it, so a suite added after them starts unbaselined. The `cast skills` suite reads no
+  fixture at all: it asserts the frontmatter, the `!` line and the `.claude/skills/<name>` symlink
+  of each cast skill in the repository itself.
 - The manifest and syntax suite loops `for d in plugins/*/`: validate, `node --check`, `bash -n`
   and the executable-bit checks are derived from the plugin directories, each guarded by
   `[ -f "$f" ] || continue` so a plugin shipping no `bin/`, `scripts/` or `workflows/` is skipped.

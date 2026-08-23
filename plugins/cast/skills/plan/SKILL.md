@@ -34,9 +34,8 @@ which goal the graph will not give up.
    `{"op":"split","module":"<id>","into":[{"id":"<id>","imports":[],"importedBy":[]},...]}`.
    Every id is a module the report above named, spelled exactly.
 2. **Simulate.** `cast plan simulate <name> --root <root>`, or the path where the draft is not in
-   `.cast/plans`. It writes nothing - no source file, no
-   `.cast/graph.json`. Exit 2 is a plan that could not be applied at all: an unknown operation, or
-   a module it names that the graph does not have. That is never a partial answer, so do not read
+   `.cast/plans`. It writes nothing - no source file, no graph file. Exit 2 is a plan that could
+   not be applied at all: an unknown operation, or a module it names that the graph does not have. That is never a partial answer, so do not read
    the numbers off a run that died - fix the draft and simulate again.
 3. **Judge.** Against the criteria below, on the report and on nothing else.
 4. **Redraft.** A rejected plan is edited and simulated again. Say what you changed and why before
@@ -87,7 +86,7 @@ operations in order.
   for a manual look at the plan; drop `--plan` for the current state, and publish both as Artifacts
   to compare. Without `--fragment` the page is a standalone file, sent with `SendUserFile`.
 
-Both render, and neither writes a source file or `.cast/graph.json`; a plan that cannot be applied
+Both render, and neither writes a source file or a graph file; a plan that cannot be applied
 exits 2 having drawn nothing.
 
 Report what the plan improves and what it costs, in that order, and name a violation it adds.

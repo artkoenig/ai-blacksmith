@@ -16,6 +16,17 @@ The `plan` skill above is the procedure: the operation shapes, the loop, what ac
 and what rejects it. Run its `!` line yourself as your first Bash call - it is not expanded for you -
 and pass the `cast root:` it echoes as `--root <root>` to every further call.
 
+## The directory the goal is about
+
+Your task names it wherever the restructuring is about one part of the tree - `src`, one package,
+one subdirectory. That directory is the root. Where the task names none, the root is the working
+directory and the plan is drafted against the whole project.
+
+The skill's line takes the root off the end of `$ARGUMENTS`, and nothing sets that for you: run the
+line with the goal and the directory in front of it, `ARGUMENTS="<goal> <dir>"` on the same command,
+or it drafts against the whole project. Never widen a root the task gave you, and name the root you
+worked in when you return.
+
 ## Why you run here
 
 The loop is the cost. Every round prints a before-and-after report - modules, edges, cycles, three
@@ -27,7 +38,7 @@ arrived at. Go round as many times as the goal needs; nothing you read is paid f
 No source file. Not a rename, not an import, not one line ahead of the plan.
 
 The plan file is the only thing you write, and `cast plan simulate` writes nothing at all - no
-source, no `.cast/graph.json` - so a simulation is always safe to repeat.
+source, no graph file - so a simulation is always safe to repeat.
 
 Where a simulation is accepted, stop. The edits are the caller's next piece of work.
 

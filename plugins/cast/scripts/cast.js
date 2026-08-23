@@ -2,7 +2,8 @@
 'use strict'
 // cast - the module graph of a project, and what is wrong with it.
 //
-//   cast scan [--root <dir>]     writes <root>/.cast/graph.json
+//   cast scan [--root <dir>]     writes the graph to a scratch directory keyed
+//                                by the root, and prints the file it wrote
 //   cast report [--root <dir>]   reads it and says what is wrong
 //   cast check [--root <dir>]    the rules of <root>/.cast/rules.json, evaluated
 //                                against the module graph; exit 1 on an error
@@ -26,7 +27,9 @@
 // specifier resolves - comes from an adapter file. Adapters ship in
 // ../adapters/, and a project adds its own in <root>/.cast/adapters/.
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
+const crypto = require('crypto')
 
 const SHIPPED = path.join(__dirname, '..', 'adapters')
 const ALWAYS_IGNORED = ['.git', '.cast', '.claude', '.forge']
@@ -1367,6 +1370,26 @@ function report(graph, rules) {
   return out.join('\n')
 }
 
+// The graph is derived state, and derived state does not belong in the tree it
+// describes. Written into `<root>/.cast/` it had to be gitignored by every
+// project that ran cast, and every agent that scanned one left a file behind in
+// a checkout it was told not to touch. It goes to a scratch directory under the
+// system temp instead, keyed by the root: `cast scan` and the six commands that
+// read the graph back derive the same path from the same `--root`, so neither
+// has to be told where it is, and two roots never share a file.
+//
+// `CAST_GRAPH` names the file outright, for a caller with a scratch directory of
+// its own - an agent handed one in its task. An environment variable rather than
+// a flag because the whole point is that scan and the command reading its graph
+// agree: exported once it holds for every call, where a flag is one more thing
+// to repeat on each and to forget on one.
+function graphFile(root) {
+  const named = process.env.CAST_GRAPH
+  if (named) return path.resolve(named)
+  const key = crypto.createHash('sha1').update(root).digest('hex').slice(0, 12)
+  return path.join(os.tmpdir(), 'cast', `${path.basename(root) || 'root'}-${key}`, 'graph.json')
+}
+
 function readGraph(out) {
   try {
     return JSON.parse(fs.readFileSync(out, 'utf8'))
@@ -1931,13 +1954,24 @@ function main(argv) {
     else if (cmd === 'render' && argv[i] === '--plan' && argv[i + 1]) planName = argv[++i]
     else die(USAGE)
   }
-  const out = path.join(root, '.cast', 'graph.json')
+  // A root that is not a directory is a question about a project that does not
+  // exist. It says so here rather than throwing out of the walk, so the caller
+  // that mistyped a directory reads which one.
+  try {
+    if (!fs.statSync(root).isDirectory()) die(`not a directory: ${root}`)
+  } catch (e) {
+    if (e && e.code === 'ENOENT') die(`no directory at ${root}`)
+    throw e
+  }
+  const out = graphFile(root)
 
   if (cmd === 'scan') {
     const graph = scan(root)
     fs.mkdirSync(path.dirname(out), { recursive: true })
     fs.writeFileSync(out, JSON.stringify(graph, null, 2) + '\n')
-    process.stdout.write(`${graph.modules.length} modules scanned into ${path.relative(root, out)}\n`)
+    // The absolute path, because the file is no longer under the root and a
+    // path relative to it would climb out through `../..`.
+    process.stdout.write(`${graph.modules.length} modules scanned into ${out}\n`)
     return 0
   }
   if (cmd === 'report') {
@@ -2047,7 +2081,7 @@ function main(argv) {
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
 module.exports = {
-  scan, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
+  scan, graphFile, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
   viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
   edgesAt, edgeLines,
   readRules, violations, check, readBaseline, ratchet,
