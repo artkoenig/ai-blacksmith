@@ -2745,6 +2745,71 @@ done
 [ "$S" = 0 ] && ok "cast skill root"
 
 
+# --- cast agents ------------------------------------------------------------
+# The two subagents a session delegates the graph to. Each is a context boundary
+# around a skill that already exists, and what it buys is the report, the edge
+# listings and the rounds of simulation staying out of the caller - so a
+# definition that hands those back anyway has paid a dispatch for nothing.
+S=0
+for a in graph-analyst refactor-planner; do
+  F="plugins/cast/agents/$a.md"
+  if [ ! -f "$F" ]; then fail "cast agents" "$F is missing"; S=1; continue; fi
+  FM="$(sed -n '2,/^---$/p' "$F")"
+  # break: dropping description, which is the only thing routing reads - an
+  # agent nothing routes to is never dispatched and the session runs cast itself
+  for k in name description model tools skills; do
+    printf '%s\n' "$FM" | grep -q "^$k:" \
+      || { fail "cast agents" "$F carries no $k in its frontmatter"; S=1; }
+  done
+  # break: copying one agent's file to the other and leaving the name behind
+  printf '%s\n' "$FM" | grep -qx "name: $a" \
+    || { fail "cast agents" "$F does not name itself $a"; S=1; }
+  # break: copying the agent into .claude/agents, where an edit to the source in
+  # plugins/cast is not live in the session
+  [ -L ".claude/agents/$a.md" ] \
+    || { fail "cast agents" ".claude/agents/$a.md is not a symbolic link"; S=1; }
+  [ "$(readlink -f ".claude/agents/$a.md")" = "$PWD/plugins/cast/agents/$a.md" ] \
+    || { fail "cast agents" ".claude/agents/$a.md does not point at plugins/cast/agents/$a.md"; S=1; }
+  # break: handing the agent Edit, so it can change the source it was dispatched
+  # to read about - neither of the two edits a file
+  printf '%s\n' "$FM" | grep -q '^tools:.*Edit' \
+    && { fail "cast agents" "$F may edit source files"; S=1; }
+  # break: returning the report itself, which pays the dispatch and lands the
+  # whole graph in the caller's context anyway
+  grep -q '^## Return$' "$F" \
+    || { fail "cast agents" "$F states no return contract"; S=1; }
+  grep -qi 'never paste the page markup' "$F" \
+    || { fail "cast agents" "$F does not keep the page markup out of its return"; S=1; }
+done
+# break: dropping the skill the agent's procedure lives in, so it rediscovers the
+# cast flags on every run - the duplication the boundary exists to avoid
+agent_declares() {
+  F="plugins/cast/agents/$1.md"
+  [ -f "$F" ] || return 0
+  sed -n '2,/^---$/p' "$F" | grep -qx "  - $2" \
+    || { fail "cast agents" "$F does not declare the $2 skill"; S=1; }
+}
+agent_declares graph-analyst cast:map
+agent_declares graph-analyst map
+agent_declares refactor-planner cast:plan
+agent_declares refactor-planner plan
+# break: letting the planner edit ahead of an accepted simulation, which is the
+# one thing the draft-simulate-judge loop exists to prevent
+grep -qi 'no source file' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner does not forbid itself a source edit"; S=1; }
+# break: rendering the page without --fragment, which the caller then cannot
+# publish as an Artifact
+grep -qF -- '--fragment' plugins/cast/agents/graph-analyst.md \
+  || { fail "cast agents" "the analyst does not render a publishable fragment"; S=1; }
+# break: adding the agents and routing nothing to them, so the session keeps
+# reading the graph in its own context
+for a in graph-analyst refactor-planner; do
+  grep -q "$a" plugins/cast/rules/cast.md \
+    || { fail "cast agents" "the cast rule never names $a"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast agents"
+
+
 # --- cast plan skill --------------------------------------------------------
 # AC4/AC5 the plan skill drafts the plan itself and loops on the simulation, and
 # it says what a simulation has to say before anyone is allowed to edit a file.

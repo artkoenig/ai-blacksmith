@@ -1,0 +1,1 @@
+../../plugins/cast/agents/graph-analyst.md
