@@ -2686,4 +2686,19 @@ if [ ! -f "$P" ] || [ ! -f "$M" ]; then fail "cast render skill" "a cast skill i
 fi
 [ "$S" = 0 ] && ok "cast render skill"
 
+# --- the cast rule lives in the plugin --------------------------------------
+# A project that installs cast gets the rule with it; this repository reads the
+# same file through a link, so the two can never drift.
+S=0
+[ -f plugins/cast/rules/cast.md ] || { fail "cast rule" "plugins/cast/rules/cast.md is gone"; S=1; }
+# break: copying the rule back into .claude/rules instead of linking it
+[ "$(readlink .claude/rules/cast.md 2>/dev/null)" = "../../plugins/cast/rules/cast.md" ] \
+  || { fail "cast rule" ".claude/rules/cast.md is not a link to the plugin's rule"; S=1; }
+# break: dropping the split that sends the page to the user and the mermaid to an issue
+grep -qF 'cast render --html' plugins/cast/rules/cast.md \
+  || { fail "cast rule" "the rule no longer names the page as what the user is sent"; S=1; }
+grep -qF 'cast render --mermaid' plugins/cast/rules/cast.md \
+  || { fail "cast rule" "the rule no longer names mermaid as what an issue carries"; S=1; }
+[ "$S" = 0 ] && ok "cast rule"
+
 exit "$FAILED"
