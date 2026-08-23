@@ -90,16 +90,11 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   by rule, file, imported module and edge kind, never by line, which churns (`baselineKey`).
   `--update` refuses (exit 1, no write) a baseline holding more violations than the one it replaces
   - the ratchet; no baseline yet accepts any count.
-- Plans are read at simulate time from `<root>/.cast/plans/<name>.json`, like the rules, applied in
-  order to a deep copy - `cast plan simulate` writes no source file and no `graph.json` - each on
-  the graph the one before left, so one may name a module an earlier one created; `apply()` dies on
-  a module it cannot find, `readPlan` on an unknown op or key.
-- An edge's `file` is the id of the module holding it after the operation too: `move`/`merge` go
-  through `resite()`, `split` sites each edge on its part, `invert` the new edge at `line` 0. Plan
-  metrics are at layer altitude, counting only edges crossing a layer boundary: `I = fan-out /
-  (fan-in + fan-out)`, 0 when a layer has neither, and the baseline is not applied.
-- `cast render --plan <name>` draws `simulateGraph(scan, readPlan(...))` instead of the scanned
-  graph, in `main`'s render branch before any write, so an unapplicable plan exits 2 with no page;
-  layers, rules and the baseline are then read against the simulated graph. The fixture tells the
-  two apart by layer size (`logic (5)` scanned, `logic (4)` after `cut`) - `L_unassigned` is in
-  both, since `pkg/*.toy` is unassigned already.
+- Plans are read at simulate time from `<root>/.cast/plans/<name>.json`; `cast plan simulate`
+  writes nothing, the ops applying in order to a deep copy, each on the graph the one before left;
+  `apply()` dies on an unknown module, `readPlan` on an unknown op or key. An op resites its edges:
+  `move`/`merge` through `resite()`, `split` per part, `invert` at `line` 0.
+- Plan metrics count edges crossing a layer boundary alone: `I = fan-out / (fan-in + fan-out)`, 0
+  when a layer has neither, no baseline. `cast render --plan <name>` draws `simulateGraph(scan,
+  readPlan(...))` in `main`'s render branch before any write: an unapplicable plan exits 2 with no
+  page, and layers, rules and the baseline read against the simulated graph.
