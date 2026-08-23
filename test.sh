@@ -1527,6 +1527,77 @@ printf '%s\n' "$V_AFTER" | grep -q 'no-back-edge' \
   || { fail "cast plan rules" "a violation the plan adds was not listed after it: $CAST_PV"; S=1; }
 [ "$S" = 0 ] && ok "cast plan rules"
 
+# --- cast: the simulated graph, rendered ------------------------------------
+# The same fixture and the same plan `cut`, drawn instead of counted. Every case
+# here renders only: the fixture is never rescanned and never edited.
+
+# AC1 --plan draws the graph cast plan simulate produces, not the scanned one,
+# and without it both renderers draw the current graph exactly as they do today
+S=0
+CAST_RM_NOW="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast render plan" "cast render --mermaid exited $RC: $CAST_RM_NOW"; S=1; }
+CAST_RM_PLAN="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan cut 2>&1)"; RC=$?
+# break: dying on --plan, or never accepting the flag at all
+[ "$RC" = 0 ] || { fail "cast render plan" "cast render --mermaid --plan exited $RC: $CAST_RM_PLAN"; S=1; }
+# the plan merges two modules of logic into one and moves a third out of it, so
+# the layer the plan leaves holds four modules where the scanned one holds five
+# break: ignoring --plan and rendering the scanned graph
+printf '%s\n' "$CAST_RM_PLAN" | grep -qF 'logic (4)' \
+  || { fail "cast render plan" "the mermaid render did not draw the graph the plan leaves: $CAST_RM_PLAN"; S=1; }
+# break: rendering a plan whether or not one was asked for
+printf '%s\n' "$CAST_RM_NOW" | grep -qF 'logic (5)' \
+  || { fail "cast render plan" "the plain mermaid render did not draw the graph as scanned: $CAST_RM_NOW"; S=1; }
+CAST_RH_PLAN="$CASTFIX/plan.html"
+CAST_RH_NOW="$CASTFIX/now.html"
+(cd "$CASTFIX" && "$CAST_BIN" render --html plan.html --plan cut >/dev/null 2>&1); RC=$?
+[ "$RC" = 0 ] || { fail "cast render plan" "cast render --html --plan exited $RC"; S=1; }
+(cd "$CASTFIX" && "$CAST_BIN" render --html now.html >/dev/null 2>&1) \
+  || { fail "cast render plan" "cast render --html did not run"; S=1; }
+# the merge names a module that exists in no scan of the fixture
+# break: the page describing the scanned graph while mermaid describes the plan
+grep -qF 'src/bc.ts' "$CAST_RH_PLAN" \
+  || { fail "cast render plan" "the page did not draw the graph the plan leaves"; S=1; }
+grep -qF 'src/bc.ts' "$CAST_RH_NOW" \
+  && { fail "cast render plan" "the plain page drew the plan"; S=1; }
+
+# AC2 rendering a plan writes no graph and no source file, and a plan that
+# cannot be applied exits 2 having drawn nothing
+rm -f "$CAST_RH_PLAN" "$CAST_RH_NOW"
+CAST_RSUMS="$(cd "$CASTFIX" && find . -type f | sort | xargs cksum)"
+CAST_RM2="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan cut 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast render plan" "the plan render exited $RC: $CAST_RM2"; S=1; }
+# break: applying the plan to the loaded graph and writing it back to
+# .cast/graph.json, or executing the moves against the source tree
+[ "$CAST_RSUMS" = "$(cd "$CASTFIX" && find . -type f | sort | xargs cksum)" ] \
+  || { fail "cast render plan" "rendering a plan changed the project"; S=1; }
+# the page a plan render is asked for is the only file it writes
+(cd "$CASTFIX" && "$CAST_BIN" render --html plan.html --plan cut >/dev/null 2>&1) \
+  || { fail "cast render plan" "cast render --html --plan did not run"; S=1; }
+CAST_RSUMS2="$(cd "$CASTFIX" && find . -type f ! -name plan.html | sort | xargs cksum)"
+[ "$CAST_RSUMS" = "$CAST_RSUMS2" ] \
+  || { fail "cast render plan" "rendering a plan to a page wrote more than the page"; S=1; }
+rm -f "$CAST_RH_PLAN"
+# a plan that cannot be applied stops the render: no such plan file
+cat > "$CASTFIX/.cast/plans/broken.json" <<'JSON'
+{ "operations": [ { "op": "move", "module": "src/gone.ts", "to": "pkg/gone.ts" } ] }
+JSON
+for bad in nope broken; do
+  CAST_RBAD="$(cd "$CASTFIX" && "$CAST_BIN" render --html bad.html --plan $bad 2>&1)"; RC=$?
+  # break: reading the plan after the page is written, or falling back to the
+  # scanned graph when the plan cannot be applied
+  [ "$RC" = 2 ] \
+    || { fail "cast render plan" "an unapplicable plan $bad exited $RC, not 2: $CAST_RBAD"; S=1; }
+  [ -e "$CASTFIX/bad.html" ] \
+    && { fail "cast render plan" "an unapplicable plan $bad still drew a page"; S=1; }
+  CAST_RBAD_M="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan $bad 2>/dev/null)"; RC=$?
+  [ "$RC" = 2 ] \
+    || { fail "cast render plan" "an unapplicable plan $bad exited $RC from mermaid, not 2"; S=1; }
+  [ -z "$CAST_RBAD_M" ] \
+    || { fail "cast render plan" "an unapplicable plan $bad still drew a graph: $CAST_RBAD_M"; S=1; }
+done
+rm -f "$CASTFIX/.cast/plans/broken.json" "$CASTFIX/bad.html"
+[ "$S" = 0 ] && ok "cast render plan"
+
 # AC4 a count labelled edges counts the same thing everywhere: the report's is
 # every import met, and every narrower count says it counts module edges
 S=0

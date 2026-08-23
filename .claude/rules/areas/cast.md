@@ -98,3 +98,8 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   through `resite()`, `split` sites each edge on its part, `invert` the new edge at `line` 0. Plan
   metrics are at layer altitude, counting only edges crossing a layer boundary: `I = fan-out /
   (fan-in + fan-out)`, 0 when a layer has neither, and the baseline is not applied.
+- `cast render --plan <name>` draws `simulateGraph(scan, readPlan(...))` instead of the scanned
+  graph, in `main`'s render branch before any write, so an unapplicable plan exits 2 with no page;
+  layers, rules and the baseline are then read against the simulated graph. The fixture tells the
+  two apart by layer size (`logic (5)` scanned, `logic (4)` after `cut`) - `L_unassigned` is in
+  both, since `pkg/*.toy` is unassigned already.

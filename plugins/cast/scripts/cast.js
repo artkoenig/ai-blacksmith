@@ -18,9 +18,11 @@
 //                                holds; --update rewrites it, and refuses to grow it
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
-//   cast render --mermaid [--expand <layer>] [--root <dir>]
-//   cast render --html <file> [--expand <layer>] [--root <dir>]
-//                                the graph at layer altitude, one layer resolved
+//   cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
+//   cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]
+//                                the graph at layer altitude, one layer resolved;
+//                                --plan draws the graph the plan would leave,
+//                                writing nothing but the page that was asked for
 //
 // The engine holds no language knowledge. Every fact about a language - which
 // files are modules, which text is an import, what kind of edge it makes, how a
@@ -1761,8 +1763,8 @@ const USAGE =
   '       cast plan simulate <name> [--root <dir>]\n' +
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
-  '       cast render --mermaid [--expand <layer>] [--root <dir>]\n' +
-  '       cast render --html <file> [--expand <layer>] [--root <dir>]'
+  '       cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]\n' +
+  '       cast render --html <file> [--expand <layer>] [--plan <name>] [--root <dir>]'
 
 function main(argv) {
   const cmd = argv[0]
@@ -1773,6 +1775,7 @@ function main(argv) {
   let htmlOut = null
   let asMermaid = false
   let update = false
+  let planName = null
   // `rules` and `plan` are the commands with a subcommand and a positional; both
   // are taken before the flag loop, which knows only flags.
   let sub = null
@@ -1791,6 +1794,7 @@ function main(argv) {
     else if (cmd === 'render' && argv[i] === '--mermaid') asMermaid = true
     else if (cmd === 'render' && argv[i] === '--html' && argv[i + 1]) htmlOut = argv[++i]
     else if (cmd === 'render' && argv[i] === '--expand' && argv[i + 1]) expand = argv[++i]
+    else if (cmd === 'render' && argv[i] === '--plan' && argv[i + 1]) planName = argv[++i]
     else die(USAGE)
   }
   const out = path.join(root, '.cast', 'graph.json')
@@ -1897,7 +1901,13 @@ function main(argv) {
   }
   if (cmd === 'render') {
     if (!asMermaid && !htmlOut) die(USAGE)
-    const graph = readGraph(out)
+    const scanned = readGraph(out)
+    // `--plan` renders the graph the plan would leave, never the scanned one:
+    // the same picture `cast plan simulate` counts, so a refactoring is looked
+    // at before a file is edited. The plan is read and applied before anything
+    // is drawn or written, so a plan that cannot be applied exits 2 having
+    // produced no page - and the simulated graph is never written back.
+    const graph = planName ? simulateGraph(scanned, readPlan(root, planName)) : scanned
     const rules = layerRules(root)
     // The render reads rules.json and the baseline the way `cast check` does, at
     // render time: a view that marked nothing would be a third answer about the
