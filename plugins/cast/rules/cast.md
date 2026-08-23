@@ -12,10 +12,15 @@ The architecture is read from the graph, not from memory.
 - A refactoring is judged on the simulation before it is executed: `cast plan simulate <name>`
   writes no source file and no `.cast/graph.json`, and reports the cycles, the layer metrics and the
   rule violations before and after (`${CLAUDE_PLUGIN_ROOT}/README.md:161-165`).
-- What the user looks at in the session is the page: `cast render --html <file> --root <root>`, and
-  `--plan <name>` for the graph a refactoring would leave. It is one self-contained file that
-  fetches nothing, opens any node to any depth and names the rule behind every breaking edge
-  (`${CLAUDE_PLUGIN_ROOT}/README.md:196-214`). Send it with `SendUserFile`; never paste its markup.
+- What the user looks at in the session is the page: `cast render --html <file> --fragment
+  --root <root>`, and `--plan <name>` for the graph a refactoring would leave. Publish that file as
+  an Artifact and hand over the link. `--fragment` is what makes it publishable: no document of its
+  own for the host to reject, every colour a theme token the host sets
+  (`${CLAUDE_PLUGIN_ROOT}/README.md:220-228`). The page is rendered, not authored - there is no
+  design pass to make over it. Drop `--fragment` where the user wants the file itself and send that
+  with `SendUserFile`. Never paste its markup either way. It fetches nothing, opens any node to any
+  depth and names the rule behind every breaking edge
+  (`${CLAUDE_PLUGIN_ROOT}/README.md:196-218`).
 - What goes into an issue or a document is mermaid: `cast render --mermaid --root <root>`, in a
   fenced `mermaid` block. It draws one node per layer and labels each arrow with the module edges
   behind it (`${CLAUDE_PLUGIN_ROOT}/README.md:169-171`), so it stays readable where no browser

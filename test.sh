@@ -1062,6 +1062,91 @@ grep -qF 'is labelled with the number of' plugins/cast/README.md \
   && { fail "cast html" "README.md still says an arrow on the page is labelled with its count"; S=1; }
 [ "$S" = 0 ] && ok "cast html"
 
+# #56 the page can be published as an artifact: a fragment with no document of
+# its own, painted from theme tokens, with a mermaid block a host can draw
+S=0
+CAST_FRAG_OUT="$(cd "$CASTFIX" && "$CAST_BIN" render --html frag.html --fragment 2>&1)" \
+  || { fail "cast artifact page" "cast render --html --fragment did not run: $CAST_FRAG_OUT"; S=1; }
+[ -f "$CASTFIX/frag.html" ] \
+  || { fail "cast artifact page" "--fragment wrote no page: $CAST_FRAG_OUT"; S=1; }
+CAST_FRAG="$(cat "$CASTFIX/frag.html" 2>/dev/null)"
+# AC1 the host supplies the skeleton and rejects a second one
+# break: writing the document around the content in fragment mode too
+for t in '<!doctype' '<html' '<head' '<body'; do
+  printf '%s\n' "$CAST_FRAG" | grep -qiF "$t" \
+    && { fail "cast artifact page" "the fragment carries its own $t"; S=1; }
+done
+# AC1 the title is what names the page, and only the head of the file is read
+# break: dropping the title with the head that used to carry it
+[ "$(printf '%s' "$CAST_FRAG" | head -c 8192 | grep -c '<title>cast</title>')" = 1 ] \
+  || { fail "cast artifact page" "the fragment does not name itself in its first 8 KB"; S=1; }
+# AC2 the standalone page is unchanged
+# break: making the fragment the only shape the renderer knows
+for t in '<!doctype html>' '<head' '<body' 'width=device-width'; do
+  printf '%s\n' "$CAST_HTML" | grep -qiF "$t" \
+    || { fail "cast artifact page" "the standalone page lost $t"; S=1; }
+done
+# AC6 a fragment fetches nothing either
+# break: reaching for a mermaid library once a host is drawing the block
+printf '%s\n' "$CAST_FRAG" | grep -qE 'src="https?:|href="https?:' \
+  && { fail "cast artifact page" "the fragment loads an external asset"; S=1; }
+# AC5 the mermaid block is drawn where a host draws mermaid, and stays its own
+# source where nothing does
+# break: leaving the block with its id alone, so a host never finds it
+for f in "$CASTFIX/frag.html" "$CASTFIX/view.html"; do
+  grep -qF 'class="mermaid"' "$f" \
+    || { fail "cast artifact page" "$f does not mark the mermaid block for a host that draws it"; S=1; }
+  grep -qF 'graph LR' "$f" \
+    || { fail "cast artifact page" "$f no longer carries the mermaid source"; S=1; }
+done
+# AC3, AC4 every colour is a token on bare `:root`, redefined both ways a theme
+# is asked for, and the ground is painted rather than inherited
+# break: putting `.node rect{fill:#eef3fb}` back as a literal, or defining a
+# colour only inside the dark block, which leaves it undefined in the light one
+CAST_THEME="$(node -e '
+const fs=require("fs");
+for (const f of process.argv.slice(1)) {
+  const p=fs.readFileSync(f,"utf8");
+  const m=p.match(/<style>([\s\S]*?)<\/style>/);
+  if(!m){ console.log(f+": no stylesheet"); continue }
+  const css=m[1];
+  if(!/:root\{[^}]*--/.test(css)) console.log(f+": no tokens on bare :root");
+  if(!/@media \(prefers-color-scheme:dark\)\{:root:not\(\[data-theme="light"\]\)\{/.test(css))
+    console.log(f+": no guarded prefers-color-scheme block");
+  if(!/:root\[data-theme="dark"\]\{/.test(css)) console.log(f+": no data-theme block");
+  if(!/body\{[^}]*background:var\(--/.test(css)) console.log(f+": body paints no background of its own");
+  const rest=css.replace(/:root[^{]*\{[^}]*\}/g,"").replace(/@media[^{]*\{[^{]*\{[^}]*\}\}/g,"");
+  const hex=rest.match(/#[0-9a-fA-F]{3,8}/g);
+  if(hex) console.log(f+": a colour outside the tokens: "+hex.join(" "));
+}' "$CASTFIX/frag.html" "$CASTFIX/view.html" 2>&1)"
+[ -z "$CAST_THEME" ] \
+  || { fail "cast artifact page" "the page does not paint from theme tokens: $CAST_THEME"; S=1; }
+# the drawing takes the arrow colour from the same sheet
+# break: `stroke: e.color`, which paints a light theme's red on a dark ground
+grep -qF "'var(--edge-' + e.tone + ')'" plugins/cast/scripts/cast.js \
+  || { fail "cast artifact page" "the drawn arrow no longer takes its colour from the sheet"; S=1; }
+# AC1 the flag answers a question only --html asks
+# break: accepting --fragment beside --mermaid and silently ignoring it
+CAST_FRAG_BAD="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --fragment 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast artifact page" "--fragment without --html exited $RC: $CAST_FRAG_BAD"; S=1; }
+# AC7, AC8 the rule, the skills and the README name the way the page is delivered
+# break: shipping the flag and leaving every caller sending the standalone file
+grep -qF -- '--fragment' plugins/cast/README.md \
+  || { fail "cast artifact page" "README.md does not document --fragment"; S=1; }
+grep -qF 'Artifact' plugins/cast/rules/cast.md \
+  || { fail "cast artifact page" "the rule does not name publishing the page as an Artifact"; S=1; }
+grep -qF -- '--fragment' plugins/cast/rules/cast.md \
+  || { fail "cast artifact page" "the rule does not render the page as a fragment"; S=1; }
+for f in plugins/cast/skills/map/SKILL.md plugins/cast/skills/plan/SKILL.md; do
+  grep -qF -- '--fragment' "$f" \
+    || { fail "cast artifact page" "$f does not render the page as a fragment"; S=1; }
+  grep -qF 'Artifact' "$f" \
+    || { fail "cast artifact page" "$f does not publish the page"; S=1; }
+done
+rm -f "$CASTFIX/frag.html"
+[ "$S" = 0 ] && ok "cast artifact page"
+
 
 # --- cast: the rules ---------------------------------------------------------
 # The same scanned fixture, read through .cast/rules.json. Rules are read at
@@ -2675,10 +2760,10 @@ if [ ! -f "$P" ] || [ ! -f "$M" ]; then fail "cast render skill" "a cast skill i
   grep -A2 'cast render --mermaid --plan' "$P" | grep -qi 'issue' \
     || { fail "cast render skill" "the plan mermaid is not named as the picture an issue carries"; S=1; }
   # break: dropping the page, leaving a mermaid block as the only way to look
-  grep -qF 'cast render --html <file> --plan <name> --root <root>' "$P" \
+  grep -qF 'cast render --html <file> --fragment --plan <name> --root <root>' "$P" \
     || { fail "cast render skill" "no skill opens the plan as a page"; S=1; }
   # break: a page of the plan and no page of the current state to compare it to
-  grep -qF 'cast render --html <file> --root <root>' "$M" \
+  grep -qF 'cast render --html <file> --fragment --root <root>' "$M" \
     || { fail "cast render skill" "no skill opens the current state as a page"; S=1; }
   # break: rendering a plan and letting it be mistaken for a scan that wrote
   grep -qF 'exits 2 having drawn nothing' "$P" \

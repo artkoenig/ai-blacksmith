@@ -81,8 +81,9 @@ operations in order.
 
 - `cast render --mermaid --plan <name> --root <root>` draws the graph the plan would leave, not the
   scanned one. That is the picture a refactoring issue carries - paste it into the issue.
-- `cast render --html <file> --plan <name> --root <root>` is the same graph as a page, for a manual
-  look at the plan; drop `--plan` for the current state, and open both to compare.
+- `cast render --html <file> --fragment --plan <name> --root <root>` is the same graph as a page,
+  for a manual look at the plan; drop `--plan` for the current state, and publish both as Artifacts
+  to compare. Without `--fragment` the page is a standalone file, sent with `SendUserFile`.
 
 Both render, and neither writes a source file or `.cast/graph.json`; a plan that cannot be applied
 exits 2 having drawn nothing.

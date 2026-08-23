@@ -32,7 +32,8 @@ the module edges behind it with the file and line of each import.
 Draw it only when asked for a picture:
 
 - `cast render --mermaid --root <root>` for a diagram in the answer.
-- `cast render --html <file> --root <root>` for a manual look at the current state - a page to open
-  and press through, where a mermaid block is already too big to read.
+- `cast render --html <file> --fragment --root <root>` where a mermaid block is already too big to
+  read - a page to open and press through. Publish it as an Artifact and give the user the link;
+  drop `--fragment` and send the file with `SendUserFile` where they want the file itself.
 
 Answer in prose with the numbers from the report. Never restate a count the report did not give.
