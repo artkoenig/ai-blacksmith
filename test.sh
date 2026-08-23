@@ -1957,43 +1957,57 @@ rm -f "$CAST_BASE"
 
 # --- cast: an arrow a reader can follow --------------------------------------
 # AC1/AC4 (of #46) every arrow shows which way the dependency runs, at every
-# altitude, and the head is the arrow's own: the severity colour of a breaking
-# edge, the inherited grey of a held one, the plain grey of one no rule names.
+# altitude. The head that used to say it is gone - on a page of many modules a
+# head per arrow is what makes the drawing unreadable - and the side says it
+# instead: an arrow to something further down the stack runs to the right of the
+# boxes, one to something further up to the left of them.
 S=0
-# break: drawing a bare curve with no marker-end, which shows no direction at all
+# break: anchoring every arrow on the right, which draws the two directions the
+# same way and leaves nothing on the page to tell them apart
 O="$(pagejs '
   const states=[[],["logic"],["ui","ui/src","logic","logic/src"]]
+  let down=0, up=0
   for (const st of states) {
     const l=layoutTree(viewTree(data,st.map(treeId)))
     if (!l.edges.length) bad("no arrow at all with "+st.join(",")+" open")
-    if (!l.markers||!l.markers.length) bad("the drawing defines no arrowhead with "+st.join(",")+" open")
     for (const e of l.edges) {
-      if (!e.marker) bad("the arrow "+e.from+" -> "+e.to+" carries no direction marker")
-      const m=l.markers.find(m=>m.id===e.marker)
-      if (!m) bad("the arrow points at the undefined head "+e.marker)
-      // break: one head for the whole page, which loses the colour and the state
-      if (m.color!==e.color) bad("a "+(e.state||"plain")+" arrow is "+e.color+" and its head "+m.color)
-      if ((m.state||null)!==(e.state||null)) bad("the head is "+m.state+" where the arrow is "+e.state)
+      const a=l.flat.find(n=>n.id===e.from), b=l.flat.find(n=>n.id===e.to)
+      const runsDown=b.y+b.h/2>=a.y+a.h/2
+      if (e.down!==runsDown) bad("the arrow "+e.from+" -> "+e.to+" is drawn as if it ran the other way")
+      if (runsDown) {
+        down++
+        if (e.x1!==a.x+a.w||e.x2!==b.x+b.w)
+          bad("an arrow down the stack does not leave and arrive on the right of its boxes")
+        if (!(e.mx>Math.max(e.x1,e.x2))) bad("an arrow down the stack does not run right of its boxes: mx "+e.mx)
+      } else {
+        up++
+        if (e.x1!==a.x||e.x2!==b.x)
+          bad("an arrow up the stack does not leave and arrive on the left of its boxes")
+        if (!(e.mx<Math.min(e.x1,e.x2))) bad("an arrow up the stack does not run left of its boxes: mx "+e.mx)
+      }
     }
   }
-  const v=view("ui","ui/src","logic","logic/src")
-  const brk=edge(v,"logic/src/c.ts","ui/src/a.ts")
-  const held=edge(v,"ui/src/a.ts","logic/src/b.ts")
-  const plain=edge(v,"ui/src/a.ts","logic/src/t.ts")
-  for (const [n,e] of [["breaking",brk],["inherited",held],["unmarked",plain]]) {
-    if (!e) bad("the fixture has no "+n+" arrow to point")
-    if (!e.marker) bad("the "+n+" arrow has no head")
-  }
-  if (new Set([brk.marker,held.marker,plain.marker]).size!==3)
-    bad("a breaking, an inherited and an unmarked arrow share one head")
+  // the fixture has to carry both directions, or the side proves nothing
+  if (!down||!up) bad("the fixture draws "+down+" arrows down and "+up+" up")
+  // break: leaving the left side of the drawing off the page, which clips every
+  // arrow that runs up
+  const l=layoutTree(view("ui","ui/src","logic","logic/src","unassigned","unassigned/pkg"))
+  for (const e of l.edges) if (e.mx<0) bad("an arrow runs off the left of the drawing: mx "+e.mx)
+  // break: keeping the marker per colour and state on the edge, which is the head
+  // by another name
+  for (const e of l.edges) if (e.marker!==undefined) bad("an arrow still carries a head: "+e.marker)
+  if (l.markers!==undefined) bad("the drawing still defines arrowheads")
 ')" || { fail "cast arrow direction" "$O"; S=1; }
-# break: computing the head in the layout and never referencing it in the markup
-grep -qF "'marker-end': 'url(#' + e.marker + ')'" "$CAST_PAGE" \
-  || { fail "cast arrow direction" "the page draws no arrowhead at the end of a curve"; S=1; }
+# break: drawing the curve with a marker-end again, which is the sprawl the side
+# was meant to replace
+grep -qF 'marker-end' "$CAST_PAGE" \
+  && { fail "cast arrow direction" "the page still points an arrow with a head"; S=1; }
 grep -qF "el('marker'" "$CAST_PAGE" \
-  || { fail "cast arrow direction" "the page defines no marker to point with"; S=1; }
-grep -qF "fill: m.color" "$CAST_PAGE" \
-  || { fail "cast arrow direction" "the arrowhead is not filled in its arrow's colour"; S=1; }
+  && { fail "cast arrow direction" "the page still defines a marker to point with"; S=1; }
+# the direction is still there to be read in words, for the arrow a reader asks
+# about - break: taking the side and saying nothing in its place
+grep -qF "'imports ' : 'imported by '" "$CAST_PAGE" \
+  || { fail "cast arrow direction" "the panel no longer says which way a dependency runs"; S=1; }
 [ "$S" = 0 ] && ok "cast arrow direction"
 
 # AC1 (of #47) the drawing at rest carries boxes and pointed lines and nothing
@@ -2017,12 +2031,12 @@ O="$(pagejs '
     if (e.weight!==e.sites.length) bad("the arrow is weighted "+e.weight+" and carries "+e.sites.length+" imports")
   }
   // break: sizing the drawing by a label box, which leaves the page wider and
-  // taller than the lanes and the boxes on it
+  // taller than the arrows and the boxes on it
   const right=Math.max(...l.flat.map(n=>n.x+n.w))
-  const lane=Math.max(...l.edges.map(e=>e.mx))
+  const out=Math.max(...l.edges.map(e=>e.mx))
   const low=Math.max(...l.flat.map(n=>n.y+n.h))
-  if (l.width!==Math.max(right,lane)+M.PAD*2)
-    bad("the drawing is "+l.width+" wide, not the last lane ("+lane+") plus padding")
+  if (l.width!==Math.max(right,out)+M.PAD)
+    bad("the drawing is "+l.width+" wide, not the furthest arrow ("+out+") plus padding")
   if (l.height!==low+M.PAD)
     bad("the drawing is "+l.height+" tall, not the last box ("+low+") plus padding")
 ')" || { fail "cast arrows alone" "$O"; S=1; }
@@ -2384,16 +2398,16 @@ O="$(pagejs '
   const l=layoutTree(view("logic","logic/src","ui","ui/src"))
   const M=l.metrics
   if (M.TAP!==TAP) bad("the layout does not carry the 44 pixel target size: TAP is "+M.TAP)
-  for (const k of ["H","HEAD","LANE","CHAN"])
+  for (const k of ["H","HEAD"])
     if (M[k]<TAP) bad("the metric "+k+" is "+M[k]+", below the "+TAP+" pixel target")
   for (const n of l.flat) {
     if (n.hh<TAP) bad("the header of "+n.key+" is "+n.hh+" high, below "+TAP)
     if (n.hw<TAP) bad("the header of "+n.key+" is "+n.hw+" wide, below "+TAP)
   }
-  // two arrows never share one press
-  const lanes=l.edges.map(e=>e.mx).sort((a,b)=>a-b)
-  for (let i=1;i<lanes.length;i++)
-    if (lanes[i]-lanes[i-1]<TAP) bad("two arrow lanes are "+(lanes[i]-lanes[i-1])+" apart, closer than "+TAP)
+  // Arrows reserve no lane since #48, so nothing keeps two of them a press apart
+  // any more: where two run over the same stretch the press lands on the one
+  // drawn last. That is the price of a flat curve and it is not tested here -
+  // what a press has to hit is the target over the curve, checked below.
 ')" || { fail "cast touch targets" "$O"; S=1; }
 # break: leaving the html controls at the browser default, ~20 pixels high
 grep -qF 'button{font:inherit;min-height:44px;min-width:44px' "$CAST_PAGE" \
@@ -2407,6 +2421,10 @@ grep -qF '.hit,.node .hit{fill:transparent;pointer-events:all}' "$CAST_PAGE" \
   || { fail "cast touch targets" "the invisible targets take no press"; S=1; }
 grep -qF "class: 'edge grab'" "$CAST_PAGE" \
   || { fail "cast touch targets" "an arrow is only as wide as the line drawn for it"; S=1; }
+# break: narrowing that target to the stroke of the line, which two arrows over
+# one stretch now leave a finger no way to hit at all
+grep -qF "'stroke-width': M.TAP, class: 'edge grab'" "$CAST_PAGE" \
+  || { fail "cast touch targets" "the target over an arrow is not a finger wide"; S=1; }
 [ "$S" = 0 ] && ok "cast touch targets"
 
 # AC7 on a narrow screen the graph scrolls inside its own container instead of
