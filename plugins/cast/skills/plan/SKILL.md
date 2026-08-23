@@ -14,7 +14,7 @@ root; without one the working directory is the project.
 The plan is yours to write. Nobody hands you one, there is no file to ask for, and a goal like
 "break the cycle between ui and data" is the whole input this skill needs.
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; fi; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; ls "$R/.cast/plans" 2>/dev/null`
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; fi; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; ls "$R/.cast/plans" 2>/dev/null || echo "no plan written yet"`
 
 That is the graph the plan is drafted against, freshly scanned, and any plan already written down.
 `cast root:` is the root; every call below passes it as `--root <root>`.
