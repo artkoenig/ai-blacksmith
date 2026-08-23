@@ -823,11 +823,29 @@ function draw() {
     press = null
   }
   // Pressing anything that is not the highlighted node ends the highlight: on a
-  // phone there is no pointer to move away, so this is the way back.
+  // phone there is no pointer to move away, so this is the way back. It ends on
+  // the release and not on the touch, because the touch that scrolls the page is
+  // how a phone reaches the panel: clearing at the start of the gesture takes the
+  // numbers away in the moment the reader scrolls to them. So the touch only
+  // proposes the end, and a gesture that travels or that the browser takes over
+  // for a scroll withdraws it.
+  let away = null
+  const cancelAway = () => { away = null }
   document.addEventListener('pointerdown', (ev) => {
     if (held === null) return
     const g = ev.target && ev.target.closest ? ev.target.closest('.node') : null
-    if (!g || g.id !== held) unhighlight()
+    away = (!g || g.id !== held) ? { x: ev.clientX, y: ev.clientY, held } : null
+  })
+  document.addEventListener('pointermove', (ev) => {
+    if (away && (Math.abs(ev.clientX - away.x) > SLOP || Math.abs(ev.clientY - away.y) > SLOP)) cancelAway()
+  })
+  document.addEventListener('pointercancel', cancelAway)
+  // Only where the highlight is still the one that press was away from: a long
+  // press on another node moves the highlight itself, and the release that ends
+  // that press must not take the node it just asked for away.
+  document.addEventListener('pointerup', () => {
+    if (away && away.held === held) unhighlight()
+    cancelAway()
   })
   const toggle = (id) => {
     toggleOpen(open, id)
@@ -851,6 +869,7 @@ function draw() {
     // render: the highlight ends when the drawing it described does.
     unhighlight()
     cancelPress()
+    cancelAway()
     laid = l
     arrows = []
     svg.textContent = ''
