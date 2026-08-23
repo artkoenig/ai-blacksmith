@@ -3,7 +3,8 @@
 The module graph of a project, and what is wrong with it.
 
 ```
-cast scan [--root <dir>]     writes <root>/.cast/graph.json
+cast scan [--root <dir>]     writes the graph outside the checkout and prints
+                             the file it wrote
 cast report [--root <dir>]   reads it and says what is wrong
 cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
 cast plan simulate <name|file> [--root <dir>]
@@ -26,6 +27,17 @@ specifier it came from, its kind (`value`, `type`, `dynamic`), the file and the 
 that produced it, and where it resolved to: another module, something outside the project,
 nothing at all, or `opaque` - an import whose target is not a literal string, kept with the
 expression as its target because nothing was looked up at all.
+
+The graph is derived state, so `scan` writes it outside the tree it describes: a scratch directory
+under the system temp, keyed by the root, one file per root. Nothing lands in the checkout and
+there is nothing to gitignore. `scan` prints the absolute path it wrote, and every command that
+reads the graph back derives the same path from the same `--root`, so neither has to be told where
+it is. `CAST_GRAPH` in the environment names the file outright, for a caller that wants it in a
+scratch directory of its own; export it once and `scan` and the command reading its graph agree.
+
+`--root` is the directory cast reads. Point it at a subdirectory and the graph is that
+subdirectory alone - `.cast/layers.json`, `.cast/rules.json` and `.cast/plans/` are then read
+under it too, so a run against one part of a project is configured under that part.
 
 `report` counts the modules and the edges by kind and breaks them down by resolution, names every
 import that resolved to nothing and every one it could not read, and names every module of every
@@ -161,7 +173,7 @@ The operations are ordered - each one is applied to the graph the one before it 
 operation may name a module an earlier one created. An operation kind, or an attribute, that cast
 cannot apply is an error, never a silent skip.
 
-The simulation writes nothing: no source file, no `.cast/graph.json`. It reports, before and
+The simulation writes nothing: no source file, no graph file. It reports, before and
 after, the modules and module edges, the cycles, the fan-in, fan-out and instability of every layer
 (`I = fan-out / (fan-in + fan-out)`, counting only the edges that cross a layer boundary), and the
 rule violations of `.cast/rules.json` - so a plan that removes a violation is visible as one that
@@ -187,7 +199,7 @@ layer a single node; an edge into it lands on the module, not on the layer.
 plan applied to a copy of the graph, so a refactoring can be looked at
 before a single source file is edited. Both `--mermaid` and `--html` take it, and both draw the
 simulated graph the same way they draw the scanned one - layers, rules and the baseline are read
-at render time against the graph the plan leaves. Rendering a plan writes no `.cast/graph.json`
+at render time against the graph the plan leaves. Rendering a plan writes no graph file
 and no source file; the only file it writes is the page `--html` was asked for. A plan that cannot
 be applied - no such plan file, an unknown operation, a module it cannot find - exits 2 and draws
 nothing, so no half-page is left behind.

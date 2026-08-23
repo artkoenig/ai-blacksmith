@@ -19,9 +19,15 @@ to compose. `cast check` deliberately has none: it answers through its exit code
   defaulting to `.`; every call on that line carries `--root "$R"`, and the line echoes
   `cast root: $R` so the model passes the same root to the calls the body asks for. The
   `cast skill root` suite counts `"$CAST"` against `--root "$R"` on that line - they must match.
-- `map`'s whole argument is the directory. `plan` carries a goal of its own, so the root is the
-  trailing word and only where `[ -d "$L" ]`; the rest stays quoted as `"$A"`, since an unquoted
-  expansion splits a goal with spaces into a usage error.
+- `map`'s whole argument is the directory, and it must be one: an argument that is no directory
+  echoes `cast root: none` and scans nothing. Falling back to `.` there is the failure the guard
+  exists for - a map of the whole project where one directory was asked for reads like an answer.
+  `plan` carries a goal of its own, so the root is the trailing word and only where `[ -d "$L" ]`;
+  the rest stays quoted as `"$A"`, since an unquoted expansion splits a goal with spaces into a
+  usage error.
+- The agents run the `!` line themselves and nothing expands `$ARGUMENTS` for them, so a directory
+  named in the task reaches cast only as `ARGUMENTS=<dir>` in front of the line. Both agent files
+  say so; without it a delegated question about one directory is answered about the whole project.
 - `plan` drafts `<root>/.cast/plans/<name>.json` itself and loops draft -> simulate -> judge ->
   redraft, so it needs `Write` in `allowed-tools` and its `!` line reports the graph rather than
   simulating a plan that does not exist yet. `cast plan simulate` is run per loop from the body.

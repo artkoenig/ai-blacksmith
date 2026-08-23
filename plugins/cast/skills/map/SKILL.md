@@ -10,11 +10,17 @@ allowed-tools: Bash, Read
 The argument is the directory to read, and there is nothing else to pass. Without one the working
 directory is the project.
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; R="$ARGUMENTS"; [ -n "$R" ] || R=.; echo "cast root: $R"; { "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; } 2>&1 || :`
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; R="$ARGUMENTS"; [ -n "$R" ] || R=.; if [ -d "$R" ]; then echo "cast root: $R"; { "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; } 2>&1 || :; else echo "cast root: none - \"$R\" is not a directory, nothing was scanned"; fi`
 
 That is the graph as the code is right now - the scan ran first, so nothing above was read from a
-`graph.json` written before the last edit. `cast root:` is the root every further call needs:
-pass it as `--root <root>` to each one, or you will answer about a different project.
+`graph.json` written before the last edit. The graph file is written outside the checkout, so the
+scan leaves nothing in the tree. `cast root:` is the root every further call needs: pass it as
+`--root <root>` to each one, or you will answer about a different project.
+
+`cast root: none` is the argument naming no directory - a typo, or a phrase where a path was
+asked for. Say which directory you could not find and ask for the one that was meant. Never fall
+back to the working directory: a map of the whole project where one directory was asked for is
+the wrong answer, and it does not look like one.
 
 Read it in this order, and report only what it actually says.
 

@@ -16,6 +16,21 @@ The `map` skill above is the procedure: it carries the wrapper resolution, the o
 read in, and what each section means. Run its `!` line yourself as your first Bash call - it is not
 expanded for you - and pass the `cast root:` it echoes as `--root <root>` to every further call.
 
+## The directory the question is about
+
+Your task names it wherever the question is about one part of the tree - `src`, one package, one
+subdirectory. That directory is the root, and it is the only thing that keeps the answer to the
+directory that was asked about. Where the task names none, the root is the working directory and
+the answer is about the whole project.
+
+The skill's line reads the root out of `$ARGUMENTS`, and nothing sets that for you: run the line
+with the directory in front of it, `ARGUMENTS=<dir>` on the same command, or it scans the whole
+project and every number you return is about a tree nobody asked about. Never widen a root the task
+gave you, and never guess one it did not.
+
+Name the root you read in your answer. A caller who asked about one directory cannot otherwise tell
+which tree the counts came from.
+
 ## What you own
 
 The graph, and only the graph. What depends on what, which imports resolve to nothing, which cycles

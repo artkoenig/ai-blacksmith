@@ -19,24 +19,32 @@ The architecture is read from the graph, not from memory.
   write goes there, never into the checkout - and they publish their own page and return its link,
   so the markup is never handled in the session that asked. Run `/map` or `/plan` inline only where
   one look answers it.
+- Name the directory in the task wherever the question is about one part of the tree - `src`, one
+  package. An agent given none reads the whole project, and an answer about the whole project where
+  one directory was asked about is the wrong answer. The same directory is the `--root` of every
+  call: `/map src`, or `graph-analyst` told the question is about `src`.
+- `cast scan` writes the graph outside the checkout - a scratch directory under the system temp,
+  keyed by the root, printed by the scan - so no run leaves a file in the tree and no project has
+  to gitignore one. `CAST_GRAPH` names the file where a caller wants it somewhere else; exported
+  once, the scan and the command reading its graph agree.
 - Every call resolves the binary the way the skills do - `command -v cast`, else
   `${CLAUDE_PLUGIN_ROOT}/bin/cast` - and passes the same `--root`.
 - A refactoring is judged on the simulation before it is executed: `cast plan simulate <name>`
-  writes no source file and no `.cast/graph.json`, and reports the cycles, the layer metrics and the
-  rule violations before and after (`${CLAUDE_PLUGIN_ROOT}/README.md:161-165`).
+  writes no source file and no graph file, and reports the cycles, the layer metrics and the
+  rule violations before and after (`${CLAUDE_PLUGIN_ROOT}/README.md:176-180`).
 - What the user looks at in the session is the page, and in a conversation it is the answer
   rather than an extra offered on request: `cast render --html <file> --fragment
   --root <root>`, and `--plan <name>` for the graph a refactoring would leave. Publish that file as
   an Artifact and hand over the link. `--fragment` is what makes it publishable: no document of its
   own for the host to reject, every colour a theme token the host sets
-  (`${CLAUDE_PLUGIN_ROOT}/README.md:220-228`). The page is rendered, not authored - there is no
+  (`${CLAUDE_PLUGIN_ROOT}/README.md:242-251`). The page is rendered, not authored - there is no
   design pass to make over it. Drop `--fragment` where the user wants the file itself and send that
   with `SendUserFile`. Never paste its markup either way. It fetches nothing, opens any node to any
   depth and names the rule behind every breaking edge
-  (`${CLAUDE_PLUGIN_ROOT}/README.md:196-218`).
+  (`${CLAUDE_PLUGIN_ROOT}/README.md:211-240`).
 - What goes into an issue or a document is mermaid: `cast render --mermaid --root <root>`, in a
   fenced `mermaid` block. It draws one node per layer and labels each arrow with the module edges
-  behind it (`${CLAUDE_PLUGIN_ROOT}/README.md:169-171`), so it stays readable where no browser
+  behind it (`${CLAUDE_PLUGIN_ROOT}/README.md:184-186`), so it stays readable where no browser
   opens it.
 - Neither render is a claim of its own. A number in an answer comes from `cast report`,
   `cast edges` or a simulation, and says which.

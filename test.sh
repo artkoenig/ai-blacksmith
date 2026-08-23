@@ -669,17 +669,20 @@ JSON
 
 CAST_BIN="$PWD/plugins/cast/bin/cast"
 S=0
-(cd "$CASTFIX" && "$CAST_BIN" scan >/dev/null 2>&1) \
-  || { fail "cast graph" "cast scan did not run"; S=1; }
+CAST_SCAN="$(cd "$CASTFIX" && "$CAST_BIN" scan 2>&1)" \
+  || { fail "cast graph" "cast scan did not run: $CAST_SCAN"; S=1; }
+# The graph is written outside the checkout, so the line the scan printed is the
+# only thing that knows where it is. Every suite below reads it through here.
+CAST_GRAPH_FILE="$(printf '%s\n' "$CAST_SCAN" | sed -n 's/^[0-9]* modules scanned into //p')"
 CAST_REPORT="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"
 # Assert against the written graph, never against an in-process call: the file is
 # the contract, and a scan that computes the right answer without writing it is a
 # scan nothing downstream can read.
-graph() { CASTFIX="$CASTFIX" node -e '
+graph() { CAST_GRAPH_FILE="$CAST_GRAPH_FILE" node -e '
   const bad=(s)=>{console.log(s);process.exit(1)}
   let g
-  try { g=JSON.parse(require("fs").readFileSync(process.env.CASTFIX+"/.cast/graph.json","utf8")) }
-  catch(e) { bad("no readable .cast/graph.json: "+e.message) }
+  try { g=JSON.parse(require("fs").readFileSync(process.env.CAST_GRAPH_FILE,"utf8")) }
+  catch(e) { bad("no readable graph at "+process.env.CAST_GRAPH_FILE+": "+e.message) }
   const mod=(id)=>g.modules.find(x=>x.id===id)
   const edge=(id,t)=>((mod(id)||{}).edges||[]).find(x=>x.target===t)
   '"$1"'
@@ -704,6 +707,68 @@ O="$(graph '
   if (e.to!=="pkg/two.toy") bad("a project adapter resolver was not used: "+e.to)
 ')" || { fail "cast graph" "$O"; S=1; }
 [ "$S" = 0 ] && ok "cast graph"
+
+# --- cast graph location ----------------------------------------------------
+# The graph is derived state and stays out of the tree it describes. A scan that
+# writes it into the checkout is one every project has to gitignore and every
+# agent leaves a file behind for.
+S=0
+# break: writing <root>/.cast/graph.json again - the fixture is scanned by every
+# suite above, so a graph in the checkout would be sitting there now
+[ -e "$CASTFIX/.cast/graph.json" ] \
+  && { fail "cast graph location" "the scan wrote the graph into the checkout"; S=1; }
+find "$CASTFIX" -name 'graph.json' | grep -q . \
+  && { fail "cast graph location" "the scan left a graph.json somewhere in the checkout"; S=1; }
+# break: printing the path relative to a root the file is no longer under, which
+# reads as ../../tmp/... and names nothing the caller can open
+case "$CAST_GRAPH_FILE" in
+  /*) [ -f "$CAST_GRAPH_FILE" ] \
+        || { fail "cast graph location" "the path the scan printed is not a readable file: $CAST_GRAPH_FILE"; S=1; } ;;
+  *) fail "cast graph location" "cast scan printed no absolute path: $CAST_SCAN"; S=1 ;;
+esac
+# break: keying the file on the working directory instead of the root, so a scan
+# and the report reading it back disagree the moment they run from different
+# places - which is every agent, and cast-check
+CAST_ELSEWHERE="$(cd / && "$CAST_BIN" report --root "$CASTFIX" 2>&1)"
+printf '%s\n' "$CAST_ELSEWHERE" | grep -q '^modules ' \
+  || { fail "cast graph location" "a report from another directory did not find the graph: $CAST_ELSEWHERE"; S=1; }
+# break: one file for every root, so scanning a subdirectory overwrites the
+# graph of the project it sits in - the whole reason a root can be a subtree
+CAST_SUB="$(cd "$CASTFIX" && "$CAST_BIN" scan --root src 2>&1)"
+CAST_SUBFILE="$(printf '%s\n' "$CAST_SUB" | sed -n 's/^[0-9]* modules scanned into //p')"
+[ "$CAST_SUBFILE" = "$CAST_GRAPH_FILE" ] \
+  && { fail "cast graph location" "two roots were scanned into the same file"; S=1; }
+CAST_WHOLE="$(printf '%s\n' "$CAST_REPORT" | awk '/^modules /{print $2; exit}')"
+printf '%s\n' "$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)" | grep -qx "modules $CAST_WHOLE" \
+  || { fail "cast graph location" "scanning a subdirectory overwrote the graph of the project"; S=1; }
+# break: ignoring CAST_GRAPH, which leaves an agent handed a scratch directory
+# writing into the shared one anyway
+CAST_NAMED="$CASTIDS/named-graph.json"
+CAST_NS="$(cd "$CASTFIX" && CAST_GRAPH="$CAST_NAMED" "$CAST_BIN" scan 2>&1)"
+[ -f "$CAST_NAMED" ] \
+  || { fail "cast graph location" "CAST_GRAPH did not name the file the scan wrote: $CAST_NS"; S=1; }
+printf '%s\n' "$CAST_NS" | grep -qF "$CAST_NAMED" \
+  || { fail "cast graph location" "the scan did not print the file CAST_GRAPH named: $CAST_NS"; S=1; }
+rm -f "$CAST_GRAPH_FILE"
+CAST_NR="$(cd "$CASTFIX" && CAST_GRAPH="$CAST_NAMED" "$CAST_BIN" report 2>&1)"
+printf '%s\n' "$CAST_NR" | grep -q '^modules ' \
+  || { fail "cast graph location" "a report did not read the graph CAST_GRAPH names: $CAST_NR"; S=1; }
+# and the readers say where they looked when there is nothing there
+CAST_NG="$(cd "$CASTFIX" && "$CAST_BIN" report 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast graph location" "a report with no graph exited $RC, not 2: $CAST_NG"; S=1; }
+printf '%s\n' "$CAST_NG" | grep -qF "$CAST_GRAPH_FILE" \
+  || { fail "cast graph location" "the missing graph was not named: $CAST_NG"; S=1; }
+(cd "$CASTFIX" && "$CAST_BIN" scan >/dev/null 2>&1) \
+  || { fail "cast graph location" "the fixture could not be rescanned"; S=1; }
+# break: dropping the root check, so a directory that is not there throws out of
+# the walk instead of saying which one was asked for
+CAST_NOROOT="$("$CAST_BIN" scan --root "$CASTFIX/nowhere" 2>&1)"; RC=$?
+[ "$RC" = 2 ] \
+  || { fail "cast graph location" "a root that is no directory exited $RC, not 2: $CAST_NOROOT"; S=1; }
+printf '%s\n' "$CAST_NOROOT" | grep -qF "$CASTFIX/nowhere" \
+  || { fail "cast graph location" "the root that is no directory was not named: $CAST_NOROOT"; S=1; }
+[ "$S" = 0 ] && ok "cast graph location"
 
 # AC2 every edge carries its kind
 S=0
@@ -1533,10 +1598,10 @@ rm -rf "$PLANDIR"
 S=0
 # a simulation writes nothing, so the after graph is read in process: stdout
 # carries only the edges a rule flags, and this is about all of them
-CAST_SITES="$(CASTFIX="$CASTFIX" CAST_JS="$PWD/plugins/cast/scripts/cast.js" node -e '
+CAST_SITES="$(CASTFIX="$CASTFIX" CAST_GRAPH_FILE="$CAST_GRAPH_FILE" CAST_JS="$PWD/plugins/cast/scripts/cast.js" node -e '
   const cast = require(process.env.CAST_JS)
   const root = process.env.CASTFIX
-  const graph = JSON.parse(require("fs").readFileSync(root + "/.cast/graph.json", "utf8"))
+  const graph = JSON.parse(require("fs").readFileSync(process.env.CAST_GRAPH_FILE, "utf8"))
   const after = cast.simulateGraph(graph, cast.readPlan(root, "cut"))
   const bad = []
   for (const m of after.modules)
@@ -2710,6 +2775,40 @@ if [ -f "$F" ]; then
   grep '^!' "$F" | grep -qF '[ -d "$L" ]' \
     || { fail "cast skill root" "$F takes its trailing word as a root without testing it is a directory"; S=1; }
 fi
+# The line is run, not read: the argument is the directory that was asked about,
+# and the whole complaint the guard answers is a map of the whole project handed
+# back to someone who asked about one subdirectory.
+CAST_REPO="$PWD"
+map_line() {
+  ARGS="$1" CASTFIX="$CASTFIX" CAST_REPO="$CAST_REPO" bash -c '
+    cd "$CASTFIX" || exit 1
+    export CLAUDE_PLUGIN_ROOT="$CAST_REPO/plugins/cast"
+    ARGUMENTS="$ARGS"
+    '"$(grep '^!' plugins/cast/skills/map/SKILL.md | head -1 | sed -e 's/^!`//' -e 's/`$//')"'
+  ' 2>&1
+}
+# break: reading the argument and scanning the working directory anyway
+CAST_ML_SUB="$(map_line src)"
+printf '%s\n' "$CAST_ML_SUB" | grep -qx 'cast root: src' \
+  || { fail "cast skill root" "the map line did not resolve the directory it was given: $CAST_ML_SUB"; S=1; }
+printf '%s\n' "$CAST_ML_SUB" | grep -q '^modules ' \
+  || { fail "cast skill root" "the map line reported no graph for the directory it was given: $CAST_ML_SUB"; S=1; }
+printf '%s\n' "$CAST_ML_SUB" | grep -qF 'pkg/one.toy' \
+  && { fail "cast skill root" "a map of src reported a module outside src"; S=1; }
+# break: falling back to the working directory when the argument names no
+# directory - the whole project answered where one directory was asked for, and
+# nothing in the answer says so
+CAST_ML_BAD="$(map_line 'the src folder')"
+printf '%s\n' "$CAST_ML_BAD" | grep -q '^cast root: none' \
+  || { fail "cast skill root" "an argument that is no directory did not report cast root: none: $CAST_ML_BAD"; S=1; }
+printf '%s\n' "$CAST_ML_BAD" | grep -q '^modules ' \
+  && { fail "cast skill root" "an argument that is no directory was mapped as the whole project anyway"; S=1; }
+grep -qF 'cast root: none' plugins/cast/skills/map/SKILL.md \
+  || { fail "cast skill root" "the map skill never says what cast root: none means"; S=1; }
+# break: no argument at all is still the working directory
+CAST_ML_NONE="$(map_line '')"
+printf '%s\n' "$CAST_ML_NONE" | grep -qx 'cast root: .' \
+  || { fail "cast skill root" "the map line without an argument did not fall back to the working directory: $CAST_ML_NONE"; S=1; }
 [ "$S" = 0 ] && ok "cast skill root"
 
 
@@ -2802,6 +2901,24 @@ for a in graph-analyst refactor-planner; do
   grep -qi 'absolute path' "$F" \
     || { fail "cast agents" "$F does not return absolute paths"; S=1; }
 done
+# The directory the task names has to reach the skill line, and nothing expands
+# $ARGUMENTS for an agent that runs it itself.
+# break: the agent that runs the line bare - a task about `src` answered with a
+# map of the whole project, which is what the caller reads as the answer
+for a in graph-analyst refactor-planner; do
+  F="plugins/cast/agents/$a.md"
+  [ -f "$F" ] || continue
+  grep -qF 'ARGUMENTS=' "$F" \
+    || { fail "cast agents" "$F never sets ARGUMENTS, so a directory in its task cannot reach the line"; S=1; }
+  grep -qi 'your task names it' "$F" \
+    || { fail "cast agents" "$F does not take the directory from its task"; S=1; }
+  grep -qi 'whole project' "$F" \
+    || { fail "cast agents" "$F does not say what it reads where its task names no directory"; S=1; }
+done
+# break: the rule dispatching to an agent and never telling it which directory,
+# which is the same failure one level up
+grep -qi 'name the directory in the task' plugins/cast/rules/cast.md \
+  || { fail "cast agents" "the cast rule does not hand the agent the directory the question is about"; S=1; }
 # The plan goes to scratch with everything else - `cast plan simulate` takes a
 # path. break: sending it back to `.cast/plans/` by default, which leaves a draft
 # in the tree on every run, accepted or not.
