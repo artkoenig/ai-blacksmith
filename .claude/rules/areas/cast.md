@@ -16,17 +16,13 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   `opaque` patterns capture an import whose target is no literal string: `resolution: "opaque"`,
   `resolve` never called, named by `cast report`; a second list through `imports()`, capture past
   the quote.
-- `comments` (`{line, block, strings, regex}`, a string `{open, close, escape?, interpolate?}`)
-  drives `mask()`: comments blanked before the patterns run, offsets and newlines kept so no line
-  moves; a string is only skipped, never blanked - the specifier lives in one - so a `//` in a url
-  opens nothing, and `interpolate` reads a template hole as code, which is what blanks a comment
-  inside one. No `comments` is the whole text matched: the fixture's toy import sits behind a `//`.
-- A delimiter that is also an operator needs `regex` (`{open, close, escape?, class?, notAfter}`),
-  or a quote inside `/[^'"]/` opens a string that never closes and nothing after it is blanked -
-  the repo's own `adapters/javascript.js` was read that way. Such a literal is spanned and blanked
-  in one step, opens only where `notAfter` misses the last character of code before it (`last()`
-  reads the blanked `out`, so a comment cannot be that character) and only where `span()` finds the
-  close on the same line, which bounds a misread division to nothing.
+- `comments` (`{line, block, strings, regex}`) drives `mask()`: comments blanked before the
+  patterns run, offsets and newlines kept so no line moves; a string (`{open, close, escape?,
+  interpolate?}`) is only skipped - the specifier lives in one - and `interpolate` reads a template
+  hole as code. `regex` (plus `class?`, `notAfter`) is a delimiter that is also an operator: without
+  it a quote in `/[^'"]/` opens a string that never closes and every comment after it stands. It is
+  blanked in one span, opened where `notAfter` misses the last code character (`last()` reads the
+  blanked `out`) and `span()` closes on the line. No `comments` is raw text.
 - A count labelled `edges` is every import met - `cast report`'s line, with its resolution
   breakdown. Every narrower one says `module edges`: `cast edges`, the check summary, the page.
 - Patterns match in order, one `(line, specifier)` makes one edge and the first kind wins - the
@@ -45,7 +41,7 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
 - One description, `viewData`: layers, module-edge sites, rule marks, the counts `report`/`check`
   print. Mermaid reads it at two altitudes via `viewAt(data, expand)`, the page as a tree: `treeId`
   -> `treeOf` -> `viewTree(data, open)` -> `layoutTree`, with `marker`, `toggleOpen`, `groupIds`,
-  `edgesAt`, `edgeLines`; `html` inlines them all and `draw` by `toString()`, closing over nothing.
+  `edgesAt`, `edgeLines`; `html` inlines them and `draw` by `toString()`, closing over nothing.
 - The tree is layer / folder level / file, keyed by containment path (`logic/src/b.ts`), each node
   carrying `modules`, its whole subtree. `viewTree` ends an arrow on the deepest *closed* node
   holding it, drops one inside a node; `open` is ids, `--expand` seeds it.
@@ -58,13 +54,11 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   svg in `#graph-scroll`, `overflow-x:hidden`, no `svg{max-width:100%}`.
 - An arrow is a bare curve and a `TAP`-wide transparent grab: no head, no label, no backing, and
   `width`/`height` end at the furthest `mx` and the last box. `weight`, `label`, `kinds`,
-  `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data, read by a press or the
-  highlight. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
+  `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
   left, `mx` one `M.CLEAR` (16) past the boxes the span crosses (`flat`, less the ends and any box
   holding both, overlapping by y) - flat between neighbours, no lane, the stack at `PAD + CLEAR`.
-- The count is asked for: `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges,
-  id)` the panel's lines - both pure, both tested in node. Highlighting only subtracts: `.edge.dim`
-  outside the set, nothing inside it. `pointerenter`/`pointerleave` are bound for `pointerType ===
+- `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges, id)` the panel's lines -
+  both pure, both tested in node. Highlighting only subtracts: `.edge.dim` outside the set. `pointerenter`/`pointerleave` are bound for `pointerType ===
   'mouse'` alone or a touch screen highlights on every tap; touch is a `HOLD` timer from
   `pointerdown`, cancelled by `SLOP`/release/cancel, its `click` eaten once by `suppress`.
 - `render` reads rules.json and baseline.json like `check`: severity colours and the rule label an
