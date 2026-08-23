@@ -15,14 +15,28 @@ to compose. `cast check` deliberately has none: it answers through its exit code
 - Every one of them scans before it reads: `"$CAST" scan >/dev/null && "$CAST" <command>`. Layers,
   rules and plans are read at command time, but the graph is not - without the scan the answer is
   whatever the last scan left behind. Same reason `bin/cast-check` scans.
-- `rules` and `plan` pass `"$ARGUMENTS"` straight into the wrapper, quoted: the rule is a JSON
-  object with spaces and braces, and an unquoted expansion splits it into a usage error.
+- Every skill takes an optional target directory and resolves it on the `!` line into `R`,
+  defaulting to `.`; every call on that line carries `--root "$R"`, and the line echoes
+  `cast root: $R` so the model passes the same root to the calls the body asks for. The
+  `cast skill root` suite counts `"$CAST"` against `--root "$R"` on that line - they must match.
+- `map`'s whole argument is the directory. `rules` and `plan` carry an argument of their own, so
+  the root is the trailing word and only where `[ -d "$L" ]`; the rest stays quoted as
+  `"$A"` - the rule is a JSON object with spaces and braces, and an unquoted expansion splits it
+  into a usage error.
+- `plan` drafts `<root>/.cast/plans/<name>.json` itself and loops draft -> simulate -> judge ->
+  redraft, so it needs `Write` in `allowed-tools` and its `!` line reports the graph rather than
+  simulating a plan that does not exist yet. `cast plan simulate` is run per loop from the body.
+- The judgement is prose the `cast plan skill` suite greps by heading: `## What accepts a
+  simulation`, `## What rejects it`, `## Edit nothing until it is accepted`. Renaming a heading
+  fails the suite - the headings are the contract, not decoration.
+- `render` is reached from the skills alone: the plan's `--mermaid --plan` is the picture an issue
+  carries, `--html --plan` the manual look at the plan, `--html` in `map` the look at today.
 - Frontmatter is `name`, `description`, `argument-hint`, `allowed-tools` - `Bash, Read`. The
   `cast skills` suite in `test.sh` fails on a missing key and on a `name` that is not the directory.
 - `.claude/skills/<name>` is a symlink into here, so an edit is live in the session; never edit
   through the symlink, and never copy instead of linking - the suite checks the link target.
 - A new skill directory is not watched until the next session, unlike an edit to an existing one.
 - The suite greps the `!` lines for the subcommand (`report`, `rules preview`, `plan simulate`), so
-  a rewrite that keeps the prose and drops the execution goes red.
+  a rewrite that keeps the prose and drops the execution goes red; `plan`'s is `report`.
 - `claude plugin validate ./plugins/cast --strict` is run by the manifest suite over every
   `plugins/*/`; no manifest lists the skills, they are discovered from `skills/`.

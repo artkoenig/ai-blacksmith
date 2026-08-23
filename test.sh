@@ -2559,7 +2559,131 @@ skill_runs() {
 }
 skill_runs map 'report'
 skill_runs rules 'rules preview'
-skill_runs plan 'plan simulate'
+# The plan skill simulates a plan it has not drafted yet, so the prompt line
+# reports the graph it drafts against; `plan simulate` is run per loop, and the
+# `cast plan skill` suite below is what holds it there.
+skill_runs plan 'report'
 [ "$S" = 0 ] && ok "cast skills"
+
+
+# --- cast skill root --------------------------------------------------------
+# AC6 every skill takes an optional target directory and runs cast against it.
+# The prompt line resolves that root once, echoes it so the model can pass it on,
+# and carries it on every call it makes - with no argument, the working directory.
+S=0
+for s in map rules plan; do
+  F="plugins/cast/skills/$s/SKILL.md"
+  [ -f "$F" ] || { fail "cast skill root" "$F is missing"; S=1; continue; }
+  L="$(grep '^!' "$F" | head -1)"
+  # break: dropping --root from one of the calls on the line, so the scan reads
+  # the working directory and the command reads the directory that was asked for
+  C="$(printf '%s\n' "$L" | grep -o '"\$CAST"' | wc -l | tr -d ' ')"
+  R="$(printf '%s\n' "$L" | grep -o -- '--root "\$R"' | wc -l | tr -d ' ')"
+  [ "$C" -ge 2 ] || { fail "cast skill root" "$F runs fewer than two cast calls in its prompt"; S=1; }
+  [ "$C" = "$R" ] || { fail "cast skill root" "$F makes $C cast calls but passes --root on $R of them"; S=1; }
+  # break: leaving the root empty when no argument is given, which is a usage
+  # error instead of a run against the working directory
+  printf '%s\n' "$L" | grep -q 'R=\.' \
+    || { fail "cast skill root" "$F does not fall back to the working directory"; S=1; }
+  # break: resolving the root and never telling the model, so every command it
+  # runs afterwards answers about a different project
+  printf '%s\n' "$L" | grep -q 'echo "cast root: \$R"' \
+    || { fail "cast skill root" "$F never reports the root it resolved"; S=1; }
+  # break: documenting the argument as the plan name or the rule alone, so the
+  # directory is never passed
+  grep -q 'working directory' "$F" \
+    || { fail "cast skill root" "$F does not say what happens without a directory"; S=1; }
+  # break: telling the model the root and not that its own calls need it
+  grep -qF -- '--root <root>' "$F" \
+    || { fail "cast skill root" "$F never asks for --root <root> on the calls it hands on"; S=1; }
+done
+# break: the two skills whose argument is not the directory taking the trailing
+# word blindly, so a rule object or a goal is read as a root
+for s in rules plan; do
+  F="plugins/cast/skills/$s/SKILL.md"
+  [ -f "$F" ] || continue
+  grep '^!' "$F" | grep -qF '[ -d "$L" ]' \
+    || { fail "cast skill root" "$F takes its trailing word as a root without testing it is a directory"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast skill root"
+
+
+# --- cast plan skill --------------------------------------------------------
+# AC4/AC5 the plan skill drafts the plan itself and loops on the simulation, and
+# it says what a simulation has to say before anyone is allowed to edit a file.
+S=0
+F="plugins/cast/skills/plan/SKILL.md"
+if [ ! -f "$F" ]; then fail "cast plan skill" "$F is missing"; S=1; else
+  # break: leaving allowed-tools at Bash, Read, so the skill cannot write the
+  # plan file it is told to draft
+  sed -n '2,/^---$/p' "$F" | grep -q '^allowed-tools:.*Write' \
+    || { fail "cast plan skill" "the plan skill cannot write the plan it drafts"; S=1; }
+  # break: requiring a plan file someone else wrote - the old behaviour, which
+  # stopped and asked instead of drafting
+  grep -qiE 'ask (which|for a) plan|never simulate a plan you wrote' "$F" \
+    && { fail "cast plan skill" "the plan skill still asks for a plan instead of drafting one"; S=1; }
+  grep -qF 'The plan is yours to write' "$F" \
+    || { fail "cast plan skill" "the plan skill does not claim the drafting as its own"; S=1; }
+  # break: naming the plan file without saying the skill writes it
+  grep -qF '<root>/.cast/plans/<name>.json' "$F" \
+    || { fail "cast plan skill" "the plan skill does not name the file it drafts"; S=1; }
+  # break: dropping an operation from the shape, so a draft is guesswork
+  for o in move merge invert split; do
+    grep -qF "\"op\":\"$o\"" "$F" \
+      || { fail "cast plan skill" "the plan skill does not give the shape of a $o operation"; S=1; }
+  done
+  # break: describing one pass instead of a loop, so a rejected plan is reported
+  # rather than redrafted
+  for h in 'Draft' 'Simulate' 'Judge' 'Redraft'; do
+    grep -qE "^[0-9]+\. \*\*$h\.\*\*" "$F" \
+      || { fail "cast plan skill" "the plan skill has no $h step"; S=1; }
+  done
+  grep -qF 'until a simulation is accepted' "$F" \
+    || { fail "cast plan skill" "the plan skill does not loop until a simulation is accepted"; S=1; }
+  # break: the loop that never runs the simulator
+  grep -qF 'cast plan simulate <name> --root <root>' "$F" \
+    || { fail "cast plan skill" "the plan skill never runs the simulation on the root it resolved"; S=1; }
+  # AC5 break: dropping either half of the judgement, which leaves accepted to taste
+  grep -q '^## What accepts a simulation$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not say what accepts a simulation"; S=1; }
+  grep -q '^## What rejects it$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not say what rejects a simulation"; S=1; }
+  # break: accepting a plan that adds a cycle or a violation
+  grep -qF 'any cycle, any violation' "$F" \
+    || { fail "cast plan skill" "a plan that adds a cycle or a violation is not rejected"; S=1; }
+  # break: letting the edits start before the simulation is accepted, which is
+  # the whole point of planning first
+  grep -q '^## Edit nothing until it is accepted$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not forbid editing before a simulation is accepted"; S=1; }
+  grep -qF 'No source file is touched while this loop runs' "$F" \
+    || { fail "cast plan skill" "the plan skill does not forbid touching a source file during the loop"; S=1; }
+fi
+[ "$S" = 0 ] && ok "cast plan skill"
+
+
+# --- cast render skill ------------------------------------------------------
+# AC7 a skill reaches the renderer: the plan's mermaid is what a refactoring
+# issue carries, and the page is the manual look - at the plan and at today.
+S=0
+P="plugins/cast/skills/plan/SKILL.md"
+M="plugins/cast/skills/map/SKILL.md"
+if [ ! -f "$P" ] || [ ! -f "$M" ]; then fail "cast render skill" "a cast skill is missing"; S=1; else
+  # break: leaving --plan to the command line, so the picture in the issue is
+  # the graph as it is today and not the one the plan would leave
+  grep -qF 'cast render --mermaid --plan <name> --root <root>' "$P" \
+    || { fail "cast render skill" "no skill draws the plan as mermaid"; S=1; }
+  grep -A2 'cast render --mermaid --plan' "$P" | grep -qi 'issue' \
+    || { fail "cast render skill" "the plan mermaid is not named as the picture an issue carries"; S=1; }
+  # break: dropping the page, leaving a mermaid block as the only way to look
+  grep -qF 'cast render --html <file> --plan <name> --root <root>' "$P" \
+    || { fail "cast render skill" "no skill opens the plan as a page"; S=1; }
+  # break: a page of the plan and no page of the current state to compare it to
+  grep -qF 'cast render --html <file> --root <root>' "$M" \
+    || { fail "cast render skill" "no skill opens the current state as a page"; S=1; }
+  # break: rendering a plan and letting it be mistaken for a scan that wrote
+  grep -qF 'exits 2 having drawn nothing' "$P" \
+    || { fail "cast render skill" "the plan skill does not say an unapplicable plan draws nothing"; S=1; }
+fi
+[ "$S" = 0 ] && ok "cast render skill"
 
 exit "$FAILED"
