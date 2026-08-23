@@ -67,7 +67,7 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
 - `README.md`'s `--html` paragraph is the page's prose spec: a change to what a press hits, or to
   what an arrow or a node shows, leaves it false until that paragraph is edited in the same commit.
-- Control characters in `scripts/cast.js` are escapes (`'\0'`): a literal NUL reads as binary.
+- Never commit `.cast/graph.json`: scan output, absolute `root`, ignored as `**/.cast/graph.json`.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
   `forbidden` names an edge that must not exist, `allowed` drops it. A side is a layer name where
   `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise; layer wins a tie, so

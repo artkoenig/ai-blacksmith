@@ -3,4 +3,4 @@
 .claude/worktrees/
 .forge/context/
 .forge/context.jsonl
-.cast/graph.json
+**/.cast/graph.json
