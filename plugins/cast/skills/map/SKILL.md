@@ -29,11 +29,15 @@ Read it in this order, and report only what it actually says.
 Follow one layer edge down with `cast edges --from <layer> --to <layer> --root <root>`, which lists
 the module edges behind it with the file and line of each import.
 
-Draw it only when asked for a picture:
+In a conversation the page is the answer, not something held back until a picture is asked for.
+Render it on every map:
 
-- `cast render --mermaid --root <root>` for a diagram in the answer.
-- `cast render --html <file> --fragment --root <root>` where a mermaid block is already too big to
-  read - a page to open and press through. Publish it as an Artifact and give the user the link;
-  drop `--fragment` and send the file with `SendUserFile` where they want the file itself.
+- `cast render --html <file> --fragment --root <root>`, published as an Artifact, and hand the
+  user the link. It opens any node to any depth and names the rule behind every breaking edge,
+  which no paragraph does. Drop `--fragment` and send the file with `SendUserFile` where they
+  want the file itself. Never paste its markup either way.
+- `cast render --mermaid --root <root>` instead, in a fenced `mermaid` block, only where the
+  answer is going somewhere no browser opens it - an issue, a document.
 
-Answer in prose with the numbers from the report. Never restate a count the report did not give.
+Beside the link, say in a few sentences what the report found: the unresolved imports, the cycles,
+the layers. Never restate a count the report did not give.

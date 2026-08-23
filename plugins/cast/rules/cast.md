@@ -12,7 +12,8 @@ The architecture is read from the graph, not from memory.
 - A refactoring is judged on the simulation before it is executed: `cast plan simulate <name>`
   writes no source file and no `.cast/graph.json`, and reports the cycles, the layer metrics and the
   rule violations before and after (`${CLAUDE_PLUGIN_ROOT}/README.md:161-165`).
-- What the user looks at in the session is the page: `cast render --html <file> --fragment
+- What the user looks at in the session is the page, and in a conversation it is the answer
+  rather than an extra offered on request: `cast render --html <file> --fragment
   --root <root>`, and `--plan <name>` for the graph a refactoring would leave. Publish that file as
   an Artifact and hand over the link. `--fragment` is what makes it publishable: no document of its
   own for the host to reject, every colour a theme token the host sets
