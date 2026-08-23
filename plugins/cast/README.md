@@ -215,7 +215,12 @@ and the rule where one names it. Leaving the node with the mouse, pressing elsew
 group ends it; lifting the finger after a long press does not - the numbers stay until the next
 press, because a phone has no pointer to leave with. Clicking an arrow still lists
 those imports, each with its file and its line. `--expand <layer>` opens that layer to begin with.
-The counts beside the drawing are the ones `cast report` and `cast check` print for the same graph.
+The counts above the drawing are the ones `cast report` and `cast check` print for the same graph,
+in those two groups: what the graph is, and what the rules say about it. A count that is a finding
+rather than a size - a cycle, an unresolved import, a violation - carries its severity where it is
+not zero, so the panel is read at a glance. The page is named after the project it read, and opens
+on those counts and the drawing: what a press does is written at the foot, shut, for the reader who
+goes looking. Nothing is fetched, and no state hides behind a hover - there is none on a phone.
 
 `--fragment` writes the same page without the document around it: no `<!doctype>`, no `<html>`,
 no `<head>` and no `<body>`, only the `<title>`, the style, the drawing and the script. It is for a

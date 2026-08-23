@@ -972,6 +972,14 @@ function mermaid(graph, rules, expand, checkRules, baseline) {
 // phone waits for a second tap before it believes the first, and the wait is a
 // zoom. Nothing here reveals a control on `:hover` - there is no hover on a
 // phone, so a control that needs one does not exist there.
+// The page is an instrument, not a document: a project's name in the type of a
+// path, the counts as a panel that says at a glance which of them should have
+// been zero, and one drawing under them. Two faces carry it - a sans for the
+// chrome, a mono everywhere the page shows something the project itself named:
+// the project, a module, a file and line, a count. No face is fetched: the page
+// loads nothing at view time, which rules a webfont out and leaves the stacks
+// below, each ending in a family every platform has.
+//
 // Every colour is a custom property on bare `:root`, so one sheet answers three
 // ways of asking for a theme: the page's own light default, a viewer that only
 // reports `prefers-color-scheme`, and a host that stamps `data-theme` on the
@@ -979,24 +987,34 @@ function mermaid(graph, rules, expand, checkRules, baseline) {
 // the other two, so none is.
 const THEME_LIGHT = [
   'color-scheme:light',
-  '--bg:#ffffff', '--fg:#222222', '--line:#dddddd',
-  '--btn-bg:#f4f4f4', '--btn-line:#bbbbbb',
-  '--node-bg:#eef3fb', '--node-line:#4a6fa5',
-  '--folder-bg:#f2f5ee', '--folder-line:#6f8a5a',
-  '--file-bg:#f6f6f2', '--file-line:#8a8a70',
+  '--bg:#f7f9fb', '--surface:#ffffff', '--fg:#141a21', '--muted:#5d6b7a', '--line:#e3e9ef',
+  '--accent:#2f5d8c',
+  '--bad:#b3261e', '--bad-bg:#fdf1f0', '--warn:#8a5a00', '--warn-bg:#fdf6e7',
+  '--btn-bg:#ffffff', '--btn-line:#d3dbe3',
+  // Depth reads as recession, not as three unrelated hues: one family, the layer
+  // carrying the accent and each level inside it quieter than the one holding it.
+  '--node-bg:#e8eff8', '--node-line:#2f5d8c',
+  '--folder-bg:#eff3f7', '--folder-line:#93a4b8',
+  '--file-bg:#f7f9fb', '--file-line:#c3ccd7',
   '--edge-plain:#666666', '--edge-inherited:#888888',
   '--edge-warn:#e08b00', '--edge-error:#d32f2f',
 ].join(';')
 const THEME_DARK = [
   'color-scheme:dark',
-  '--bg:#14171a', '--fg:#e6e6e6', '--line:#333940',
-  '--btn-bg:#22262b', '--btn-line:#454b52',
-  '--node-bg:#1b2530', '--node-line:#7aa2d4',
-  '--folder-bg:#1d241b', '--folder-line:#9dbb85',
-  '--file-bg:#23231d', '--file-line:#b5b596',
+  '--bg:#0e1216', '--surface:#161c23', '--fg:#e7ecf1', '--muted:#96a3b2', '--line:#242d37',
+  '--accent:#7fa9d8',
+  '--bad:#ff8a80', '--bad-bg:#2a1618', '--warn:#f0b45a', '--warn-bg:#2a2113',
+  '--btn-bg:#1c232b', '--btn-line:#313b46',
+  '--node-bg:#18242f', '--node-line:#7fa9d8',
+  '--folder-bg:#171d25', '--folder-line:#5a6979',
+  '--file-bg:#111721', '--file-line:#3a4552',
   '--edge-plain:#9aa0a6', '--edge-inherited:#6e747a',
   '--edge-warn:#f0a830', '--edge-error:#ff6b6b',
 ].join(';')
+
+const SANS = 'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif'
+const MONO = 'ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace'
+const LABEL = 'font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)'
 
 const PAGE_CSS = [
   `:root{${THEME_LIGHT}}`,
@@ -1007,20 +1025,47 @@ const PAGE_CSS = [
   // The ground is painted, never inherited: a transparent body borrows the
   // background of whatever embeds the page, and a drawing built for one theme
   // lands on the other.
-  'body{font:16px system-ui,sans-serif;margin:1rem;color:var(--fg);background:var(--bg);touch-action:manipulation}',
-  '#controls{display:flex;flex-wrap:wrap;gap:8px}',
-  'button{font:inherit;min-height:44px;min-width:44px;padding:0 12px;cursor:pointer;touch-action:manipulation;color:var(--fg);background:var(--btn-bg);border:1px solid var(--btn-line);border-radius:6px}',
+  `body{font:16px/1.5 ${SANS};margin:0;padding:clamp(16px,4vw,40px);color:var(--fg);background:var(--bg);touch-action:manipulation}`,
+  // Every gap is the layout's, never a margin's: two of those collapse into one
+  // and the spacing stops being the number it says it is.
+  '.page{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:28px}',
+  'section{display:flex;flex-direction:column;gap:10px}',
+  // The project is a directory the reader knows by its path, so it is set in the
+  // face a path is set in.
+  `h1{margin:0;font:600 clamp(26px,4vw,38px)/1.15 ${MONO};letter-spacing:-.01em;text-wrap:balance;overflow-wrap:anywhere}`,
+  `h2{margin:0;${LABEL};font-weight:600}`,
+  `.eyebrow{margin:0;${LABEL}}`,
+  // Each cell carries its own outline and the grid only spaces them: a track the
+  // last row leaves empty then shows the page's own ground, not a panel with a
+  // hole in it.
+  '.stats{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}',
+  '.stat{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:6px}',
+  `.stat .k{${LABEL}}`,
+  `.stat .v{font:400 21px/1.1 ${MONO};font-variant-numeric:tabular-nums}`,
+  // A count that should have been zero says so in its own colour, so the panel
+  // is read at a glance and not summed by the reader.
+  '.stat.bad{background:var(--bad-bg);border-color:var(--bad)}',
+  '.stat.bad .k,.stat.bad .v{color:var(--bad)}',
+  '.stat.warn{background:var(--warn-bg);border-color:var(--warn)}',
+  '.stat.warn .k,.stat.warn .v{color:var(--warn)}',
+  '#controls{display:flex;flex-wrap:wrap;gap:8px;margin:0}',
+  // Nothing on this page answers a hover: there is none on a phone, so a state
+  // only a pointer can reach is a state half the readers never see.
+  'button{font:inherit;min-height:44px;min-width:44px;padding:0 14px;cursor:pointer;touch-action:manipulation;color:var(--fg);background:var(--btn-bg);border:1px solid var(--btn-line);border-radius:6px}',
+  'button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}',
   // The graph scrolls inside its own box. It is never scaled to fit: a tree
   // deep enough to need this is a tree too small to read once it has been.
-  '#graph-scroll{overflow-x:auto;max-width:100%;border:1px solid var(--line);background:var(--bg)}',
+  '#graph-scroll{overflow-x:auto;max-width:100%;width:max-content;border:1px solid var(--line);background:var(--surface);border-radius:6px}',
   '#graph{display:block;touch-action:manipulation}',
   '.node rect{fill:var(--node-bg);stroke:var(--node-line)}',
   '.node.folder rect{fill:var(--folder-bg);stroke:var(--folder-line)}',
   '.node.file rect{fill:var(--file-bg);stroke:var(--file-line)}',
   '.node.open>rect{fill:none;stroke-dasharray:4 3}',
   // svg text carries its own `fill` and never the `color` around it: without
-  // this the labels stay black wherever the ground goes dark.
-  '.node text{font-size:15px;pointer-events:none;fill:var(--fg)}',
+  // this the labels stay black wherever the ground goes dark. A node's label is
+  // a file name, so it is set in the mono; 14px keeps the longest of them inside
+  // a box whose width is fixed, never measured.
+  `.node text{font:14px ${MONO};pointer-events:none;fill:var(--fg)}`,
   '.node .head{cursor:pointer}',
   // The target itself: painted with nothing, pressed like anything else.
   '.hit,.node .hit{fill:transparent;pointer-events:all}',
@@ -1030,7 +1075,21 @@ const PAGE_CSS = [
   // arrows it does name are left alone, so their colour, width and dash are the
   // ones they carry at rest.
   '.edge.dim{opacity:.15}',
-  '#sites li{font-family:ui-monospace,monospace;overflow-wrap:anywhere}',
+  // Nothing was pressed yet, so the panel is not a box of air.
+  '#sites:empty{display:none}',
+  '#sites{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px}',
+  '#sites h3{margin:0 0 8px;font-size:15px;font-weight:600}',
+  '#sites ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}',
+  `#sites li{font-family:${MONO};font-size:13px;overflow-wrap:anywhere;color:var(--muted)}`,
+  '.chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}',
+  `.chip{font:13px ${MONO};padding:5px 10px;border:1px solid var(--line);border-radius:4px;background:var(--surface)}`,
+  '.chip b{font-weight:400;color:var(--muted)}',
+  // What the drawing answers to, kept where it does not open the page: shut, at
+  // the foot, for the reader who wants it.
+  '.legend{border-top:1px solid var(--line);padding-top:16px;color:var(--muted);font-size:14px}',
+  `.legend summary{cursor:pointer;${LABEL}}`,
+  '.legend summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}',
+  '.legend p{margin:10px 0 0;max-width:66ch}',
 ].join('')
 
 // Self-contained on purpose: the data, the script and the style are in the file
@@ -1051,17 +1110,29 @@ function html(graph, rules, expand, checkRules, baseline, fragment) {
   if (expand && !all.includes(expand)) die(`no layer ${expand}: the layers are ${all.join(', ')}`)
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const c = data.counts
-  const counts = [
-    ['modules', c.modules], ['edges', c.edges], ['module edges', c.moduleEdges],
-    ['layers', c.layers], ['unassigned', c.unassigned], ['unresolved', c.unresolved],
-    ['opaque', c.opaque], ['cycles', c.cycles], ['violations', c.violations],
-    ['errors', c.errors], ['baselined', c.baselined], ['rules', c.rules],
-  ]
-    .map(([k, v]) => `<li>${esc(k)} ${v}</li>`)
-    .join('\n')
+  // The two panels are the two commands: what `cast report` counts about the
+  // graph, and what `cast check` counts against the rules. A count that is a
+  // finding rather than a size carries its severity, and only where it is not
+  // zero - a project with nothing wrong shows no colour at all.
+  const stat = (k, v, tone) =>
+    `<li class="stat${tone && v > 0 ? ' ' + tone : ''}"><span class="k">${esc(k)}</span><span class="v">${v}</span></li>`
+  const graphStats = [
+    stat('modules', c.modules), stat('edges', c.edges), stat('module edges', c.moduleEdges),
+    stat('layers', c.layers), stat('unassigned', c.unassigned, 'warn'),
+    stat('unresolved', c.unresolved, 'bad'), stat('opaque', c.opaque, 'warn'),
+    stat('cycles', c.cycles, 'bad'),
+  ].join('\n')
+  const ruleStats = [
+    stat('rules', c.rules), stat('violations', c.violations, 'bad'),
+    stat('errors', c.errors, 'bad'), stat('baselined', c.baselined, 'warn'),
+  ].join('\n')
   const layers = all
-    .map((l) => `<li>${esc(l)} (${data.layers.find((x) => x.name === l).modules.length})</li>`)
+    .map((l) => `<li class="chip">${esc(l)} <b>${data.layers.find((x) => x.name === l).modules.length}</b></li>`)
     .join('\n')
+  // The page is named after the project it read, because that is the one thing
+  // that tells two of these pages apart in a list of them.
+  const project = String(graph.root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop()
+  const title = project ? `${project} module graph` : 'module graph'
   // `</` inside the JSON would end the script element early, whatever it means
   // to JSON: the escape is the only thing between the data and a broken page.
   // `--expand <layer>` opens that layer's node, the one state the command can
@@ -1069,28 +1140,50 @@ function html(graph, rules, expand, checkRules, baseline, fragment) {
   const embedded = JSON.stringify({ ...data, open: expand ? [treeId(expand)] : [] }).replace(/</g, '\\u003c')
   const fns = [treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds, edgesAt, edgeLines, draw]
   const script = fns.map((f) => f.toString()).join('\n\n') + '\ndraw()\n'
+  // The drawing opens the page: nothing is introduced, because the counts above
+  // it and the controls beside it are what an introduction would have said. What
+  // is left - which press does what - is shut at the foot, for the reader who
+  // goes looking.
   const content = [
-    '<h1>cast</h1>',
-    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow runs to the right of the boxes where it imports something further down, to the left where it imports something further up. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
+    '<div class="page">',
+    '<header class="head">',
+    '<p class="eyebrow">module graph</p>',
+    `<h1>${esc(project || 'cast')}</h1>`,
+    '</header>',
+    '<section>',
+    '<h2>graph</h2>',
+    `<ul class="stats" id="counts">\n${graphStats}\n</ul>`,
+    '</section>',
+    '<section>',
+    '<h2>rules</h2>',
+    `<ul class="stats" id="rule-counts">\n${ruleStats}\n</ul>`,
+    '</section>',
+    '<section>',
     '<p id="controls"><button type="button" id="collapse-all">close all groups</button><button type="button" id="expand-all">open all groups</button></p>',
     '<div id="graph-scroll"><svg id="graph" role="img" aria-label="the module graph"></svg></div>',
     '<div id="sites"></div>',
-    '<h2>counts</h2>',
-    `<ul id="counts">\n${counts}\n</ul>`,
+    '</section>',
+    '<section>',
     '<h2>layers</h2>',
-    `<ul id="layers">\n${layers}\n</ul>`,
+    `<ul class="chips" id="layers">\n${layers}\n</ul>`,
+    '</section>',
+    '<details class="legend">',
+    '<summary>reading the graph</summary>',
+    '<p>A node marked ▸ is a closed group and one marked ▾ is an open one. Press a group’s header - its marker or its label - to open or close it, an arrow to list the imports behind it. An arrow runs to the right of the boxes where it imports something further down, to the left where it imports something further up. To ask for the numbers, point at a node with the mouse or press and hold it on a touch screen: its own arrows stay while the rest fade, and the panel says how many imports run each way, of which kinds - value, type or dynamic - and under which rule.</p>',
+    '</details>',
+    '</div>',
     `<script id="cast-data" type="application/json">${embedded}</script>`,
     `<script>\n${script}</script>`,
   ]
   if (fragment) {
-    return ['<title>cast</title>', `<style>${PAGE_CSS}</style>`, ...content, ''].join('\n')
+    return [`<title>${esc(title)}</title>`, `<style>${PAGE_CSS}</style>`, ...content, ''].join('\n')
   }
   return [
     '<!doctype html>',
     '<html lang="en">',
     // Without this a phone lays the page out at a desktop width and scales the
     // result down, which is how a 44 pixel target becomes a 15 pixel one.
-    '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>cast</title>',
+    `<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>`,
     `<style>${PAGE_CSS}</style>`,
     '</head>',
     '<body>',

@@ -1072,14 +1072,24 @@ CAST_FRAG_OUT="$(cd "$CASTFIX" && "$CAST_BIN" render --html frag.html --fragment
 CAST_FRAG="$(cat "$CASTFIX/frag.html" 2>/dev/null)"
 # AC1 the host supplies the skeleton and rejects a second one
 # break: writing the document around the content in fragment mode too
-for t in '<!doctype' '<html' '<head' '<body'; do
+for t in '<!doctype' '<html' '<head>' '<head ' '<body>' '<body '; do
   printf '%s\n' "$CAST_FRAG" | grep -qiF "$t" \
     && { fail "cast artifact page" "the fragment carries its own $t"; S=1; }
 done
 # AC1 the title is what names the page, and only the head of the file is read
 # break: dropping the title with the head that used to carry it
-[ "$(printf '%s' "$CAST_FRAG" | head -c 8192 | grep -c '<title>cast</title>')" = 1 ] \
-  || { fail "cast artifact page" "the fragment does not name itself in its first 8 KB"; S=1; }
+# break: naming every page `cast`, which tells no two of them apart in a list
+CAST_FRAG_TITLE="$(printf '%s' "$CAST_FRAG" | head -c 8192 | sed -n 's|.*<title>\(.*\)</title>.*|\1|p' | head -1)"
+case "$CAST_FRAG_TITLE" in
+  *' module graph') : ;;
+  *) fail "cast artifact page" "the fragment names itself '$CAST_FRAG_TITLE' in its first 8 KB"; S=1 ;;
+esac
+# the project the page read is the half of that name that tells it apart
+CAST_FIX_NAME="$(basename "$CASTFIX")"
+case "$CAST_FRAG_TITLE" in
+  "$CAST_FIX_NAME"*) : ;;
+  *) fail "cast artifact page" "the title '$CAST_FRAG_TITLE' does not name the project $CAST_FIX_NAME"; S=1 ;;
+esac
 # AC2 the standalone page is unchanged
 # break: making the fragment the only shape the renderer knows
 for t in '<!doctype html>' '<head' '<body' 'width=device-width'; do
@@ -1148,6 +1158,25 @@ for f in plugins/cast/skills/map/SKILL.md plugins/cast/skills/plan/SKILL.md; do
     || { fail "cast artifact page" "$f does not render the page as a fragment"; S=1; }
   grep -qF 'Artifact' "$f" \
     || { fail "cast artifact page" "$f does not publish the page"; S=1; }
+done
+# the document opens on the graph and its counts: what a press does is at the
+# foot, shut, and nothing before the drawing is prose
+# break: putting the reading guide back at the top, where it introduces a page
+# whose first screen is the answer
+CAST_LEGEND="$(sed -n '/<details class="legend">/,/<\/details>/p' "$CASTFIX/frag.html")"
+printf '%s\n' "$CAST_LEGEND" | grep -qF 'press and hold it on a touch screen' \
+  || { fail "cast artifact page" "the reading guide is not shut at the foot of the page"; S=1; }
+CAST_BEFORE="$(sed -n '1,/<div id="graph-scroll">/p' "$CASTFIX/frag.html")"
+printf '%s\n' "$CAST_BEFORE" | grep -qE '^<p>' \
+  && { fail "cast artifact page" "the page introduces itself before it draws anything"; S=1; }
+# the two faces: a sans for the chrome, a mono wherever the page shows something
+# the project itself named - the project, a file, a count
+# break: one face for everything, which sets a path in the type of a sentence
+for r in 'h1{margin:0;font:600 clamp(26px,4vw,38px)/1.15 ui-monospace' \
+         '.node text{font:14px ui-monospace' \
+         'font-variant-numeric:tabular-nums'; do
+  grep -qF "$r" "$CASTFIX/frag.html" \
+    || { fail "cast artifact page" "the page does not set $r"; S=1; }
 done
 rm -f "$CASTFIX/frag.html"
 [ "$S" = 0 ] && ok "cast artifact page"
@@ -2080,7 +2109,7 @@ grep -qF 'if (open[id] === true) delete open[id]' "$CAST_PAGE" \
 CAST_CHK="$(cd "$CASTFIX" && "$CAST_BIN" check 2>&1)" || true
 C_SUM="$(printf '%s\n' "$CAST_CHK" | tail -1)"
 n_of() { printf '%s\n' "$2" | sed -n "s/$1/\1/p" | head -1; }
-li_of() { sed -n "s|^<li>$1 \([0-9]*\)</li>\$|\1|p" "$CAST_PAGE" | head -1; }
+li_of() { sed -n "s|^<li class=\"stat[^\"]*\"><span class=\"k\">$1</span><span class=\"v\">\([0-9]*\)</span></li>\$|\1|p" "$CAST_PAGE" | head -1; }
 same() {
   [ -n "$2" ] || { fail "cast html agrees" "the command printed no $1 to compare"; S=1; return; }
   [ -n "$3" ] || { fail "cast html agrees" "the page shows no count for $1"; S=1; return; }
