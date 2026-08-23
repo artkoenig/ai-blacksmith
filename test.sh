@@ -2686,4 +2686,40 @@ if [ ! -f "$P" ] || [ ! -f "$M" ]; then fail "cast render skill" "a cast skill i
 fi
 [ "$S" = 0 ] && ok "cast render skill"
 
+# --- the cast rule lives in the plugin --------------------------------------
+# A project that installs cast gets the rule with it; this repository reads the
+# same file through a link, so the two can never drift.
+S=0
+[ -f plugins/cast/rules/cast.md ] || { fail "cast rule" "plugins/cast/rules/cast.md is gone"; S=1; }
+# break: copying the rule back into .claude/rules instead of linking it
+[ "$(readlink .claude/rules/cast.md 2>/dev/null)" = "../../plugins/cast/rules/cast.md" ] \
+  || { fail "cast rule" ".claude/rules/cast.md is not a link to the plugin's rule"; S=1; }
+# break: dropping the split that sends the page to the user and the mermaid to an issue
+grep -qF 'cast render --html' plugins/cast/rules/cast.md \
+  || { fail "cast rule" "the rule no longer names the page as what the user is sent"; S=1; }
+grep -qF 'cast render --mermaid' plugins/cast/rules/cast.md \
+  || { fail "cast rule" "the rule no longer names mermaid as what an issue carries"; S=1; }
+[ "$S" = 0 ] && ok "cast rule"
+
+# --- the cast rule reaches a project that installs cast ---------------------
+# The rule is injected at SessionStart, never copied into the project: a copy
+# ages the moment the plugin is updated and nothing notices.
+S=0
+grep -q 'scripts/session-start.js' plugins/cast/hooks/hooks.json \
+  || { fail "cast rule delivery" "the cast hooks no longer run the session start script"; S=1; }
+grep -q "'rules', 'cast.md'" plugins/cast/scripts/session-start.js \
+  || { fail "cast rule delivery" "the session start hook no longer reads the rule"; S=1; }
+CH="$(mktemp -d)"
+start_cast() { echo '{}' | env CLAUDE_PROJECT_DIR="$1" node plugins/cast/scripts/session-start.js; }
+# break: dropping the injection, leaving the rule inert wherever cast is installed
+start_cast "$CH" | grep -q 'cast render --mermaid' \
+  || { fail "cast rule delivery" "an installed plugin did not inject its rule"; S=1; }
+# a project that carries the rule itself already loads it as a project rule
+# break: injecting always, so the cast checkout pays for its own rule twice
+mkdir -p "$CH/.claude/rules" && : > "$CH/.claude/rules/cast.md"
+start_cast "$CH" | grep -q 'cast render --mermaid' \
+  && { fail "cast rule delivery" "a project that carries the rule was charged for it twice"; S=1; }
+rm -rf "$CH"
+[ "$S" = 0 ] && ok "cast rule delivery"
+
 exit "$FAILED"
