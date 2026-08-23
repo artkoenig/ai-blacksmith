@@ -153,11 +153,18 @@ function imports(text, adapter) {
 // String literals are left standing - the specifier lives in one - and are only
 // skipped over, with a template literal's `${}` read as code again so a require
 // inside one keeps its edge.
+//
+// `regex` is for a literal whose delimiter is also an operator, like javascript's
+// `/`: a quote inside one is no string, so it is spanned in one step and blanked.
+// It opens only where the delimiter cannot be the operator - `notAfter` is tested
+// against the last character of code before it - and only where it closes on the
+// same line, so a division that opens nothing swallows nothing.
 function mask(text, spec) {
   if (!spec) return text
   const lines = spec.line || []
   const blocks = spec.block || []
   const strings = spec.strings || []
+  const regexes = spec.regex || []
   const out = text.split('')
   const stack = [] // interpolations open: the string they are in, and its brace depth
   let str = null // the string literal being read, or null in code
@@ -195,6 +202,16 @@ function mask(text, spec) {
       i += s.open.length
       continue
     }
+    // A regex literal: opened only where the delimiter is no operator, and
+    // spanned to its close in one step, so a quote in a character class opens
+    // no string. Comments are already blanks, so the character before it is
+    // the last of the code.
+    const rx = regexes.find((x) => at(x.open) && !x.notAfter.test(last(out, i)))
+    const end = rx ? span(text, rx, i) : -1
+    if (end !== -1) {
+      for (; i < end; i++) out[i] = ' '
+      continue
+    }
     // Inside a `${}`, the brace that closes it is the one that returns to the
     // string; a brace of the code in between is not.
     const top = stack[stack.length - 1]
@@ -213,6 +230,33 @@ function mask(text, spec) {
     i++
   }
   return out.join('')
+}
+
+// The last character of code before `i`, whitespace and blanked comments skipped.
+function last(out, i) {
+  let j = i - 1
+  while (j >= 0 && /\s/.test(out[j])) j--
+  return j < 0 ? '' : out[j]
+}
+
+// Where the literal opened at `i` closes, or -1 where it does not close on its
+// line. Inside a `class` pair - a character class - the close token is content.
+function span(text, spec, i) {
+  let cls = false
+  for (let j = i + spec.open.length; j < text.length; j++) {
+    if (text[j] === '\n') return -1
+    if (spec.escape && text.startsWith(spec.escape, j)) {
+      j += spec.escape.length
+      continue
+    }
+    if (spec.class) {
+      if (!cls && text[j] === spec.class[0]) cls = true
+      else if (cls && text[j] === spec.class[1]) cls = false
+      if (cls) continue
+    }
+    if (text.startsWith(spec.close, j)) return j + spec.close.length
+  }
+  return -1
 }
 
 

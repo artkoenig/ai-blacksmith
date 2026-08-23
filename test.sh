@@ -847,6 +847,17 @@ const s = "// not a comment"; import { v } from './val'
 const t = `${require('./tpl')}`
 export { u, g, s, t, r, v }
 TS
+# A regex literal is no string: a quote inside its character class opens nothing,
+# and a `/` that divides opens no literal.
+cat > "$CMTFIX/src/regex.ts" <<'TS'
+const re = /[^'"\s)]/g
+// import('./gone')
+/** @type {import('./vanished').V} */
+const slash = /\/\//
+const half = 6 / 2; import('./after'); const t = half / 1
+const r = require('./req')
+export { re, slash, half, t, r }
+TS
 # A block comment spans lines: what follows it is reported where it is written.
 cat > "$CMTFIX/src/lines.ts" <<'TS'
 /*
@@ -887,6 +898,25 @@ O="$(cgraph '
     if (!e) bad("an import after a comment token in a string produced no edge: "+t)
     if (e.kind!==k) bad(t+" is "+e.kind+", not "+k)
   }
+')" || { fail "cast comments" "$O"; S=1; }
+# AC1/AC2 a quote inside a regex literal opens no string, so a jsdoc annotation
+# and a commented-out import after one are still comments
+# break: dropping the regex-literal span from mask(), which enters string state
+# at the quote in the character class and leaves nothing after it blanked
+O="$(cgraph '
+  for (const t of ["./gone","./vanished"]) {
+    const e=edge("src/regex.ts",t)
+    if (e) bad("a comment after a regex literal produced the edge "+t+":"+e.line)
+  }
+')" || { fail "cast comments" "$O"; S=1; }
+# a `/` that divides opens no literal, and the code between two of them is code
+# break: opening a regex literal on any `/`, which swallows the import after it
+O="$(cgraph '
+  const a=edge("src/regex.ts","./after")
+  if (!a) bad("the import after a division produced no edge")
+  if (a.line!==5) bad("the import after a division is reported at line "+a.line+", not 5")
+  const r=edge("src/regex.ts","./req")
+  if (!r) bad("the require after a regex literal produced no edge")
 ')" || { fail "cast comments" "$O"; S=1; }
 # the line an import is reported at does not move
 # break: deleting the comments instead of blanking them, which shifts every line

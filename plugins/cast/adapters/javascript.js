@@ -36,8 +36,13 @@ const opaque = [
 
 // What opens a comment in this language, and what a string literal is - a `//`
 // inside one opens nothing. The engine blanks the comments before any pattern
-// runs, so a jsdoc `import('./b')` and a commented-out import make no edge,
-// while a template literal's `${}` is read as code again.
+// runs, so a jsdoc annotation and a commented-out import make no edge, while a
+// template literal's `${}` is read as code again.
+//
+// A regex literal is declared too, because a quote inside one - `/[^'\"]/` - is
+// no string, and reading it as one would leave every comment after it standing.
+// `notAfter` is what tells the literal from division: a `/` that follows a value
+// - a name, a number, a `)`, a `]`, a closing quote - is the operator.
 const comments = {
   line: ['//'],
   block: [['/*', '*/']],
@@ -46,6 +51,7 @@ const comments = {
     { open: '"', close: '"', escape: '\\' },
     { open: '`', close: '`', escape: '\\', interpolate: ['${', '}'] },
   ],
+  regex: [{ open: '/', close: '/', escape: '\\', class: ['[', ']'], notAfter: /[\w$)\]'"`]/ }],
 }
 
 // tsconfig.json is the only configuration read, and only for baseUrl and paths:

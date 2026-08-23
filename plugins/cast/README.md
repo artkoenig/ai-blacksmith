@@ -262,7 +262,7 @@ module.exports = {
   ignore: ['node_modules'],                       // directories never walked
   patterns: [{ kind: 'value', re: /.../g }],      // one capture group: the specifier
   opaque: [{ kind: 'value', re: /.../g }],        // optional; a target that is no literal string
-  comments: { line: ['//'], block: [['/*', '*/']], strings: [...] },  // optional
+  comments: { line: ['//'], block: [['/*', '*/']], strings: [...], regex: [...] },  // optional
   init(ctx),                                      // optional; its return is ctx.state
   resolve(spec, fromModuleId, ctx),               // {to} | {external: true} | null
 }
@@ -279,7 +279,11 @@ before the patterns run, keeping each character's offset so the line an edge is 
 move. `line` is the tokens that comment to end of line, `block` the open/close pairs, and `strings`
 the literals a comment token inside opens nothing in - each `{open, close, escape?, interpolate?}`,
 with `interpolate: ['${', '}']` making a template literal's holes code again, so a `require` in one
-keeps its edge. An adapter that declares no `comments` is matched over its whole text.
+keeps its edge. `regex` is for a literal whose delimiter is also an operator - javascript's `/` -
+where a quote is no string: each `{open, close, escape?, class?, notAfter}` is spanned and blanked
+in one step, and opens only where `notAfter` does not match the last character of code before it and
+where it closes on the same line, so a division opens nothing. An adapter that declares no
+`comments` is matched over its whole text.
 
 Adapters ship in `adapters/`. A project adds its own in `<root>/.cast/adapters/`, which is how a
 second language arrives without touching the engine.

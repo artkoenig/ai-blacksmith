@@ -16,11 +16,17 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   `opaque` patterns capture an import whose target is no literal string: `resolution: "opaque"`,
   `resolve` never called, named by `cast report`; a second list through `imports()`, capture past
   the quote.
-- `comments` (`{line, block, strings}`, a string `{open, close, escape?, interpolate?}`) drives
-  `mask()`: comments blanked before the patterns run, offsets and newlines kept so no line moves; a
-  string is only skipped, never blanked - the specifier lives in one - so a `//` in a url opens
-  nothing, and `interpolate` reads a template hole as code, which is what blanks a comment inside
-  one. No `comments` is the whole text matched: the fixture's toy import sits behind a `//`.
+- `comments` (`{line, block, strings, regex}`, a string `{open, close, escape?, interpolate?}`)
+  drives `mask()`: comments blanked before the patterns run, offsets and newlines kept so no line
+  moves; a string is only skipped, never blanked - the specifier lives in one - so a `//` in a url
+  opens nothing, and `interpolate` reads a template hole as code, which is what blanks a comment
+  inside one. No `comments` is the whole text matched: the fixture's toy import sits behind a `//`.
+- A delimiter that is also an operator needs `regex` (`{open, close, escape?, class?, notAfter}`),
+  or a quote inside `/[^'"]/` opens a string that never closes and nothing after it is blanked -
+  the repo's own `adapters/javascript.js` was read that way. Such a literal is spanned and blanked
+  in one step, opens only where `notAfter` misses the last character of code before it (`last()`
+  reads the blanked `out`, so a comment cannot be that character) and only where `span()` finds the
+  close on the same line, which bounds a misread division to nothing.
 - A count labelled `edges` is every import met - `cast report`'s line, with its resolution
   breakdown. Every narrower one says `module edges`: `cast edges`, the check summary, the page.
 - Patterns match in order, one `(line, specifier)` makes one edge and the first kind wins - the
