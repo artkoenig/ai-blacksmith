@@ -19,7 +19,11 @@ paths:
   embedded data block and the pure functions `cast.js` exports - never a browser, on a phone or
   anywhere else: markup and css are read by `grep` over the page, and a function the page needs
   (`marker`, `toggleOpen`, `groupIds`) is tested in node and grepped for in the page, which is how a
-  claim about a press is checked without one. The cast fixture ships its own `.cast/layers.json`, so
+  claim about a press is checked without one. A dozen suites assert fixed counts over that
+  one fixture (`unresolved 2`, `opaque 2`, `module edges 8 -> 7`, the layer sizes), so a case
+  needing a new module or a new module edge gets its own `mktemp -d` project - `cast comments`
+  is one - and a case that must live in the shared fixture adds an external edge, which no count
+  there reads. The cast fixture ships its own `.cast/layers.json`, so
   every `cast report` assertion sees the layer sections too, and the `cast check` suites rewrite its
   `.cast/rules.json` per case - rules are read at check time, so none of them rescans. The `cast
   baseline` and `cast ratchet` suites also write and remove its `.cast/baseline.json`; the last one
@@ -33,6 +37,11 @@ paths:
   `plugin.json` on `displayName`, `description` and `keywords`.
   Forge's `hooks/hooks.json` check stays named - forge is the only plugin that ships one. The
   suites below it stay forge-bound on purpose.
+- The cast page suites grep its source with `grep -F` on substrings:
+  `"g.addEventListener('click'"` hits any local ending in `g` (`bg`), failing an unrelated suite -
+  name around it. A multi-line `-F` pattern is alternatives, not a block: cut the block out with
+  `sed -n '/a/,/b/p'` first. `grep -c` counts lines, and a comment naming the symbol counts too -
+  match the call, not the word.
 - A suite is a `# --- <name> ---` block that ends in `ok <name>` or `fail <name> "<what>"`.
   `fail` sets `FAILED`; the script exits with it.
 - Guard a multi-step suite with `S=0` and report once at the end.

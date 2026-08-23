@@ -262,6 +262,7 @@ module.exports = {
   ignore: ['node_modules'],                       // directories never walked
   patterns: [{ kind: 'value', re: /.../g }],      // one capture group: the specifier
   opaque: [{ kind: 'value', re: /.../g }],        // optional; a target that is no literal string
+  comments: { line: ['//'], block: [['/*', '*/']], strings: [...] },  // optional
   init(ctx),                                      // optional; its return is ctx.state
   resolve(spec, fromModuleId, ctx),               // {to} | {external: true} | null
 }
@@ -272,6 +273,13 @@ module.exports = {
 dropped. `opaque` patterns capture the expression of an import whose target is no literal string -
 `require(path.join(dir, name))` - which is never resolved, and counted and named as `opaque` in the
 report rather than passed over: a graph missing those edges must say so.
+
+`comments` is what makes an import written in a comment no import: the engine blanks every comment
+before the patterns run, keeping each character's offset so the line an edge is reported at does not
+move. `line` is the tokens that comment to end of line, `block` the open/close pairs, and `strings`
+the literals a comment token inside opens nothing in - each `{open, close, escape?, interpolate?}`,
+with `interpolate: ['${', '}']` making a template literal's holes code again, so a `require` in one
+keeps its edge. An adapter that declares no `comments` is matched over its whole text.
 
 Adapters ship in `adapters/`. A project adds its own in `<root>/.cast/adapters/`, which is how a
 second language arrives without touching the engine.

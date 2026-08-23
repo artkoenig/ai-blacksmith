@@ -34,6 +34,20 @@ const opaque = [
   { kind: 'value', re: /(?:^|[^\w.$])require\s*\(\s*([^'"\s)][^\n]*)\)/g },
 ]
 
+// What opens a comment in this language, and what a string literal is - a `//`
+// inside one opens nothing. The engine blanks the comments before any pattern
+// runs, so a jsdoc `import('./b')` and a commented-out import make no edge,
+// while a template literal's `${}` is read as code again.
+const comments = {
+  line: ['//'],
+  block: [['/*', '*/']],
+  strings: [
+    { open: "'", close: "'", escape: '\\' },
+    { open: '"', close: '"', escape: '\\' },
+    { open: '`', close: '`', escape: '\\', interpolate: ['${', '}'] },
+  ],
+}
+
 // tsconfig.json is the only configuration read, and only for baseUrl and paths:
 // those are what make two spellings of one import the same edge.
 function init(ctx) {
@@ -129,6 +143,7 @@ module.exports = {
   ignore: ['node_modules', 'dist', 'build', 'coverage', 'out'],
   patterns,
   opaque,
+  comments,
   init,
   resolve,
 }
