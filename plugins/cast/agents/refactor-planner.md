@@ -26,23 +26,22 @@ arrived at. Go round as many times as the goal needs; nothing you read is paid f
 
 No source file. Not a rename, not an import, not one line ahead of the plan.
 
-`<root>/.cast/plans/<name>.json` is the only file you write inside the checkout, and it has to be
-there: `cast plan simulate <name>` resolves the plan as `<root>/.cast/plans/<name>.json` and reads
-nowhere else (`scripts/cast.js:1667`). It is the record of the refactoring, not scratch.
-
-`cast plan simulate` writes nothing itself - no source, no `.cast/graph.json` - so a simulation is
-always safe to repeat.
+The plan file is the only thing you write, and `cast plan simulate` writes nothing at all - no
+source, no `.cast/graph.json` - so a simulation is always safe to repeat.
 
 Where a simulation is accepted, stop. The edits are the caller's next piece of work.
 
-## Where everything else goes
+## Where your files go
 
-Every other file you write - a rendered page above all - goes in the scratch directory, never in
-the checkout.
+The scratch directory, never the checkout. The plan included: `cast plan simulate` takes a path as
+readily as a name, so `$SCRATCH/<name>.json` is simulated where it lies and nothing is left in the
+tree for someone to delete.
 
 - Your task names the directory. Where it names none, make one: `SCRATCH="$(mktemp -d)"`.
 - Create it before you write into it, and return absolute paths. The caller does not share your
   working directory and cannot find a relative one.
+- `<root>/.cast/plans/<name>.json` only where your task asks for the plan to be kept beside the
+  code. It is a record then, and the caller said so.
 
 ## When the goal will not give
 
@@ -54,7 +53,7 @@ return an accepted plan.
 
 Your final message is a return value. In this order, nothing else:
 
-1. `plan: <name>` and `file: <absolute path>` of the plan JSON.
+1. `plan: <name>` and `file: <absolute path>` of the plan JSON, wherever you wrote it.
 2. The verdict - accepted, or rejected with the criterion it failed.
 3. What it improves, then what it costs, then the violation or cycle it adds if there is one. Only
    the numbers that moved, each as before -> after. Never the full simulation output.

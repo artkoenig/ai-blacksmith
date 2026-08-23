@@ -6,7 +6,7 @@ The module graph of a project, and what is wrong with it.
 cast scan [--root <dir>]     writes <root>/.cast/graph.json
 cast report [--root <dir>]   reads it and says what is wrong
 cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
-cast plan simulate <name> [--root <dir>]
+cast plan simulate <name|file> [--root <dir>]
                              applies <root>/.cast/plans/<name>.json to a copy of
                              the graph and says what it would change
 cast baseline [--update] [--root <dir>]
@@ -14,8 +14,8 @@ cast baseline [--update] [--root <dir>]
                              holds, and the ratchet that rewrites it
 cast edges --from <layer> --to <layer> [--root <dir>]
                              the module edges behind one layer edge
-cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
-cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]
+cast render --mermaid [--expand <layer>] [--plan <name|file>] [--root <dir>]
+cast render --html <file> [--fragment] [--expand <layer>] [--plan <name|file>] [--root <dir>]
                              the graph at layer altitude, one layer resolved;
                              --plan draws the graph <name> would leave instead
                              of the scanned one
@@ -129,8 +129,13 @@ can only shrink, so a rule cannot quietly stop meaning anything.
 
 ## Plans
 
-`<root>/.cast/plans/<name>.json` is a refactoring written down before anyone edits a file: an
-ordered list of operations, applied by `cast plan simulate <name>` to a copy of the graph.
+A plan is a refactoring written down before anyone edits a file: an ordered list of operations,
+applied by `cast plan simulate` to a copy of the graph.
+
+The argument is a name or a path. A bare name is the project's own plan, `<root>/.cast/plans/<name>.json`
+- the one that is worth keeping beside the code. An argument carrying a `/` or a `.json` is a path,
+resolved against the working directory, so a draft can be simulated out of a scratch directory
+without being written into the checkout at all. `--plan` on `cast render` reads the same two forms.
 
 ```json
 {
@@ -178,8 +183,8 @@ graph LR
 `--expand <layer>` resolves that one layer to its modules, in a subgraph, and leaves every other
 layer a single node; an edge into it lands on the module, not on the layer.
 
-`--plan <name>` draws the graph `cast plan simulate <name>` produces instead of the scanned one:
-`<root>/.cast/plans/<name>.json` applied to a copy of the graph, so a refactoring can be looked at
+`--plan <name|file>` draws the graph `cast plan simulate` produces instead of the scanned one: the
+plan applied to a copy of the graph, so a refactoring can be looked at
 before a single source file is edited. Both `--mermaid` and `--html` take it, and both draw the
 simulated graph the same way they draw the scanned one - layers, rules and the baseline are read
 at render time against the graph the plan leaves. Rendering a plan writes no `.cast/graph.json`

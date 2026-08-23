@@ -6,7 +6,7 @@
 //   cast report [--root <dir>]   reads it and says what is wrong
 //   cast check [--root <dir>]    the rules of <root>/.cast/rules.json, evaluated
 //                                against the module graph; exit 1 on an error
-//   cast plan simulate <name> [--root <dir>]
+//   cast plan simulate <name|file> [--root <dir>]
 //                                a refactoring written down before it is done:
 //                                <root>/.cast/plans/<name>.json applied to a copy
 //                                of the graph, before and after, writing nothing
@@ -15,8 +15,8 @@
 //                                holds; --update rewrites it, and refuses to grow it
 //   cast edges --from <layer> --to <layer> [--root <dir>]
 //                                the module edges behind one layer edge
-//   cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]
-//   cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]
+//   cast render --mermaid [--expand <layer>] [--plan <name|file>] [--root <dir>]
+//   cast render --html <file> [--fragment] [--expand <layer>] [--plan <name|file>] [--root <dir>]
 //                                the graph at layer altitude, one layer resolved;
 //                                --plan draws the graph the plan would leave,
 //                                writing nothing but the page that was asked for
@@ -1663,13 +1663,32 @@ function readOperation(o, at) {
   return { op: 'split', module: planString(o, 'module', at), into }
 }
 
-function readPlan(root, name) {
-  const file = path.join(root, '.cast', 'plans', `${name}.json`)
+// A plan is named or it is a path. A bare name is the project's own, read where
+// it has always been read - `<root>/.cast/plans/<name>.json`. An argument that
+// carries a separator or a `.json` is a path instead, resolved against the
+// working directory, so a draft can be simulated out of a scratch directory
+// without being written into the checkout first. A plan name is a slug after the
+// goal, so the two never collide.
+function planFile(root, nameOrPath) {
+  if (nameOrPath.endsWith('.json') || nameOrPath.includes('/') || nameOrPath.includes(path.sep))
+    return { name: path.basename(nameOrPath, '.json'), file: path.resolve(nameOrPath) }
+  return { name: nameOrPath, file: path.join(root, '.cast', 'plans', `${nameOrPath}.json`) }
+}
+
+// A path outside the root has no readable relative form: `../../..` names the
+// file to nobody. Inside it, the relative one is what the caller typed.
+function under(root, file) {
+  const rel = path.relative(root, file)
+  return rel && !rel.startsWith('..') ? rel : file
+}
+
+function readPlan(root, nameOrPath) {
+  const { name, file } = planFile(root, nameOrPath)
   let raw
   try {
     raw = fs.readFileSync(file, 'utf8')
   } catch {
-    die(`no plan at ${path.relative(root, file)}`)
+    die(`no plan at ${under(root, file)}`)
   }
   let parsed
   try {
@@ -1873,11 +1892,11 @@ function simulate(graph, after, rules, plan, ruleFile) {
 
 const USAGE =
   'usage: cast <scan|report|check> [--root <dir>]\n' +
-  '       cast plan simulate <name> [--root <dir>]\n' +
+  '       cast plan simulate <name|file> [--root <dir>]\n' +
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
-  '       cast render --mermaid [--expand <layer>] [--plan <name>] [--root <dir>]\n' +
-  '       cast render --html <file> [--fragment] [--expand <layer>] [--plan <name>] [--root <dir>]'
+  '       cast render --mermaid [--expand <layer>] [--plan <name|file>] [--root <dir>]\n' +
+  '       cast render --html <file> [--fragment] [--expand <layer>] [--plan <name|file>] [--root <dir>]'
 
 function main(argv) {
   const cmd = argv[0]
@@ -2032,5 +2051,5 @@ module.exports = {
   viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
   edgesAt, edgeLines,
   readRules, violations, check, readBaseline, ratchet,
-  readPlan, simulateGraph, simulate, layerMetrics,
+  readPlan, planFile, simulateGraph, simulate, layerMetrics,
 }

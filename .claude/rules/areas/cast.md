@@ -6,7 +6,7 @@ paths:
 # cast
 
 The module graph of a project, and the rules it must obey. `bin/cast` and `bin/cast-check` are
-shims; all behaviour is `scripts/cast.js`, and every fact about a language is an adapter file.
+shims; all behaviour is `scripts/cast.js`, every fact about a language an adapter file.
 
 - The engine holds no language knowledge: extensions, import patterns, edge kinds and resolution
   come from an adapter, and anything language-specific in `scripts/cast.js` breaks `cast graph`.
@@ -15,7 +15,7 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
   which answers `{to}`, `{external: true}` or `null` - never a dropped edge, but `unresolved`.
 - An adapter's optional `opaque` patterns capture an import whose target is no literal string:
   `resolution: "opaque"`, `resolve` never called, named by `cast report`; a second pattern list
-  through `imports()`, the capture excluding a leading quote.
+  through `imports()`, capture excluding a leading quote.
 - A count labelled `edges` is every import met - `cast report`'s line, with its resolution
   breakdown. Every narrower one says `module edges`: `cast edges`, the check summary, the page.
 - Patterns match in order, one `(line, specifier)` makes one edge and the first kind wins - the
@@ -25,9 +25,9 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - Layers are read at report time from `<root>/.cast/layers.json`, never baked into `graph.json`:
   re-layering needs no rescan. Glob to layer name, first match wins, engine `globToRe` (`**` spans
   segments, `*`/`?` stay in one). No file means the first directory level is the layer, on `ENOENT`
-  alone: unreadable, invalid or not a layer name is exit 2.
-- A module no glob claims is `unassigned`: counted and named by `cast report`, never swept into a
-  declared layer; `assign()` keys placement by module id.
+  alone: unreadable, invalid or not a layer name is exit 2. A module no glob claims is
+  `unassigned`: counted and named by `cast report`, never swept into a declared layer; `assign()`
+  keys placement by module id.
 - `cast render` reads the layers at render time and never rewrites the graph: layer nodes
   `L_<name>`, module nodes `M_<id>`, every character mermaid rejects escaped to `_<hex>_`
   (`M_src_2f_b_2e_ts`), name only in the label - reversible, or `src/a-b.ts` and `src/a_b.ts`
@@ -88,13 +88,13 @@ shims; all behaviour is `scripts/cast.js`, and every fact about a language is an
 - `.cast/baseline.json` holds inherited violations, read at check time like the rules: a held one
   drops out of the listing and the exit code, counted as the summary suffix `, N baselined`, keyed
   by rule, file, imported module and edge kind, never by line, which churns (`baselineKey`).
-  `--update` refuses (exit 1, no write) a baseline holding more violations than the one it replaces
-  - the ratchet; no baseline yet accepts any count.
-- Plans are read at simulate time from `<root>/.cast/plans/<name>.json`; `cast plan simulate`
-  writes nothing, the ops applying in order to a deep copy, each on the graph the one before left;
-  `apply()` dies on an unknown module, `readPlan` on an unknown op or key. An op resites its edges:
-  `move`/`merge` through `resite()`, `split` per part, `invert` at `line` 0.
+  `--update` refuses (exit 1, no write) a baseline bigger than the one it replaces - the ratchet.
+- Plans are read at simulate time; `cast plan simulate` writes nothing, ops applying in order to a
+  deep copy, each on the graph the one before left; `apply()` dies on an unknown module, `readPlan`
+  on an unknown op or key. An op resites its edges: `move`/`merge` via `resite()`, `split` per
+  part, `invert` at `line` 0. `planFile()` resolves the argument for `plan simulate` and
+  `render --plan` alike: a `/` or `.json` is a path against cwd, else a name under `.cast/plans/`.
 - Plan metrics count edges crossing a layer boundary alone: `I = fan-out / (fan-in + fan-out)`, 0
-  when a layer has neither, no baseline. `cast render --plan <name>` draws `simulateGraph(scan,
-  readPlan(...))` in `main`'s render branch before any write: an unapplicable plan exits 2 with no
-  page, and layers, rules and the baseline read against the simulated graph.
+  when a layer has neither, no baseline. `cast render --plan` draws `simulateGraph(scan,
+  readPlan(...))` before any write: an unapplicable plan exits 2 with no page, and layers, rules
+  and baseline read against the simulated graph, not the scanned one.

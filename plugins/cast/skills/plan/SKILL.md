@@ -24,15 +24,17 @@ That is the graph the plan is drafted against, freshly scanned, and any plan alr
 Draft, simulate, judge, redraft. Go round it until a simulation is accepted, or until you can say
 which goal the graph will not give up.
 
-1. **Draft.** Write `<root>/.cast/plans/<name>.json` yourself, `<name>` after the goal
-   (`break-ui-data`). It is an object with an `operations` array, ordered - each operation applies
+1. **Draft.** Write the plan yourself, `<name>` after the goal (`break-ui-data`). It goes in
+   `<root>/.cast/plans/<name>.json` where it is worth keeping beside the code, and in a scratch
+   directory where it is not - `cast plan simulate` takes a path as readily as a name. It is an object with an `operations` array, ordered - each operation applies
    to the graph the one before it left behind, so a module a `move` renamed is named by its new id
    from there on. The operations are `{"op":"move","module":"<id>","to":"<id>"}`,
    `{"op":"merge","modules":["<id>",...],"into":"<id>"}`,
    `{"op":"invert","from":"<id>","to":"<id>"}` and
    `{"op":"split","module":"<id>","into":[{"id":"<id>","imports":[],"importedBy":[]},...]}`.
    Every id is a module the report above named, spelled exactly.
-2. **Simulate.** `cast plan simulate <name> --root <root>`. It writes nothing - no source file, no
+2. **Simulate.** `cast plan simulate <name> --root <root>`, or the path where the draft is not in
+   `.cast/plans`. It writes nothing - no source file, no
    `.cast/graph.json`. Exit 2 is a plan that could not be applied at all: an unknown operation, or
    a module it names that the graph does not have. That is never a partial answer, so do not read
    the numbers off a run that died - fix the draft and simulate again.

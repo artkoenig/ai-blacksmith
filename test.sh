@@ -1491,6 +1491,44 @@ printf '%s\n' "$CAST_PLAN" | grep -q '^module edges 8 -> 7' \
   || { fail "cast plan" "the operations did not reach the copied graph: $CAST_PLAN"; S=1; }
 [ "$S" = 0 ] && ok "cast plan"
 
+# a plan is a name or a path, so a draft never has to be written into the
+# checkout to be simulated - the agents keep theirs in a scratch directory
+S=0
+PLANDIR="$(mktemp -d)"
+cp "$CASTFIX/.cast/plans/cut.json" "$PLANDIR/cut.json"
+# break: resolving every argument under <root>/.cast/plans, which makes a plan
+# outside the checkout unreadable and the scratch draft impossible
+CAST_PP="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate "$PLANDIR/cut.json" 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan path" "a plan given by path exited $RC: $CAST_PP"; S=1; }
+printf '%s\n' "$CAST_PP" | grep -q '^module edges 8 -> 7' \
+  || { fail "cast plan path" "the plan at a path was not applied: $CAST_PP"; S=1; }
+# break: naming the plan by its whole path, which puts a scratch directory in
+# every line of the report
+printf '%s\n' "$CAST_PP" | grep -q '^plan cut ' \
+  || { fail "cast plan path" "the plan at a path is not named by its basename: $CAST_PP"; S=1; }
+# --plan resolves the same way, or the page and the simulation disagree on what
+# a plan argument means
+# break: teaching only `plan simulate` about paths and leaving render behind
+CAST_PR2="$(cd "$CASTFIX" && "$CAST_BIN" render --mermaid --plan "$PLANDIR/cut.json" 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan path" "rendering a plan given by path exited $RC: $CAST_PR2"; S=1; }
+printf '%s\n' "$CAST_PR2" | grep -q '^graph LR' \
+  || { fail "cast plan path" "the plan at a path drew no graph: $CAST_PR2"; S=1; }
+# a bare name still means the project's own plan
+# break: reading every argument as a path, which breaks `plan simulate <name>`
+CAST_PN="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate cut 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast plan path" "a plan given by name exited $RC: $CAST_PN"; S=1; }
+# and a name that is nowhere says where it looked, relatively - break: printing
+# the absolute path of a file inside the root, or `../..` for one outside it
+CAST_PM="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate nosuch 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast plan path" "a missing plan exited $RC, not 2: $CAST_PM"; S=1; }
+printf '%s\n' "$CAST_PM" | grep -qxF 'no plan at .cast/plans/nosuch.json' \
+  || { fail "cast plan path" "a missing plan did not say where it looked: $CAST_PM"; S=1; }
+CAST_PM2="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate "$PLANDIR/nosuch.json" 2>&1)"; RC=$?
+printf '%s\n' "$CAST_PM2" | grep -qxF "no plan at $PLANDIR/nosuch.json" \
+  || { fail "cast plan path" "a missing plan outside the root was not named absolutely: $CAST_PM2"; S=1; }
+rm -rf "$PLANDIR"
+[ "$S" = 0 ] && ok "cast plan path"
+
 # every edge the simulation produces names a site in the module that holds it
 S=0
 # a simulation writes nothing, so the after graph is read in process: stdout
@@ -2757,16 +2795,15 @@ for a in graph-analyst refactor-planner; do
   grep -qi 'absolute path' "$F" \
     || { fail "cast agents" "$F does not return absolute paths"; S=1; }
 done
-# The plan is the one file that stays in the checkout, because cast reads it
-# nowhere else. break: drafting it into scratch along with the page, which
-# leaves `cast plan simulate` with no plan to simulate at all.
+# The plan goes to scratch with everything else - `cast plan simulate` takes a
+# path. break: sending it back to `.cast/plans/` by default, which leaves a draft
+# in the tree on every run, accepted or not.
 grep -qF '$SCRATCH/<name>.json' plugins/cast/agents/refactor-planner.md \
-  && { fail "cast agents" "the planner drafts the plan where cast cannot read it"; S=1; }
-grep -qF '<root>/.cast/plans/' plugins/cast/agents/refactor-planner.md \
-  || { fail "cast agents" "the planner no longer drafts where cast reads the plan"; S=1; }
-# break: moving readPlan's resolution, which silently makes the line above false
-grep -qF "path.join(root, '.cast', 'plans'" plugins/cast/scripts/cast.js \
-  || { fail "cast agents" "readPlan no longer resolves the plan the planner writes"; S=1; }
+  || { fail "cast agents" "the planner does not draft into the scratch directory"; S=1; }
+# break: dropping the one case that does belong in the checkout, so a plan the
+# caller asked to keep is written where nothing looks for it
+grep -qF '<root>/.cast/plans/<name>.json' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner never keeps a plan beside the code"; S=1; }
 [ "$S" = 0 ] && ok "cast agents"
 
 
