@@ -16,17 +16,19 @@ The plan is yours to write. Nobody hands you one, there is no file to ask for, a
 
 The one exception is a plan that already exists: a word in the argument that names one - a bare name
 read under `<root>/.cast/plans/<name>.json`, or a path to a plan file anywhere - is a plan to
-continue rather than a plan to draft.
+continue rather than a plan to draft. A path counts as a plan file only where it ends in `.json`
+and holds an `operations` array; any other file the goal happens to name - a script to move, a
+module to split - is a word of the goal and nothing more.
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; fi; P=""; for W in $A; do if [ -f "$W" ]; then P="$W"; elif [ -f "$R/.cast/plans/$W.json" ]; then P="$W"; fi; done; echo "cast root: $R"; echo "cast plan: ${P:-none}"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; if [ -n "$P" ]; then echo "--- operations ---"; cat "$R/.cast/plans/$P.json" 2>/dev/null || cat "$P"; "$CAST" plan simulate "$P" --root "$R" || echo "that plan does not apply to this graph"; else ls "$R/.cast/plans" 2>/dev/null || echo "no plan written yet"; fi`
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; fi; P=""; for W in $A; do case "$W" in *.json) if [ -f "$W" ] && grep -q '"operations"' "$W"; then P="$W"; fi;; esac; if [ -f "$R/.cast/plans/$W.json" ]; then P="$W"; fi; done; echo "cast root: $R"; echo "cast plan: ${P:-none}"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; if [ -n "$P" ]; then echo "--- operations ---"; cat "$R/.cast/plans/$P.json" 2>/dev/null || cat "$P"; "$CAST" plan simulate "$P" --root "$R" || echo "that plan does not apply to this graph"; else ls "$R/.cast/plans" 2>/dev/null || echo "no plan written yet"; fi`
 
 That is the graph the plan is drafted against, freshly scanned. `cast root:` is the root; every call
 below passes it as `--root <root>`.
 
 `cast plan: <name>` is a plan handed to you: its operations and its simulation against that graph
 are printed above, and the loop starts from where it stands. `cast plan: none` is a plan to draft
-from scratch - a word that names no plan is not a plan, and the listing under it is what the project
-already holds.
+from scratch - a word that names no plan is not a plan, even where it names an existing file, and
+the listing under it is what the project already holds.
 
 ## The loop
 

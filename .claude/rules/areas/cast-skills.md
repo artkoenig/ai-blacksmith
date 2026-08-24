@@ -32,7 +32,9 @@ to compose. `cast check` deliberately has none: it answers through its exit code
   redraft, so it needs `Write` in `allowed-tools`, and `cast plan simulate` is run per loop from
   the body.
 - `plan`'s `!` line resolves a plan as well as a root, in that order: after `R`, any word of `$A`
-  that is an existing file, or a name with `$R/.cast/plans/<word>.json` under it, becomes `P`. It
+  that is an existing `*.json` file holding an `operations` array, or a name with
+  `$R/.cast/plans/<word>.json` under it, becomes `P`. Testing `-f` alone is the bug that made a goal
+  like `move test.sh out of plugins` label `test.sh` the plan and `cat` it into the preamble. It
   echoes `cast plan: <name>` or `cast plan: none`, and where there is one it prints the plan and
   simulates it - that is the state the loop continues from. Any word may be the plan, since the
   trailing one is already spoken for by the root.

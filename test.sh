@@ -3310,6 +3310,26 @@ printf '%s\n' "$CAST_PN2" | grep -qF 'no plan at ' \
   && { fail "cast plan continue" "a word that names no plan was handed to the simulator: $CAST_PN2"; S=1; }
 printf '%s\n' "$CAST_PN2" | grep -qF 'cut.json' \
   || { fail "cast plan continue" "the preamble no longer lists the plans it found: $CAST_PN2"; S=1; }
+# AC3 a goal that names an existing file that is not a plan - `move tool.sh
+# somewhere else`, with tool.sh in the root - still drafts from scratch: only a
+# `*.json` holding operations is a plan, so nothing else is labelled one or cat'd
+# into the preamble.
+# break: resolving any word the `-f` test accepts as the plan
+printf 'echo hi\n' > "$CASTFIX/tool.sh"
+printf '{"name":"x"}\n' > "$CASTFIX/pkg.json"
+CAST_PF="$(plan_line 'move tool.sh somewhere else' "$CASTFIX")"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast plan continue" "a goal naming a plain file exited $RC: $CAST_PF"; S=1; }
+printf '%s\n' "$CAST_PF" | grep -qx 'cast plan: none' \
+  || { fail "cast plan continue" "a file that is no plan was labelled the plan: $CAST_PF"; S=1; }
+printf '%s\n' "$CAST_PF" | grep -qF 'echo hi' \
+  && { fail "cast plan continue" "a file that is no plan was printed as the plan: $CAST_PF"; S=1; }
+# a json file that carries no operations is no plan either
+# break: taking any `*.json` path as a plan without reading it
+CAST_PJ="$(plan_line 'move pkg.json somewhere else' "$CASTFIX")"
+printf '%s\n' "$CAST_PJ" | grep -qx 'cast plan: none' \
+  || { fail "cast plan continue" "a json holding no operations was labelled the plan: $CAST_PJ"; S=1; }
+rm -f "$CASTFIX/tool.sh" "$CASTFIX/pkg.json"
 # AC3 a project that holds no plan at all is the same: exit 0, and none.
 # break: `cat` or `ls` on a directory that is not there deciding the exit code
 PLANE="$(mktemp -d)"
