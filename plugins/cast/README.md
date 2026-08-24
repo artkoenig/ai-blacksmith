@@ -97,9 +97,32 @@ rule caught is dropped where an allowed rule claims the same edge.
 same glob engine `layers.json` uses), so a rule can be written between two layers or between two
 files that share one. A side that is there but is not a string is rejected for its shape, naming
 what was expected; only a missing one is reported as missing. `kinds` limits the rule to those edge kinds: a rule carrying
-`kinds: ["value"]` is not violated by an `import type`. `severity` is `error` or `warn`; a warning
-is listed and leaves the exit code alone. An attribute this evaluator does not know is reported as
-`not evaluated`, never quietly passed.
+`kinds: ["value"]` is not violated by an `import type`. `severity` is `error`, `warn`, `info` or
+`ignore`: an error fails the check, a warning and an info are listed and leave the exit code alone,
+and an `ignore` rule is read and evaluates nothing - its violations are neither listed nor counted.
+An attribute this evaluator does not know is reported as `not evaluated`, never quietly passed.
+
+A rule may name a shape of the graph instead of an edge between two sides, one shape per rule:
+
+```json
+{
+  "forbidden": [
+    { "name": "no-cycles", "severity": "error", "circular": true },
+    { "name": "no-orphans", "severity": "warn", "orphan": true },
+    { "name": "resolve-everything", "severity": "error", "couldNotResolve": true }
+  ]
+}
+```
+
+`circular: true` makes every module edge that closes a dependency cycle a violation, reported with
+the file and the line of the import like any other. `orphan: true` makes every module that neither
+imports nor is imported one, named by its path - a module whose only import cast could not resolve
+did import, and is not an orphan. `couldNotResolve: true` makes every import that resolved to
+nothing one, reported with the file and the line of the import; its `to` is the text nobody could
+resolve, so a `to` on such a rule is read as a glob over that text and never as a layer. On these
+rules `from` and `to` are optional and narrow the rule where they are there: a rule with neither
+catches every cycle, every orphan or every unresolved import there is. An orphan is a module rather
+than an edge, so it takes no `to` at all.
 
 `cast check` reads the rules against the module graph, never against the layer aggregate the
 render draws, so a violation between two modules of one layer is found like any other. It answers

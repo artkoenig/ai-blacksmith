@@ -1527,7 +1527,22 @@ function readGraph(out) {
 // Each rule carries `name`, `severity`, `from`, `to` and `kinds`. A side is a
 // layer name where one is declared, and a path glob otherwise, so a rule can be
 // written between two layers or between two files with no layer of their own.
-const RULE_KEYS = ['name', 'severity', 'from', 'to', 'kinds']
+const RULE_KEYS = ['name', 'severity', 'from', 'to', 'kinds', 'circular', 'orphan', 'couldNotResolve']
+
+// Beside an edge between two sides, a rule may name a shape of the graph itself:
+// an edge that closes a dependency cycle, a module nothing touches, an import
+// that resolved to nothing. One rule names one of them - two of them in one rule
+// are two questions asked as one, and no answer would say which was violated.
+const SUBJECTS = [
+  ['circular', 'circular'],
+  ['orphan', 'orphan'],
+  ['couldNotResolve', 'unresolved'],
+]
+
+// A severity says what a violation costs, and two of the four cost nothing:
+// `info` is listed and leaves the exit code alone like `warn`, `ignore` is not
+// evaluated at all - the rule stays in the file, readable, and finds nothing.
+const SEVERITIES = ['error', 'warn', 'info', 'ignore']
 
 function side(spec, names) {
   if (typeof spec !== 'string' || !spec) return null
@@ -1553,13 +1568,39 @@ function sideShape(r, key, at) {
 function readRule(r, at, names, notEvaluated) {
   if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${at} is not a rule object`)
   if (typeof r.name !== 'string' || !r.name) die(`${at} carries no name`)
-  sideShape(r, 'from', at)
-  sideShape(r, 'to', at)
-  const from = side(r.from, names)
-  const to = side(r.to, names)
+  const named = []
+  for (const [key, subject] of SUBJECTS) {
+    if (r[key] === undefined) continue
+    if (typeof r[key] !== 'boolean')
+      die(`${at} (${r.name}) has ${key} ${JSON.stringify(r[key])}, not true or false`)
+    if (r[key]) named.push([key, subject])
+  }
+  if (named.length > 1)
+    die(`${at} (${r.name}) carries ${named.map(([k]) => k).join(' and ')}; a rule names one of them`)
+  const subject = named.length ? named[0][1] : 'edge'
+  // A rule between two sides names both of them. A rule about the shape of the
+  // graph names as many as narrow it and no more: `from` alone catches every
+  // cycle a module is in, neither side catches every cycle there is. An orphan
+  // is a module rather than an edge, so it has no far side to name at all.
+  const given = (k) => r[k] !== undefined && r[k] !== null
+  if (subject === 'edge') {
+    sideShape(r, 'from', at)
+    sideShape(r, 'to', at)
+  } else {
+    if (subject === 'orphan' && given('to'))
+      die(`${at} (${r.name}) is an orphan rule and carries a to; an orphan is a module, not an edge`)
+    for (const k of ['from', 'to']) if (given(k)) sideShape(r, k, at)
+  }
+  const from = given('from') ? side(r.from, names) : null
+  // The far side of an unresolved import is the text nobody could resolve, never
+  // a module and so never a layer: it is read as a glob whatever it spells.
+  const to = given('to') ? side(r.to, subject === 'unresolved' ? [] : names) : null
   const severity = r.severity === undefined ? 'error' : r.severity
-  if (severity !== 'error' && severity !== 'warn')
-    die(`${at} (${r.name}) has severity ${JSON.stringify(r.severity)}, not error or warn`)
+  if (!SEVERITIES.includes(severity))
+    die(
+      `${at} (${r.name}) has severity ${JSON.stringify(r.severity)}, ` +
+        `not ${SEVERITIES.slice(0, -1).join(', ')} or ${SEVERITIES[SEVERITIES.length - 1]}`
+    )
   let kinds = null
   if (r.kinds !== undefined) {
     if (!Array.isArray(r.kinds) || r.kinds.some((k) => typeof k !== 'string'))
@@ -1569,7 +1610,18 @@ function readRule(r, at, names, notEvaluated) {
   // An attribute this evaluator cannot decide is named, never quietly passed:
   // a green check must not stand for a rule nobody evaluated.
   for (const k of Object.keys(r)) if (!RULE_KEYS.includes(k)) notEvaluated.push(`${r.name}: ${k}`)
-  return { name: r.name, severity, kinds, from, to, fromSpec: r.from, toSpec: r.to }
+  // A side nobody wrote down matches everything, and says so where the rule is
+  // listed: a blank in that line would read as a rule with a side that got lost.
+  return {
+    name: r.name,
+    severity,
+    subject,
+    kinds,
+    from,
+    to,
+    fromSpec: given('from') ? r.from : '**',
+    toSpec: given('to') ? r.to : '**',
+  }
 }
 
 function readRules(root, names) {
@@ -1601,12 +1653,102 @@ function readRules(root, names) {
 }
 
 function sideHits(s, id, of) {
+  // A side nobody wrote down is every side there is - the only way a rule about
+  // the shape of the graph can be written without naming a module.
+  if (!s) return true
   return s.layer !== undefined ? of.get(id) === s.layer : s.re.test(id)
 }
 
-function hits(rule, fromId, edge, of) {
-  if (rule.kinds && !rule.kinds.includes(edge.kind)) return false
-  return sideHits(rule.from, fromId, of) && sideHits(rule.to, edge.to, of)
+function hits(rule, c, of) {
+  if (rule.kinds && c.kind !== null && !rule.kinds.includes(c.kind)) return false
+  if (!sideHits(rule.from, c.fromId, of)) return false
+  if (c.subject === 'orphan') return true
+  // The target of an unresolved import is text, not a module: it is matched
+  // against the glob and never against a layer, which it can never be in.
+  if (c.subject === 'unresolved') return !rule.to || (rule.to.re ? rule.to.re.test(c.target) : false)
+  return sideHits(rule.to, c.toId, of)
+}
+
+// Each subject is its own set of candidates, and every one of them carries the
+// violation it would become: the site, the module or the text imported, and the
+// layer edge it is read under. Past this function nothing knows which kind of
+// rule found what - the listing, the baseline and the page read one shape.
+function candidates(graph, of, subject) {
+  const out = []
+  if (subject === 'orphan') {
+    // Neither imports nor is imported: no import written in it at all, resolved
+    // or not, and no module edge arriving. A module that imports something cast
+    // could not resolve did import - it is unresolved, never orphaned.
+    const imported = new Set()
+    for (const m of graph.modules)
+      for (const e of m.edges) if (e.resolution === 'module') imported.add(e.to)
+    for (const m of graph.modules) {
+      if (m.edges.length || imported.has(m.id)) continue
+      out.push({
+        subject,
+        fromId: m.id,
+        toId: null,
+        target: m.id,
+        kind: null,
+        v: { file: m.id, line: 0, to: m.id, kind: 'orphan', edge: `${of.get(m.id)} orphan` },
+      })
+    }
+    return out
+  }
+  // Every module of a cycle sits in one strongly connected component, so an edge
+  // closes a cycle exactly where both of its ends are in the same one.
+  const inCycle = new Map()
+  if (subject === 'circular')
+    cycles(graph).forEach((comp, i) => {
+      for (const id of comp) inCycle.set(id, i)
+    })
+  for (const m of graph.modules) {
+    for (const e of m.edges) {
+      if (subject === 'unresolved') {
+        if (e.resolution !== 'unresolved') continue
+        out.push({
+          subject,
+          fromId: m.id,
+          toId: null,
+          target: e.target,
+          kind: e.kind,
+          v: {
+            file: e.file,
+            line: e.line,
+            to: e.target,
+            kind: e.kind,
+            edge: `${of.get(m.id)} -> unresolved`,
+          },
+        })
+        continue
+      }
+      if (e.resolution !== 'module') continue
+      if (subject === 'circular' && (!inCycle.has(m.id) || inCycle.get(m.id) !== inCycle.get(e.to)))
+        continue
+      out.push({
+        subject,
+        fromId: m.id,
+        toId: e.to,
+        target: e.to,
+        kind: e.kind,
+        v: {
+          file: e.file,
+          line: e.line,
+          to: e.to,
+          kind: e.kind,
+          edge: `${of.get(m.id)} -> ${of.get(e.to)}`,
+        },
+      })
+    }
+  }
+  return out
+}
+
+// An exception is read at the same subject as what it would except: an allowed
+// edge excepts a forbidden edge and the cycle it closes, and an orphan or an
+// unresolved import is only excepted by a rule that names one.
+function excepts(a, c) {
+  return a.subject === c.subject || (a.subject === 'edge' && c.subject === 'circular')
 }
 
 // Every resolved module edge is evaluated, including the ones inside a single
@@ -1614,25 +1756,21 @@ function hits(rule, fromId, edge, of) {
 // draws, where an intra-layer edge has no arrow at all.
 function violations(graph, of, rules) {
   const out = []
-  for (const m of graph.modules) {
-    for (const e of m.edges) {
-      if (e.resolution !== 'module') continue
-      rules.forbidden.forEach((r, ri) => {
-        if (!hits(r, m.id, e, of)) return
-        if (rules.allowed.some((a) => hits(a, m.id, e, of))) return
-        out.push({
-          ri,
-          rule: r.name,
-          severity: r.severity,
-          file: e.file,
-          line: e.line,
-          to: e.to,
-          kind: e.kind,
-          edge: `${of.get(m.id)} -> ${of.get(e.to)}`,
-        })
-      })
-    }
+  const bySubject = new Map()
+  const forSubject = (s) => {
+    if (!bySubject.has(s)) bySubject.set(s, candidates(graph, of, s))
+    return bySubject.get(s)
   }
+  rules.forbidden.forEach((r, ri) => {
+    // `ignore` is the severity that is not evaluated: its violations are neither
+    // listed nor counted, so the rule is read and finds nothing.
+    if (r.severity === 'ignore') return
+    for (const c of forSubject(r.subject)) {
+      if (!hits(r, c, of)) continue
+      if (rules.allowed.some((a) => excepts(a, c) && hits(a, c, of))) continue
+      out.push({ ri, rule: r.name, severity: r.severity, ...c.v })
+    }
+  })
   return out.sort((a, b) => a.ri - b.ri || (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
 }
 
@@ -1699,7 +1837,15 @@ function group(found, forbidden) {
   forbidden.forEach((r, ri) => {
     const mine = found.filter((v) => v.ri === ri)
     if (!mine.length) return
-    lines.push(`${r.name} (${r.severity}) ${r.fromSpec} -> ${r.toSpec} ${mine.length}`)
+    // An orphan is a module and has no edge to group it under: it is named by
+    // its path, which is the whole of what there is to open.
+    if (r.subject === 'orphan') {
+      lines.push(`${r.name} (${r.severity}) ${r.fromSpec} (orphan) ${mine.length}`)
+      for (const v of mine) lines.push(`  ${v.file}`)
+      return
+    }
+    const subject = r.subject === 'edge' ? '' : `(${r.subject}) `
+    lines.push(`${r.name} (${r.severity}) ${r.fromSpec} -> ${r.toSpec} ${subject}${mine.length}`)
     for (const le of [...new Set(mine.map((v) => v.edge))].sort()) {
       const sites = mine.filter((v) => v.edge === le)
       lines.push(`  ${le} ${sites.length}`)

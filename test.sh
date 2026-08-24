@@ -685,7 +685,12 @@ JS
 CASTFIX="$(mktemp -d)"
 CASTIDS="$(mktemp -d)"
 CMTFIX="$(mktemp -d)"
-trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS" "$CMTFIX"' EXIT
+# A second, tiny project for the rules that name a shape of the graph rather than
+# an edge: one cycle, one module nothing touches, one import that resolves to
+# nothing. Kept apart from the fixture above so its module and edge counts, which
+# half the cast suites assert, stay what they are.
+CASTKIN="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS" "$CMTFIX" "$CASTKIN"' EXIT
 mkdir -p "$CASTFIX/src" "$CASTFIX/pkg" "$CASTFIX/.cast/adapters" "$CASTFIX/node_modules/react"
 cat > "$CASTFIX/tsconfig.json" <<'JSON'
 { "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/*"] } } }
@@ -1637,6 +1642,160 @@ CAST_RSH3="$(try_rule '{"name":"r","to":"logic"}')"; RC=$?
 printf '%s\n' "$CAST_RSH3" | grep -q 'carries no from' \
   || { fail "cast rule shape" "an absent from was not reported as absent: $CAST_RSH3"; S=1; }
 [ "$S" = 0 ] && ok "cast rule shape"
+
+# --- cast: rules that name a shape of the graph -----------------------------
+# src/x.ts and src/y.ts import each other, src/x.ts also imports src/leaf.ts,
+# which closes no cycle, src/gap.ts imports a module that is not there, and
+# src/lone.ts neither imports nor is imported. No layers.json, so every module is
+# in the layer `src`.
+mkdir -p "$CASTKIN/src"
+printf "import { y } from './y'\nimport { leaf } from './leaf'\n" > "$CASTKIN/src/x.ts"
+printf 'export const leaf = 1\n' > "$CASTKIN/src/leaf.ts"
+printf "import { x } from './x'\n" > "$CASTKIN/src/y.ts"
+printf "import { z } from './nope'\n" > "$CASTKIN/src/gap.ts"
+printf 'export const lone = 1\n' > "$CASTKIN/src/lone.ts"
+mkdir -p "$CASTKIN/.cast"
+CAST_KIN_RULES="$CASTKIN/.cast/rules.json"
+(cd "$CASTKIN" && "$CAST_BIN" scan >/dev/null 2>&1) || fail "cast circular rule" "the fixture would not scan"
+
+# AC1 a forbidden rule carrying circular: true catches every module edge that
+# closes a cycle, with its site; a graph with cycles and no such rule is green
+S=0
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-cycles", "severity": "error", "circular": true } ] }
+JSON
+CAST_CIRC="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reading `circular` as an attribute nobody evaluates, which leaves every
+# cycle a green check
+[ "$RC" = 1 ] || { fail "cast circular rule" "a violated circular rule exited $RC, not 1: $CAST_CIRC"; S=1; }
+printf '%s\n' "$CAST_CIRC" | grep -q '^no-cycles (error) \*\* -> \*\* (circular) 2$' \
+  || { fail "cast circular rule" "the cycle's edges are not grouped under their rule: $CAST_CIRC"; S=1; }
+# break: naming the component and not the imports, which leaves nothing to open
+printf '%s\n' "$CAST_CIRC" | grep -q '^    src/x.ts:1 -> src/y.ts (value)$' \
+  || { fail "cast circular rule" "an edge of the cycle carries no site: $CAST_CIRC"; S=1; }
+printf '%s\n' "$CAST_CIRC" | grep -q '^    src/y.ts:1 -> src/x.ts (value)$' \
+  || { fail "cast circular rule" "the closing edge of the cycle was not caught: $CAST_CIRC"; S=1; }
+# an edge outside the cycle is not one: src/x.ts -> src/leaf.ts is a module edge
+# like the two above and closes nothing
+# break: reporting every module edge as circular
+printf '%s\n' "$CAST_CIRC" | grep -q 'src/leaf.ts' \
+  && { fail "cast circular rule" "an edge in no cycle was reported as circular: $CAST_CIRC"; S=1; }
+printf '%s\n' "$CAST_CIRC" | grep -q '^2 violations (2 errors)' \
+  || { fail "cast circular rule" "the cycle was not counted as two edges: $CAST_CIRC"; S=1; }
+# the same graph, a rule that is not about cycles: cycles alone never fail a check
+# break: making a cycle a violation of the graph rather than of a rule
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "src-off-nowhere", "severity": "error", "from": "src/**", "to": "nowhere/**" } ] }
+JSON
+CAST_NOCIRC="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast circular rule" "a cycle failed a check no rule asked about: $CAST_NOCIRC"; S=1; }
+printf '%s\n' "$CAST_NOCIRC" | grep -q '^0 violations' \
+  || { fail "cast circular rule" "a cycle was counted without a circular rule: $CAST_NOCIRC"; S=1; }
+# from narrows it, and a from no module of the cycle matches catches nothing
+# break: ignoring the sides of a circular rule
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-cycles", "severity": "error", "from": "src/gap.ts", "circular": true } ] }
+JSON
+CAST_CIRCF="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast circular rule" "a circular rule ignored its from: $CAST_CIRCF"; S=1; }
+[ "$S" = 0 ] && ok "cast circular rule"
+
+# AC2 a forbidden rule carrying orphan: true names every module that neither
+# imports nor is imported, by its path
+S=0
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-orphans", "severity": "error", "orphan": true } ] }
+JSON
+CAST_ORPH="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reading `orphan` as an attribute nobody evaluates
+[ "$RC" = 1 ] || { fail "cast orphan rule" "a violated orphan rule exited $RC, not 1: $CAST_ORPH"; S=1; }
+printf '%s\n' "$CAST_ORPH" | grep -q '^no-orphans (error) \*\* (orphan) 1$' \
+  || { fail "cast orphan rule" "the orphans are not grouped under their rule: $CAST_ORPH"; S=1; }
+# break: counting the orphans and never naming them, which leaves nothing to open
+printf '%s\n' "$CAST_ORPH" | grep -q '^  src/lone.ts$' \
+  || { fail "cast orphan rule" "the orphan was not named by its path: $CAST_ORPH"; S=1; }
+# a module that imports or is imported is not one - break: calling every module
+# with no incoming edge an orphan, which is most of a project
+for M in src/x.ts src/y.ts src/gap.ts src/leaf.ts; do
+  printf '%s\n' "$CAST_ORPH" | grep -q "^  $M\$" \
+    && { fail "cast orphan rule" "$M is no orphan and was reported as one: $CAST_ORPH"; S=1; }
+done
+printf '%s\n' "$CAST_ORPH" | grep -q '^1 violation (1 error)' \
+  || { fail "cast orphan rule" "the orphan count is not one: $CAST_ORPH"; S=1; }
+# an orphan is a module, so a to on such a rule is rejected rather than ignored
+# break: accepting a to nobody evaluates, and calling the check green
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-orphans", "orphan": true, "to": "src/**" } ] }
+JSON
+CAST_ORPH2="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast orphan rule" "an orphan rule carrying a to exited $RC, not 2: $CAST_ORPH2"; S=1; }
+[ "$S" = 0 ] && ok "cast orphan rule"
+
+# AC3 a forbidden rule carrying couldNotResolve: true catches every import that
+# resolved to nothing, with the file and the line of the import
+S=0
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "resolve-everything", "severity": "error", "couldNotResolve": true } ] }
+JSON
+CAST_UNRES="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: reading `couldNotResolve` as an attribute nobody evaluates
+[ "$RC" = 1 ] || { fail "cast unresolved rule" "a violated couldNotResolve rule exited $RC, not 1: $CAST_UNRES"; S=1; }
+printf '%s\n' "$CAST_UNRES" | grep -q '^resolve-everything (error) \*\* -> \*\* (unresolved) 1$' \
+  || { fail "cast unresolved rule" "the unresolved import is not grouped under its rule: $CAST_UNRES"; S=1; }
+# break: naming the importing module and not the import, which leaves nothing to open
+printf '%s\n' "$CAST_UNRES" | grep -q '^    src/gap.ts:1 -> ./nope (value)$' \
+  || { fail "cast unresolved rule" "the unresolved import carries no site: $CAST_UNRES"; S=1; }
+# a resolved import is not one - break: catching every edge whatever it resolved to
+printf '%s\n' "$CAST_UNRES" | grep -q 'src/x.ts' \
+  && { fail "cast unresolved rule" "a resolved import was reported as unresolved: $CAST_UNRES"; S=1; }
+# the far side is the text nobody could resolve, read as a glob
+# break: matching the to against a module id, which no unresolved import has
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "resolve-everything", "couldNotResolve": true, "to": "./other*" } ] }
+JSON
+CAST_UNRES2="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast unresolved rule" "a to that names other text still caught ./nope: $CAST_UNRES2"; S=1; }
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "resolve-everything", "couldNotResolve": true, "to": "./nop*" } ] }
+JSON
+CAST_UNRES3="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast unresolved rule" "a to matching the text caught nothing: $CAST_UNRES3"; S=1; }
+[ "$S" = 0 ] && ok "cast unresolved rule"
+
+# AC4 severity takes info and ignore beside error and warn
+S=0
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-cycles", "severity": "info", "circular": true } ] }
+JSON
+CAST_INFO="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: counting an info violation as an error, which fails a build over a note
+[ "$RC" = 0 ] || { fail "cast severity levels" "an info violation exited $RC, not 0: $CAST_INFO"; S=1; }
+# break: silencing what does not fail, which makes an info rule unreadable
+printf '%s\n' "$CAST_INFO" | grep -q '^no-cycles (info) \*\* -> \*\* (circular) 2$' \
+  || { fail "cast severity levels" "an info violation was not listed: $CAST_INFO"; S=1; }
+printf '%s\n' "$CAST_INFO" | grep -q '(0 errors)' \
+  || { fail "cast severity levels" "an info violation was counted as an error: $CAST_INFO"; S=1; }
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-cycles", "severity": "ignore", "circular": true } ] }
+JSON
+CAST_IGN="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+# break: evaluating an ignore rule like any other, which lists what was ignored
+[ "$RC" = 0 ] || { fail "cast severity levels" "an ignore rule exited $RC, not 0: $CAST_IGN"; S=1; }
+printf '%s\n' "$CAST_IGN" | grep -q 'no-cycles (ignore)' \
+  && { fail "cast severity levels" "an ignored violation was listed: $CAST_IGN"; S=1; }
+printf '%s\n' "$CAST_IGN" | grep -q '^0 violations (0 errors)' \
+  || { fail "cast severity levels" "an ignored violation was counted: $CAST_IGN"; S=1; }
+# an unknown severity is the check refusing to run, naming the four it knows
+# break: defaulting an unknown severity to error or to warn, which answers for a
+# rule nobody wrote
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-cycles", "severity": "fatal", "circular": true } ] }
+JSON
+CAST_SEV="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 2 ] || { fail "cast severity levels" "an unknown severity exited $RC, not 2: $CAST_SEV"; S=1; }
+printf '%s\n' "$CAST_SEV" | grep -qF 'not error, warn, info or ignore' \
+  || { fail "cast severity levels" "the severities that are known were not named: $CAST_SEV"; S=1; }
+[ "$S" = 0 ] && ok "cast severity levels"
 
 # AC8 a violation listed in .cast/baseline.json leaves the check green; one that
 # is not listed turns it red

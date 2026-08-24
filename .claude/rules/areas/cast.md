@@ -77,6 +77,21 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   The exit code comes from severity, not the count: `warn` is listed and leaves 0; the summary is
   the last line, the only one on a clean project. `die()` is exit 2 throughout: an unreadable or
   invalid `rules.json` is "could not run", not a violation or a pass; validate in `readRules`.
+- A rule names one subject: an edge between two sides, or one shape of the graph - `circular`,
+  `orphan`, `couldNotResolve` (`SUBJECTS`, `readRule` sets `r.subject`), two in one rule is exit 2.
+  On a shape rule `from`/`to` are optional filters, `fromSpec`/`toSpec` fall back to `**` for the
+  listing, an orphan takes no `to`, and an unresolved `to` is a glob over the specifier text (side
+  read with `names` empty), never a layer. `candidates(graph, of, subject)` builds each set and
+  carries the violation it becomes in `.v`, so past it the listing, the baseline and the page read
+  one shape; `hits(rule, c, of)` takes a candidate, not an edge. An orphan is a module with no
+  edge of any resolution and no module edge arriving, `file`/`to` its id, `kind` `orphan`, `line`
+  0, printed `  <path>` under a `(orphan)` header rather than grouped by layer edge.
+- `SEVERITIES` is `error, warn, info, ignore`: only `error` moves the exit code, `ignore` is
+  skipped in `violations()` so it is neither listed nor counted, and an unknown one is exit 2
+  naming all four. Adding one means the message in `readRule` names it too.
+- The cast rule fixtures are two: `CASTFIX`, whose module and edge counts half the suites assert -
+  never add a file to it - and `CASTKIN`, the small one for the shape rules (a cycle, an edge
+  outside it, an orphan, an unresolved import), scanned once with no `layers.json`.
 - An unknown rule attribute is `not evaluated: <rule>: <key>`: a new attribute means adding it to
   `RULE_KEYS` in the same change. `readRule` validates one rule wherever it is written down, and
   `group()` renders rule/edge/site for the check and the plan report alike. Trying a rule before
