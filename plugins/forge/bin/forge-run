@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared implementation behind forge-test / forge-lint / forge-typecheck / forge-build.
+# Shared implementation behind forge-test / forge-lint / forge-typecheck / forge-build / forge-deps.
 #
 # Contract, identical for every kind:
 #   forge-<kind>                  -> exit 0 and one line: "<n>/<n> tests succeeded"

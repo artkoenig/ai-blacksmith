@@ -129,7 +129,9 @@ cat > "$PASSFIX/.forge/config.json" <<'JSON'
                 "typecheck": { "command": "bash ./fake.sh", "parser": "generic" },
                 "build":     { "command": "bash ./crash.sh", "parser": "generic" },
                 "lint":      { "command": "bash ./many.sh", "parser": "generic",
-                               "failingPattern": "^FAIL [^:]+" } } }
+                               "failingPattern": "^FAIL [^:]+" },
+                "deps":      { "command": "bash ./deps.sh", "parser": "generic",
+                               "failingPattern": "^violation [^:]+", "passingPattern": "^ok " } } }
 JSON
 cat > "$PASSFIX/fake.sh" <<'SH'
 echo "warn: E42 error recovered, 0 failures"
@@ -141,6 +143,14 @@ SH
 cat > "$PASSFIX/crash.sh" <<'SH'
 echo "the compiler exploded"
 exit 3
+SH
+cat > "$PASSFIX/deps.sh" <<'SH'
+if [ -n "${DEPS_OK:-}" ]; then echo "ok   no forbidden edge"; exit 0; fi
+echo "violation ui-off-data: src/ui/report.ts:12 -> db/read.ts"
+echo "    value import at src/ui/report.ts:12"
+echo "violation no-cycles: src/a.ts:3 -> src/b.ts"
+echo "    the edge that closes the cycle"
+exit 1
 SH
 cat > "$PASSFIX/many.sh" <<'SH'
 i=1; while [ "$i" -le 25 ]; do echo "FAIL case$i: boom"; i=$((i + 1)); done
@@ -175,6 +185,56 @@ CAPPED="$(cd "$PASSFIX" && CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-lint")"
 printf '%s\n' "$CAPPED" | grep -q "^the first 20 failures" \
   || { fail wrappers "a capped failure list did not say it was capped"; S=1; }
 [ "$S" = 0 ] && ok "wrapper contract"
+
+# --- forge-deps contract ----------------------------------------------------
+# AC8 the dependency check is a wrapper like every other: it runs
+# commands.deps.command and answers on the same three exit codes. It is a shim
+# into forge-run, so what is asserted here is that the kind is wired at all.
+S=0
+DEPS_OUT="$(cd "$PASSFIX" && DEPS_OK=1 CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-deps")"; RC=$?
+# break: no forge-deps on the bin path, or a shim passing a kind nothing configures
+[ "$RC" = 0 ] || { fail "forge-deps contract" "a passing forge-deps did not exit 0"; S=1; }
+# one line, and counted in checks rather than tests - break: NOUN=tests for deps
+[ "$DEPS_OUT" = "1/1 checks succeeded" ] \
+  || { fail "forge-deps contract" "a passing forge-deps did not answer '1/1 checks succeeded'"; S=1; }
+cd "$PASSFIX" || exit 1
+DEPS_OUT="$(CLAUDE_PROJECT_DIR="$PASSFIX" "$BIN/forge-deps")"; RC=$?
+cd "$OLDPWD" || exit 1
+# break: reporting the command's own exit code, or swallowing a failure as 0
+[ "$RC" = 1 ] || { fail "forge-deps contract" "a failing forge-deps did not exit 1"; S=1; }
+# every violation, each with its detail - break: reporting only the first one
+printf '%s\n' "$DEPS_OUT" | grep -q "violation ui-off-data" \
+  || { fail "forge-deps contract" "the failure report did not name the first violation"; S=1; }
+printf '%s\n' "$DEPS_OUT" | grep -q "violation no-cycles" \
+  || { fail "forge-deps contract" "the failure report did not name every violation"; S=1; }
+printf '%s\n' "$DEPS_OUT" | grep -q "the edge that closes the cycle" \
+  || { fail "forge-deps contract" "the failure report did not carry the detail of a violation"; S=1; }
+# a step that could not run at all is neither - break: exiting 1 on a missing command
+(cd "$FIX" && CLAUDE_PROJECT_DIR="$FIX" "$BIN/forge-deps" >/dev/null 2>&1); [ $? = 2 ] \
+  || { fail "forge-deps contract" "an unconfigured forge-deps did not exit 2"; S=1; }
+DEPS_UNCONF="$(cd "$FIX" && CLAUDE_PROJECT_DIR="$FIX" "$BIN/forge-deps" 2>&1)"
+case "$DEPS_UNCONF" in
+  unconfigured*deps*) ;;
+  *) fail "forge-deps contract" "an unconfigured forge-deps did not name the key it wants"; S=1 ;;
+esac
+[ "$S" = 0 ] && ok "forge-deps contract"
+
+# --- bootstrap deps ---------------------------------------------------------
+# AC9 bootstrap wires the dependency check for a project that carries a .cast
+# directory, and allows the wrapper that runs it. A command nobody may run
+# without a prompt is a command that stops the run.
+S=0
+BOOT="plugins/forge/skills/bootstrap/SKILL.md"
+# break: dropping the deps key from the config template bootstrap writes
+grep -q '"deps": { "command": "cast-check"' "$BOOT" \
+  || { fail "bootstrap deps" "$BOOT does not wire commands.deps.command to cast-check"; S=1; }
+# break: writing the key without saying which project gets it
+grep -q '`.cast` directory' "$BOOT" \
+  || { fail "bootstrap deps" "$BOOT does not say a .cast directory is what wires deps"; S=1; }
+# break: leaving forge-deps off the allow list, so every run prompts for it
+grep -qF '"Bash(forge-deps:*)"' "$BOOT" \
+  || { fail "bootstrap deps" "$BOOT does not allow Bash(forge-deps:*)"; S=1; }
+[ "$S" = 0 ] && ok "bootstrap deps"
 
 # --- hook decisions ---------------------------------------------------------
 hook() { echo "$2" | node "plugins/forge/scripts/$1"; }

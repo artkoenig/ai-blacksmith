@@ -5,8 +5,11 @@ paths:
 
 # Wrapper commands
 
-- `forge-run` is the whole implementation. `forge-test`, `forge-lint`, `forge-typecheck` and
-  `forge-build` are two-line shims that `exec` into it with their step name.
+- `forge-run` is the whole implementation. `forge-test`, `forge-lint`, `forge-typecheck`,
+  `forge-build` and `forge-deps` are two-line shims that `exec` into it with their step name.
+  A new kind is a shim and a config key, never a branch in `forge-run`.
+- `forge-deps` is the dependency check - `commands.deps.command`, usually `cast-check`. Only
+  `test` counts tests; every other kind, `deps` among them, answers in `checks`.
 - Two answers, and no third: exit `0` with the single line `<n>/<n> tests succeeded`, or exit `1`
   with every failing test and its detail. Exit `2` is for a step that could not run at all -
   unconfigured, or an argument that is not `--run <pattern>`. Never add a mode; a caller that has

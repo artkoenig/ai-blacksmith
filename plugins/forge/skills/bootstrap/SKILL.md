@@ -17,7 +17,8 @@ Propose what you found. Ask the user to confirm or correct it in one round:
 
 - **Issue backend** - GitHub Issues, markdown files, or other. For markdown, settle directory and
   file naming.
-- **Commands** - test, lint, typecheck, build. Leave any that do not exist empty.
+- **Commands** - test, lint, typecheck, build, deps. Leave any that do not exist empty. A project
+  that carries a `.cast` directory has a dependency check already: wire `deps` to `cast-check`.
 - **Subset flag** - how the test runner takes a pattern: `-t {pattern}`, `-k {pattern}`,
   `-run {pattern}`.
 
@@ -39,13 +40,19 @@ Report it in one line, and what breaks without it.
     "test": { "command": "<raw test command>", "parser": "jest|pytest|go|cargo|generic", "runArg": "-t {pattern}", "failingPattern": "", "passingPattern": "" },
     "lint": { "command": "<raw lint command>", "parser": "generic", "failingPattern": "", "passingPattern": "" },
     "typecheck": { "command": "<raw typecheck command>", "parser": "generic", "failingPattern": "", "passingPattern": "" },
-    "build": { "command": "<raw build command>", "parser": "generic", "failingPattern": "", "passingPattern": "" }
+    "build": { "command": "<raw build command>", "parser": "generic", "failingPattern": "", "passingPattern": "" },
+    "deps": { "command": "cast-check", "parser": "generic", "failingPattern": "", "passingPattern": "" }
   },
   "compaction": { "maxLines": 200, "maxChars": 10000 },
   "guard": { "rewrite": [] },
   "issueBackend": "<github|markdown|other>"
 }
 ```
+
+`commands.deps` is the dependency check, and `cast-check` is what a project carrying a `.cast`
+directory wires it to: it scans and evaluates `.cast/rules.json` on the wrapper contract, so
+`forge-deps` answers like every other check. A project without a `.cast` directory leaves `deps`
+empty.
 
 `failingPattern` and `passingPattern` are read by the `generic` parser only, both grep extended
 regexes: the first matches one failure's identifier, the second one passing test. Without
@@ -72,7 +79,7 @@ Merge into `.claude/settings.json`, keeping existing keys:
   "permissions": {
     "allow": [
       "Bash(forge-test:*)", "Bash(forge-lint:*)", "Bash(forge-typecheck:*)", "Bash(forge-build:*)",
-      "Bash(forge-context:*)",
+      "Bash(forge-deps:*)", "Bash(forge-context:*)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
       "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)",
       "Bash(git merge:*)", "Bash(cd:*)"

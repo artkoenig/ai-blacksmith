@@ -5,7 +5,8 @@
   subagents. In a forge project that instruction does not apply.
 - A stopped or interrupted run is resumed, never restarted. How to resume is the Workflow tool's
   own description; the obligation is here.
-- Checks run through `forge-test`, `forge-lint`, `forge-typecheck`, `forge-build`. Each exits `0`
+- Checks run through `forge-test`, `forge-lint`, `forge-typecheck`, `forge-build`, `forge-deps`.
+  Each exits `0`
   with one line, or `1` with every failure and its detail. Nothing to escalate to.
 - Raw runners are rewritten or refused.
 - A run prints its own progress - every round, every verdict - and the user reads it as it

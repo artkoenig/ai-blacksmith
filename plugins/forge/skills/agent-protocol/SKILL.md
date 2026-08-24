@@ -50,9 +50,10 @@ Use the wrappers. Never the raw runners - they are blocked.
 | `forge-test` | `1` | every failing test, each with its detail |
 | `forge-test --run <pattern>` | `0` or `1` | the same two answers for a subset |
 
-Same contract for `forge-lint`, `forge-typecheck`, `forge-build`. There is nothing to escalate to:
-a `1` already carries what a fix needs. Exit `2` means the step could not run - unconfigured, or a
-flag that does not exist. Never re-run a check to see more; you already saw everything.
+Same contract for `forge-lint`, `forge-typecheck`, `forge-build` and `forge-deps`. There is nothing
+to escalate to: a `1` already carries what a fix needs. Exit `2` means the step could not run -
+unconfigured, or a flag that does not exist. Never re-run a check to see more; you already saw
+everything.
 
 ## Context
 
