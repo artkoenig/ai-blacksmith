@@ -31,6 +31,16 @@ line with the goal and the directory in front of it, `ARGUMENTS="<goal> <dir>"` 
 or it drafts against the whole project. Never widen a root the task gave you, and name the root you
 worked in when you return.
 
+## The plan the task hands you
+
+Your task may name a plan to continue - a bare name under `<root>/.cast/plans/<name>.json`, or a
+path to a plan file anywhere. It reaches the skill on the same line as the goal and the root,
+`ARGUMENTS="<goal> <plan> <dir>"`, and the line answers `cast plan: <name>` with that plan's
+operations and its simulation. Where your task names none, you draft from scratch as always.
+
+A continued plan is edited in place: the file you were handed is the file you write, the whole plan
+is simulated and judged, and it is that file you return.
+
 ## Why you run here
 
 The loop is the cost. Every round prints a before-and-after report - modules, edges, cycles, three
@@ -68,7 +78,8 @@ return an accepted plan.
 
 Your final message is a return value. In this order, nothing else:
 
-1. `plan: <name>` and `file: <absolute path>` of the plan JSON, wherever you wrote it.
+1. `plan: <name>` and `file: <absolute path>` of the plan JSON, wherever you wrote it - the file you
+   continued where your task handed you one.
 2. The verdict - accepted, or rejected with the criterion it failed.
 3. What it improves, then what it costs, then the violation or cycle it adds if there is one. Only
    the numbers that moved, each as before -> after. Never the full simulation output.

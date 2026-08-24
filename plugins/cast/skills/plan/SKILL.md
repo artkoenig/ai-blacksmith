@@ -1,7 +1,7 @@
 ---
 name: plan
 description: Draft a refactoring as a cast plan and judge it on the simulation - what moving, merging, inverting or splitting modules would do to the cycles, the layer metrics and the rule violations. Use before editing any file for a restructuring.
-argument-hint: "[the refactoring goal - optionally followed by the target directory]"
+argument-hint: "[the refactoring goal - optionally a plan to continue, optionally the target directory]"
 allowed-tools: Bash, Read, Write
 ---
 
@@ -14,10 +14,21 @@ root; without one the working directory is the project.
 The plan is yours to write. Nobody hands you one, there is no file to ask for, and a goal like
 "break the cycle between ui and data" is the whole input this skill needs.
 
-!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; fi; echo "cast root: $R"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; ls "$R/.cast/plans" 2>/dev/null || echo "no plan written yet"`
+The one exception is a plan that already exists: a word in the argument that names one - a bare name
+read under `<root>/.cast/plans/<name>.json`, or a path to a plan file anywhere - is a plan to
+continue rather than a plan to draft. A path counts as a plan file only where it ends in `.json`
+and holds an `operations` array; any other file the goal happens to name - a script to move, a
+module to split - is a word of the goal and nothing more.
 
-That is the graph the plan is drafted against, freshly scanned, and any plan already written down.
-`cast root:` is the root; every call below passes it as `--root <root>`.
+!`CAST="$(command -v cast || echo "${CLAUDE_PLUGIN_ROOT:-plugins/cast}/bin/cast")"; A="$ARGUMENTS"; R=.; L="${A##* }"; if [ -n "$L" ] && [ -d "$L" ]; then R="$L"; fi; P=""; for W in $A; do case "$W" in *.json) if [ -f "$W" ] && grep -q '"operations"' "$W"; then P="$W"; fi;; esac; if [ -f "$R/.cast/plans/$W.json" ]; then P="$W"; fi; done; echo "cast root: $R"; echo "cast plan: ${P:-none}"; "$CAST" scan --root "$R" >/dev/null && "$CAST" report --root "$R"; if [ -n "$P" ]; then echo "--- operations ---"; cat "$R/.cast/plans/$P.json" 2>/dev/null || cat "$P"; "$CAST" plan simulate "$P" --root "$R" || echo "that plan does not apply to this graph"; else ls "$R/.cast/plans" 2>/dev/null || echo "no plan written yet"; fi`
+
+That is the graph the plan is drafted against, freshly scanned. `cast root:` is the root; every call
+below passes it as `--root <root>`.
+
+`cast plan: <name>` is a plan handed to you: its operations and its simulation against that graph
+are printed above, and the loop starts from where it stands. `cast plan: none` is a plan to draft
+from scratch - a word that names no plan is not a plan, even where it names an existing file, and
+the listing under it is what the project already holds.
 
 ## The loop
 
@@ -40,6 +51,20 @@ which goal the graph will not give up.
 3. **Judge.** Against the criteria below, on the report and on nothing else.
 4. **Redraft.** A rejected plan is edited and simulated again. Say what you changed and why before
    you write it.
+
+## Continuing a plan you were handed
+
+Where the preamble reported `cast plan: <name>`, that file is the plan. The loop is the same one;
+only the start is different.
+
+- The named file is the one you edit, in place. No copy under a new name, no second plan beside it -
+  its history is git's.
+- An operation you append applies to the graph the operations before it leave behind, not to the
+  scanned one. A module an earlier `move` or `merge` renamed is named by its new id from there on,
+  and the ids to spell are the ones the printed operations leave, read off the plan above.
+- Simulate and judge the whole plan - the operations it arrived with and the ones you added -
+  against the criteria below, never the addition alone. A plan is judged whole, so an operation that
+  arrived with it is yours to defend or to drop.
 
 Every number comes twice, before and after:
 
