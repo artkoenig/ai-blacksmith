@@ -266,6 +266,10 @@ start 0000000 nogit | grep -q "outdated forge plugin" \
 # the setup notice survives - break: losing it when the staleness check is added
 CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q '/forge:bootstrap' \
   || { fail staleness "the bootstrap notice was lost"; S=1; }
+# and it instructs the session to run bootstrap itself - break: softening it back into advice for
+# the human, which is what let a session read it as background and leave the project unconfigured
+CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q 'Invoke the forge:bootstrap skill' \
+  || { fail staleness "the bootstrap notice did not instruct the session to run bootstrap"; S=1; }
 # a set-up project is handed the plugin's own rules, so an update carries them and
 # no second bootstrap is needed - break: writing them into the project instead
 CLAUDE_PROJECT_DIR="$FIX" start "${TIP:0:7}" mkt | grep -q 'forge-test' \

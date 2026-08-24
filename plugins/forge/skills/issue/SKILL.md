@@ -64,8 +64,9 @@ that survives the work and reads as a failure nobody caused. Scope it and run it
 What the grounding found shapes the criteria and their verify commands. It does not go into the
 issue. The implementer finds its own way. A map written into an issue is maintained by nobody.
 
-Persist through the project's `issue-backend` skill. Where it does not exist, stop and say
-`/forge:bootstrap` has not run.
+Persist through the project's `issue-backend` skill. Where it does not exist, invoke the
+`forge:bootstrap` skill and then persist - an issue that cannot be stored was written for nothing.
+Where bootstrap writes no config because the project has nothing to detect yet, say that and stop.
 
 ## 4. Decide the cut
 
