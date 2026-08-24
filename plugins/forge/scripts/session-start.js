@@ -100,12 +100,14 @@ if (config(input)) {
   // rather than a round.
   say.push(
     'forge is installed and this project is not set up for it. Invoke the ' +
-      'forge:bootstrap skill now, before the work this session was opened for - ' +
-      'do not ask for permission, and do not leave /forge:bootstrap to the human. ' +
-      "It detects the project's commands and issue backend itself and asks only " +
-      'where that is genuinely ambiguous, so it usually costs no round. Report in ' +
-      'one line what it wrote. It handles one case on its own: a project with no ' +
-      'build system yet gets nothing written.'
+      'forge:bootstrap skill yourself - do not ask for permission, and do not ' +
+      'leave /forge:bootstrap to the human. Where the repository already holds ' +
+      'code, invoke it now, before the work this session was opened for: it reads ' +
+      "the project's commands and issue backend off the files and asks only where " +
+      'they are genuinely ambiguous. Where it is empty, there is no project to set ' +
+      'up yet - invoke it once the human has said what they want built, and it ' +
+      'settles the stack, the checks, the architecture and the first issues in one ' +
+      'round. Report in one line what it wrote.'
   )
 }
 const outdated = stale()

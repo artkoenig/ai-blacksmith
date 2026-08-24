@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: Set up a project for forge - detect the commands and the issue backend, then write the adapter, the check commands, the rules and the settings. Runs unattended where the repository answers, and asks only where it does not. Use before the first /forge:issue in a repository, and whenever a session finds the project unconfigured.
+description: Set up a project for forge - detect the commands and the issue backend, then write the adapter, the check commands, the rules and the settings. Runs unattended where the repository answers, and asks only where it does not. On a project that does not exist yet it asks about the product only, recommends a stack and an architecture that follow from the answers, and comes out with the scaffold and the first issues. Use before the first /forge:issue in a repository, and whenever a session finds the project unconfigured.
 argument-hint: "[no arguments]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -16,10 +16,11 @@ the repository genuinely leaves open.
 Read `package.json` scripts, `pyproject.toml`, `Makefile`, `go.mod`, `Cargo.toml`, the Gradle or
 Maven build files, or the CI workflow. Run every command before you write it down.
 
-**Nothing to detect is an answer.** A repository with no build system - a fresh checkout, a project
-whose first source file is not written yet - gets no config at all. Say so in one line and stop.
-A config with empty commands silences the session-start notice for good, so the project that most
-needs setting up becomes the one that never gets it. Running again later costs nothing.
+**Nothing to detect sends you to section 2.** A repository with no build system - a fresh checkout,
+a project whose first source file is not written yet - has its answers in the human rather than in
+the files. Never write a config from what you found there anyway: empty commands silence the
+session-start notice for good, so the project that most needs setting up becomes the one that never
+gets it.
 
 **Issue backend.** The first that holds:
 
@@ -40,14 +41,79 @@ nothing choosing between them, an issues folder and an active GitHub tracker bot
 carrying only the questions the repository left open. What you decided yourself goes in the report
 instead, where it is cheap to correct.
 
-## 2. Check the precondition
+## 2. A project that does not exist yet: ask about it, recommend the rest
+
+Reaching here means the session is about to start something. Where nobody has said so - an empty
+checkout and a request about something else entirely - stop and say nothing. An empty directory is
+not a project, and a bootstrap nobody asked for is a round nobody gets back.
+
+Where they have, ask once, and ask about the product rather than about the machine. Nobody has to
+make a technical decision to get a project:
+
+- **What is being built, and who uses it.** Three or four user stories in their own words - "as a
+  gardener I want to see what to sow this month". Everything below is derived from these, so take
+  them as they are said rather than tidying them into requirements.
+- **What the first version must do.** The boundary of the MVP - what is in it, and what is
+  deliberately left out.
+- **Where it runs, and what it must work without.** A phone, a browser, a terminal, a server; with
+  no network, with no account, with no sign-up. These are facts about the product, not technical
+  choices, and they decide more of the stack than a preference would.
+
+Never ask which language, which framework, which database, or how the code should be layered. A
+human who wants to decide those says so unprompted; one who does not still gets a project.
+
+Decide the issue backend from the remote, by section 1's order. Not everything is a question just
+because the files are empty.
+
+### Derive the stack and the layers, then recommend
+
+Read the stories for what actually constrains the build - the surface they need, what is stored and
+for how long, whether it works offline, who else has to read the code - and name the two or three
+stacks that fit. Put them to the human as one recommendation with the runners-up visible and the
+recommendation preselected, each with what it buys and what it costs in one line, in the terms of
+their stories rather than the industry's: "works on the phone with no server and no account" says
+more than "local-first".
+
+**Prefer a stack whose checks run where the agents run.** A recommendation whose tests need a
+device, an emulator or a paid service makes every issue's verify command theatre. Where the surface
+cannot be checked headlessly, say so and split it: the logic into a module the checks reach, the
+surface into one they do not, and cut the issues along that line. That split is a finding to report,
+not a preference - name what cannot be verified, and why.
+
+The layers come from the same reading. The nouns of the stories are what is stored, the verbs are
+the logic, what the human sees is the surface: two to four names, and which may depend on which.
+Recommend them the same way. Where the stories describe screens, the surface is real - draft them
+with the `design` skill before any issue is cut, because a screen settles an argument that prose
+keeps open.
+
+An override is not an argument. Take it, say in one line what it changes about the checks, and go
+on. Where nothing is overridden, the recommendation stands and the project gets built.
+
+Then, in this order:
+
+1. **Scaffold, minimally.** The build file, a directory per layer, and one real test that passes.
+   Nothing else - features are what the issues are for. Skip it and every command in the config is
+   one that has never run, and the wrappers answer `unconfigured` to the first agent that calls one.
+2. **Section 4, against the scaffold.** The commands are real now, so run them, exactly as they are
+   run for a project that already had code.
+3. **The architecture, as an intention.** `.cast/layers.json` maps one glob per layer to its name,
+   `.cast/rules.json` holds the dependencies those layers may not have. Globs describe the tree that
+   is planned, so both are written before the code that fills them, and every increment is measured
+   against them from the first. cast reads a language only through an adapter and ships few - where
+   the project's has none, say so in one line: the layers are recorded, the check is unavailable
+   until an adapter exists, and writing one is an issue of its own.
+4. **The MVP issues.** Invoke the `forge:issue` skill once per item of the boundary. It carries the
+   criteria discipline and decides the cut - repeating either here would be a second copy to
+   maintain - and it does not re-ask what this interview settled.
+
+## 3. Check the precondition
 
 Report it in one line, and what breaks without it.
 
 - **Workflows.** `/forge:work` is a workflow. Needs Claude Code v2.1.154 or later and a paid plan;
   on Pro, enabled in `/config`. Off means there is no execution path.
 
-## 3. Write the files
+## 4. Write the files
 
 `.forge/config.json`:
 
@@ -123,12 +189,13 @@ git check-ignore -v .claude/rules/probe.md
 Anything printed names the rule that swallows it - usually a blanket `.claude/`. Append
 `!.claude/rules/` and check again.
 
-## 4. Verify, then report
+## 5. Verify, then report
 
 Run `forge-test`. A green project answers one line and exits `0`; a red one lists its failures and
 exits `1`. Exit `2` means the config is wrong - fix it before reporting success.
 
 Report in five lines at most: backend, commands wired, the two preconditions, next step
-(`/forge:issue`). Say which of them you decided rather than asked, so a wrong call is cheap to
-correct. Where the session-start notice invoked you rather than the human, stop there and get on
-with the work the session was opened for - setting the project up is not what it was opened for.
+(`/forge:issue`, or `/forge:work` where section 2 already wrote the issues - name them and their
+ids). Say which of it you decided rather than asked, so a wrong call is cheap to correct. Where the
+session-start notice invoked you rather than the human, stop there and get on with the work the
+session was opened for - unless that work was the project itself, which section 2 has just set up.

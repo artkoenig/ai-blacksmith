@@ -270,6 +270,10 @@ CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q '/forge:bootstr
 # the human, which is what let a session read it as background and leave the project unconfigured
 CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q 'Invoke the forge:bootstrap skill' \
   || { fail staleness "the bootstrap notice did not instruct the session to run bootstrap"; S=1; }
+# an empty checkout is not set up in the first turn - break: dropping the second case, which sends
+# bootstrap at a repository that can answer nothing and a human who has not said what it is for
+CLAUDE_PROJECT_DIR=/nonexistent start "${TIP:0:7}" mkt | grep -q 'Where it is empty' \
+  || { fail staleness "the bootstrap notice did not hold bootstrap back on an empty repository"; S=1; }
 # a set-up project is handed the plugin's own rules, so an update carries them and
 # no second bootstrap is needed - break: writing them into the project instead
 CLAUDE_PROJECT_DIR="$FIX" start "${TIP:0:7}" mkt | grep -q 'forge-test' \
