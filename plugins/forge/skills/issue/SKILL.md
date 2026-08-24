@@ -56,17 +56,21 @@ skill with what the interview settled: the screens or controls the work adds, wh
 and the states that have to be visible. It comes back with a canvas the user can open and refine.
 
 Drawing it first is what makes the criteria specific - what the screen shows becomes something the
-issue can assert, instead of a sentence about a screen nobody has seen. Put the canvas link in the
-issue's goal, as the one reference the criteria are written against.
+issue can assert, instead of a sentence about a screen nobody has seen. The canvas is the one
+reference the criteria are written against, so it goes in the issue's own `## Mockup` section.
 
 On a no, on work with nothing to draw, or where the `design` skill is not installed, skip this and
 go on.
 
 ## 4. Write it
 
-Use `${CLAUDE_SKILL_DIR}/issue-template.md`. The issue holds a goal, its acceptance criteria,
-and what is out of scope. Nothing else: no file paths, no line ranges, no plan, no agent.
+Use `${CLAUDE_SKILL_DIR}/issue-template.md`. The issue holds a goal, the mockup where one was
+drafted, its acceptance criteria, and what is out of scope. Nothing else: no file paths, no line
+ranges, no plan, no agent.
 
+- Fill `## Mockup` with the published link the `design` skill came back with, and nothing else.
+  Where no canvas was drafted, drop the section - an empty heading reads as a mockup that went
+  missing.
 - Number the criteria `AC1`, `AC2`, … One verifiable statement each.
 - Append `| verify: <command>` wherever a command decides it. Prefer `forge-test --run <pattern>`.
 

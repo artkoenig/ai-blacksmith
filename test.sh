@@ -444,6 +444,20 @@ sed -n "${DL},$((WL-1))p" "$F" | grep -q '`design` skill' \
 # break: dropping Skill from allowed-tools, so the design skill cannot be invoked
 grep -q '^allowed-tools:.*Skill' "$F" \
   || { fail mockup "the issue skill can no longer invoke the design skill"; S=1; }
+# break: dropping the Mockup section from the issue template
+T=plugins/forge/skills/issue/issue-template.md
+grep -qiE '^## .*(Mockup|Design|Canvas)' "$T" \
+  || { fail mockup "the issue template carries no section for the drafted canvas"; S=1; }
+# the "Write it" step, from its heading to the next one
+W="$(awk -v s="$WL" 'NR>s && /^## /{exit} NR>=s' "$F")"
+# break: dropping the instruction to fill that section with the published link
+printf '%s\n' "$W" | grep -qi 'Mockup' \
+  || { fail mockup "writing the issue no longer fills the mockup section"; S=1; }
+printf '%s\n' "$W" | grep -qi 'link' \
+  || { fail mockup "the mockup section is no longer filled with the published link"; S=1; }
+# break: dropping the instruction to remove the section where nothing was drafted
+printf '%s\n' "$W" | grep -qi 'drop the section' \
+  || { fail mockup "an issue with no mockup now keeps an empty section"; S=1; }
 [ "$S" = 0 ] && ok "a screen is drawn before it is specified"
 
 # --- the run starts on demand -----------------------------------------------
