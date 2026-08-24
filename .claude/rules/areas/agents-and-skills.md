@@ -22,3 +22,6 @@ paths:
   `ToolSearch` too, and must load the schema with `select:<name>` before the first call.
 - A `tools:` edit is not live the way the body is: agents spawned in the same session after the
   edit still showed the old surface. Only a new session was not tried - assume one is needed.
+- `test.sh` asserts skill structure by grepping numbered headings (`^## [0-9]\+\. <name>$`) and
+  comparing their line numbers. Inserting a step means renumbering every later heading, and a
+  heading reworded without updating `test.sh` fails a suite that never mentions the wording.
