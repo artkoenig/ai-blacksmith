@@ -5,8 +5,15 @@
 //   cast scan [--root <dir>]     writes the graph to a scratch directory keyed
 //                                by the root, and prints the file it wrote
 //   cast report [--root <dir>]   reads it and says what is wrong
-//   cast check [--root <dir>]    the rules of <root>/.cast/rules.json, evaluated
-//                                against the module graph; exit 1 on an error
+//   cast check [--json] [--root <dir>]
+//                                the rules of <root>/.cast/rules.json, evaluated
+//                                against the module graph; exit 1 on an error,
+//                                --json the same answer as one JSON document
+//   cast init [--root <dir>]     a starter <root>/.cast/layers.json and
+//                                rules.json, refusing to overwrite either
+//   cast import <file> [--root <dir>]
+//                                a dependency-cruiser configuration translated
+//                                into <root>/.cast/rules.json, once
 //   cast plan simulate <name|file> [--root <dir>]
 //                                a refactoring written down before it is done:
 //                                <root>/.cast/plans/<name>.json applied to a copy
@@ -1855,10 +1862,50 @@ function group(found, forbidden) {
   return lines
 }
 
-function check(graph, of, rules, baseline) {
+// One evaluation, two renderings. The exit code is decided here and never
+// again, so `--json` cannot answer with a code the plain run would not give.
+function checkResult(graph, of, rules, baseline) {
   const { live: found, held } = partition(violations(graph, of, rules), baseline)
-  const edges = moduleEdges(graph)
   const errors = found.filter((v) => v.severity === 'error').length
+  return {
+    found,
+    held,
+    counts: {
+      violations: found.length,
+      errors,
+      moduleEdges: moduleEdges(graph),
+      rules: rules.forbidden.length,
+      baselined: held.length,
+    },
+    code: errors ? 1 : 0,
+  }
+}
+
+// The machine-readable answer: every violation with the rule that caught it and
+// the site to open, and the counts the summary line prints, so a caller reading
+// JSON never has to parse the listing back.
+function checkJson(graph, of, rules, baseline) {
+  const { found, counts, code } = checkResult(graph, of, rules, baseline)
+  const doc = {
+    violations: found.map((v) => ({
+      rule: v.rule,
+      severity: v.severity,
+      file: v.file,
+      line: v.line,
+      to: v.to,
+      kind: v.kind,
+      edge: v.edge,
+    })),
+    notEvaluated: rules.notEvaluated,
+    counts,
+  }
+  return { text: JSON.stringify(doc, null, 2), code }
+}
+
+function check(graph, of, rules, baseline) {
+  const { found, held, counts, code } = checkResult(graph, of, rules, baseline)
+  const edges = counts.moduleEdges
+  const errors = counts.errors
   const lines = group(found, rules.forbidden)
   for (const n of rules.notEvaluated) lines.push(`not evaluated: ${n}`)
   // The last line is the whole answer where nothing is wrong: one line, the
@@ -1868,7 +1915,7 @@ function check(graph, of, rules, baseline) {
       `${plural(edges, 'module edge')} against ${plural(rules.forbidden.length, 'rule')}` +
       (held.length ? `, ${held.length} baselined` : '')
   )
-  return { text: lines.join('\n'), code: errors ? 1 : 0 }
+  return { text: lines.join('\n'), code }
 }
 
 // The ratchet: a baseline may replace one that holds at least as many
@@ -2177,8 +2224,204 @@ function simulate(graph, after, rules, plan, ruleFile) {
 
 // --- cli --------------------------------------------------------------------
 
+// --- importing a dependency-cruiser configuration ---------------------------
+
+// A project that already has a .dependency-cruiser.js has its rules written
+// down; translating them once is cheaper than writing them again, and honest
+// about what did not survive. The translation runs once and writes
+// `.cast/rules.json` - no dependency-cruiser file is ever read at check time.
+//
+// A dependency-cruiser path is a regular expression and a cast rule side is a
+// glob, so the plain shapes are converted here: `^` and `$` are the anchors a
+// glob has by construction, `.*` is `**`, an escaped metacharacter is the
+// character itself. Anything else - a character class, an alternation, a
+// quantifier - has no glob that means the same thing, and answers null so the
+// rule carrying it is reported rather than translated into something narrower
+// or wider than what was written.
+const RE_META = '.+?()[]{}|*^$'
+
+function globOf(src) {
+  if (typeof src !== 'string' || !src) return null
+  let s = src
+  let anchoredStart = false
+  let anchoredEnd = false
+  if (s.startsWith('^')) {
+    anchoredStart = true
+    s = s.slice(1)
+  }
+  if (s.endsWith('$') && !s.endsWith('\\$')) {
+    anchoredEnd = true
+    s = s.slice(0, -1)
+  }
+  let out = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\') {
+      const n = s[++i]
+      // An escaped `*` or `?` is a literal a glob spells as a wildcard: there is
+      // no way to write it, so the rule is not translated.
+      if (n === undefined || n === '*' || n === '?') return null
+      out += n
+      continue
+    }
+    if (c === '.' && s[i + 1] === '*') {
+      i++
+      out += '**'
+      continue
+    }
+    if (RE_META.includes(c)) return null
+    out += c
+  }
+  if (!out) return null
+  // A regex is a search, a glob is a match: what was not anchored has to stay
+  // open at that end or the translated rule catches less than the one written.
+  if (!anchoredStart) out = '**' + out
+  if (!anchoredEnd) out = out + '**'
+  return out
+}
+
+// The attributes that survive. Everything else on a rule - `pathNot`,
+// `dependencyTypes`, `license`, a `path` that is a list - is named on stderr and
+// takes its rule with it.
+const IMPORT_SIDE = {
+  from: { path: 'from', orphan: 'orphan' },
+  to: { path: 'to', circular: 'circular', couldNotResolve: 'couldNotResolve' },
+}
+const IMPORT_RULE_KEYS = ['name', 'severity', 'comment', 'from', 'to']
+
+function translate(r, at) {
+  const notes = []
+  const out = {}
+  const name = typeof r.name === 'string' && r.name ? r.name : at
+  out.name = name
+  if (r.severity !== undefined) out.severity = r.severity
+  for (const k of Object.keys(r)) if (!IMPORT_RULE_KEYS.includes(k)) notes.push(k)
+  for (const side of ['from', 'to']) {
+    const v = r[side]
+    if (v === undefined || v === null) continue
+    if (typeof v !== 'object' || Array.isArray(v)) {
+      notes.push(side)
+      continue
+    }
+    for (const [key, value] of Object.entries(v)) {
+      const known = IMPORT_SIDE[side][key]
+      if (!known) {
+        notes.push(`${side}.${key}`)
+        continue
+      }
+      if (key === 'path') {
+        const glob = globOf(value)
+        if (glob === null) notes.push(`${side}.path`)
+        else out[known] = glob
+        continue
+      }
+      // The shape attributes are booleans; a false one is the rule not asking
+      // for that shape at all, so there is nothing to translate and nothing to
+      // report.
+      if (value === true) out[known] = true
+      else if (value !== false) notes.push(`${side}.${key}`)
+    }
+  }
+  return { name, rule: out, notes }
+}
+
+function readCruiser(file) {
+  let raw
+  if (file.endsWith('.json')) {
+    try {
+      raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch (e) {
+      die(`${file} could not be read: ${e.message}`)
+    }
+  } else {
+    try {
+      raw = require(file)
+    } catch (e) {
+      die(`${file} could not be read: ${e.message}`)
+    }
+    if (raw && raw.default && !raw.forbidden && !raw.allowed) raw = raw.default
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    die(`${file} is no dependency-cruiser configuration`)
+  return raw
+}
+
+function importCruiser(root, fileArg) {
+  const file = path.resolve(process.cwd(), fileArg)
+  if (!file.endsWith('.json') && !file.endsWith('.js'))
+    die(`${fileArg} is neither a .json nor a .js dependency-cruiser configuration`)
+  const raw = readCruiser(file)
+  const rules = { forbidden: [], allowed: [] }
+  const skipped = []
+  for (const key of ['forbidden', 'allowed']) {
+    const list = raw[key]
+    if (list === undefined) continue
+    if (!Array.isArray(list)) die(`${file}: ${key} is not an array of rules`)
+    list.forEach((r, i) => {
+      if (!r || typeof r !== 'object' || Array.isArray(r)) die(`${file}: ${key}[${i}] is not a rule`)
+      const { name, rule, notes } = translate(r, `${key}[${i}]`)
+      // A rule is written whole or not at all: half of a rule is a check that
+      // answers about something nobody wrote down.
+      if (notes.length) for (const n of notes) skipped.push(`not translated: ${name}: ${n}`)
+      else rules[key].push(rule)
+    })
+  }
+  const out = path.join(root, '.cast', 'rules.json')
+  fs.mkdirSync(path.dirname(out), { recursive: true })
+  fs.writeFileSync(out, JSON.stringify(rules, null, 2) + '\n')
+  if (skipped.length) process.stderr.write(skipped.join('\n') + '\n')
+  return {
+    text:
+      `${path.relative(root, out) || out}: ` +
+      `${plural(rules.forbidden.length, 'forbidden rule')}, ` +
+      `${plural(rules.allowed.length, 'allowed rule')}` +
+      (skipped.length ? `, ${skipped.length} not translated` : ''),
+    code: 0,
+  }
+}
+
+// --- the files a project starts from ----------------------------------------
+
+// The first layering of a project is the one it already has on disk: its top
+// directories. It is a starting point to edit, not an answer - which is why it
+// is written once and never regenerated, and why an existing file stops the
+// command rather than being improved upon.
+function starterLayers(graph) {
+  const layers = {}
+  const tops = new Set()
+  let root = false
+  for (const m of graph.modules) {
+    const i = m.id.indexOf('/')
+    if (i === -1) root = true
+    else tops.add(m.id.slice(0, i))
+  }
+  for (const t of [...tops].sort()) layers[`${t}/**`] = t
+  if (root) layers['*'] = 'root'
+  return layers
+}
+
+function init(root, graph) {
+  const files = [
+    [path.join('.cast', 'layers.json'), starterLayers(graph)],
+    [path.join('.cast', 'rules.json'), { forbidden: [], allowed: [] }],
+  ]
+  const existing = files.map(([rel]) => rel).filter((rel) => fs.existsSync(path.join(root, rel)))
+  if (existing.length)
+    return {
+      text: `refused: ${existing.join(' and ')} already exists - init never overwrites`,
+      code: 1,
+    }
+  fs.mkdirSync(path.join(root, '.cast'), { recursive: true })
+  for (const [rel, body] of files)
+    fs.writeFileSync(path.join(root, rel), JSON.stringify(body, null, 2) + '\n')
+  return { text: files.map(([rel]) => rel).join('\n'), code: 0 }
+}
+
 const USAGE =
-  'usage: cast <scan|report|check> [--root <dir>]\n' +
+  'usage: cast <scan|report> [--root <dir>]\n' +
+  '       cast check [--json] [--root <dir>]\n' +
+  '       cast init [--root <dir>]\n' +
+  '       cast import <dependency-cruiser config> [--root <dir>]\n' +
   '       cast plan simulate <name|file> [--root <dir>]\n' +
   '       cast baseline [--update] [--root <dir>]\n' +
   '       cast edges --from <layer> --to <layer> [--root <dir>]\n' +
@@ -2200,15 +2443,23 @@ function main(argv) {
   // before the flag loop, which knows only flags.
   let sub = null
   let ruleArg = null
+  let asJson = false
   let first = 1
   if (cmd === 'plan') {
     sub = argv[1]
     ruleArg = argv[2]
     first = 3
   }
+  // `import` takes the file it reads as a positional, before the flags, the way
+  // `plan` takes its name.
+  if (cmd === 'import') {
+    ruleArg = argv[1]
+    first = 2
+  }
   for (let i = first; i < argv.length; i++) {
     if (argv[i] === '--root' && argv[i + 1]) root = path.resolve(argv[++i])
     else if (cmd === 'baseline' && argv[i] === '--update') update = true
+    else if (cmd === 'check' && argv[i] === '--json') asJson = true
     else if (cmd === 'edges' && argv[i] === '--from' && argv[i + 1]) from = argv[++i]
     else if (cmd === 'edges' && argv[i] === '--to' && argv[i + 1]) to = argv[++i]
     else if (cmd === 'render' && argv[i] === '--mermaid') asMermaid = true
@@ -2248,12 +2499,31 @@ function main(argv) {
     const { of, names } = assign(graph, layerRules(root))
     const rules = readRules(root, names)
     // No rules file is not a pass with nothing said: it is the one thing that
-    // makes a green check meaningless, so it names itself.
+    // makes a green check meaningless, so it names itself. `--json` says the
+    // same thing in the document it promised: a caller parsing stdout gets JSON
+    // whatever the answer is.
     if (!rules) {
-      process.stdout.write(`no rules: write ${path.join('.cast', 'rules.json')} to check any\n`)
+      const none = `no rules: write ${path.join('.cast', 'rules.json')} to check any`
+      const empty = { forbidden: [], allowed: [], notEvaluated: [] }
+      process.stdout.write(
+        (asJson
+          ? JSON.stringify({ ...JSON.parse(checkJson(graph, of, empty, null).text), message: none }, null, 2)
+          : none) + '\n'
+      )
       return 0
     }
-    const answer = check(graph, of, rules, readBaseline(root))
+    const answer = (asJson ? checkJson : check)(graph, of, rules, readBaseline(root))
+    process.stdout.write(answer.text + '\n')
+    return answer.code
+  }
+  if (cmd === 'init') {
+    const answer = init(root, readGraph(out))
+    process.stdout.write(answer.text + '\n')
+    return answer.code
+  }
+  if (cmd === 'import') {
+    if (!ruleArg) die(USAGE)
+    const answer = importCruiser(root, ruleArg)
     process.stdout.write(answer.text + '\n')
     return answer.code
   }
@@ -2348,6 +2618,7 @@ module.exports = {
   scan, graphFile, report, cycles, imports, layerRules, layerOf, assign, layerEdges, mermaid, html,
   viewData, viewAt, layout, treeId, treeOf, viewTree, layoutTree, marker, toggleOpen, groupIds,
   edgesAt, edgeLines,
-  readRules, violations, check, readBaseline, ratchet,
+  readRules, violations, check, checkJson, readBaseline, ratchet,
+  globOf, translate, importCruiser, starterLayers, init,
   readPlan, planFile, simulateGraph, simulate, layerMetrics,
 }

@@ -6,7 +6,14 @@ The module graph of a project, and what is wrong with it.
 cast scan [--root <dir>]     writes the graph outside the checkout and prints
                              the file it wrote
 cast report [--root <dir>]   reads it and says what is wrong
-cast check [--root <dir>]    evaluates <root>/.cast/rules.json against the graph
+cast check [--json] [--root <dir>]
+                             evaluates <root>/.cast/rules.json against the graph;
+                             --json writes the same answer as one JSON document
+cast init [--root <dir>]     writes a starter <root>/.cast/layers.json and an
+                             empty rules.json, and overwrites neither
+cast import <file> [--root <dir>]
+                             translates a dependency-cruiser configuration into
+                             <root>/.cast/rules.json, once
 cast plan simulate <name|file> [--root <dir>]
                              applies <root>/.cast/plans/<name>.json to a copy of
                              the graph and says what it would change
@@ -39,11 +46,39 @@ scratch directory of its own; export it once and `scan` and the command reading 
 subdirectory alone - `.cast/layers.json`, `.cast/rules.json` and `.cast/plans/` are then read
 under it too, so a run against one part of a project is configured under that part.
 
+`check --json` writes one JSON document to stdout: `violations`, each with the rule that caught it,
+its severity, the file and line of the import, the module imported, the edge kind and the layer edge
+it sits on; `notEvaluated`, the rule attributes nothing evaluated; and `counts`, the numbers the
+summary line prints - `violations`, `errors`, `moduleEdges`, `rules` and `baselined`. The exit code
+is decided once for both renderings, so it is the one the same run gives without the flag.
+
 `report` counts the modules and the edges by kind and breaks them down by resolution, names every
 import that resolved to nothing and every one it could not read, and names every module of every
 dependency cycle - the whole strongly connected component, not the
 module the walk entered it through. It also places every module in exactly one layer and sizes each
 one.
+
+## Starting, and coming from dependency-cruiser
+
+`init` reads the scanned graph and writes the two files a project is configured by: a
+`.cast/layers.json` mapping the top directory of every module to a layer of that name (plus `*` ->
+`root` where modules sit at the top level), and a `.cast/rules.json` holding no rules at all. Both
+are a starting point to edit, so `init` never overwrites: where either file is already there it
+writes nothing and exits 1, naming what is in the way.
+
+`import` translates a dependency-cruiser configuration - `.json` or `.js`, read once, never at
+check time - into `.cast/rules.json`. What survives is `name`, `severity`, `from.path`, `from.orphan`,
+`to.path`, `to.circular` and `to.couldNotResolve`; `comment` is dropped. A dependency-cruiser path
+is a regular expression and a cast rule side is a glob, so the plain shapes are converted: `^` and
+`$` are the anchors a glob has anyway, `.*` becomes `**`, an escaped metacharacter becomes the
+character, and what is left unanchored stays open at that end. A rule carrying anything else - a
+character class or an alternation in a path, `pathNot`, `dependencyTypes`, a license attribute - is
+not written at all, and each such attribute is named on stderr as `not translated: <rule>:
+<attribute>`. Half a rule would check for something nobody wrote down.
+
+An `allowed` rule is carried across by its sides, and it means what cast means by it: an exception
+that drops a forbidden rule's hit, not dependency-cruiser's whitelist of everything permitted. Read
+the translated file before trusting it.
 
 ## Layers
 

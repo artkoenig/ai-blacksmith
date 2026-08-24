@@ -1797,6 +1797,164 @@ printf '%s\n' "$CAST_SEV" | grep -qF 'not error, warn, info or ignore' \
   || { fail "cast severity levels" "the severities that are known were not named: $CAST_SEV"; S=1; }
 [ "$S" = 0 ] && ok "cast severity levels"
 
+# --- cast: the check as one JSON document -----------------------------------
+# AC5 cast check --json answers with every violation and the counts of the
+# summary line, on the exit code the same run gives without the flag
+S=0
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-leaf", "severity": "error", "from": "src/x.ts", "to": "src/leaf.ts" },
+                 { "name": "no-cycles", "severity": "warn", "circular": true } ] }
+JSON
+CAST_JSON="$(cd "$CASTKIN" && "$CAST_BIN" check --json 2>/dev/null)"; RC=$?
+CAST_JTEXT="$(cd "$CASTKIN" && "$CAST_BIN" check 2>/dev/null)"; TRC=$?
+# break: --json falling through to the listing, which no parser reads
+CAST_JFIELDS="$(printf '%s' "$CAST_JSON" | node -e '
+let s = ""
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const d = JSON.parse(s)
+  const v = d.violations.find((v) => v.rule === "no-leaf") || {}
+  console.log([v.rule, v.severity, v.file, v.line, v.to, v.kind].join("|"))
+  const c = d.counts || {}
+  console.log([c.violations, c.errors, c.moduleEdges, c.rules, c.baselined].join("|"))
+})' 2>&1)" \
+  || { fail "cast check json" "--json did not write one JSON document: $CAST_JSON"; S=1; }
+# break: dropping the line, the kind or the imported module from a violation,
+# which leaves nothing to open
+printf '%s\n' "$CAST_JFIELDS" | grep -qx 'no-leaf|error|src/x.ts|2|src/leaf.ts|value' \
+  || { fail "cast check json" "the violation does not carry its rule, severity, site, module and kind: $CAST_JFIELDS"; S=1; }
+# break: leaving the counts of the summary line out of the document
+printf '%s\n' "$CAST_JFIELDS" | grep -qx '3|1|3|2|0' \
+  || { fail "cast check json" "the counts are not the ones the summary line prints: $CAST_JFIELDS / $CAST_JTEXT"; S=1; }
+printf '%s\n' "$CAST_JTEXT" | grep -q '^3 violations (1 error) in 3 module edges against 2 rules$' \
+  || { fail "cast check json" "the summary line the counts must mirror changed: $CAST_JTEXT"; S=1; }
+# break: answering 0 from the json branch, which hides every error from a build
+[ "$RC" = "$TRC" ] || { fail "cast check json" "--json exited $RC where the same run without it exited $TRC"; S=1; }
+[ "$RC" = 1 ] || { fail "cast check json" "a violated error rule exited $RC, not 1: $CAST_JSON"; S=1; }
+# a baselined violation is counted where the text counts it
+# break: counting the baselined ones as live, or dropping the count entirely
+cat > "$CASTKIN/.cast/baseline.json" <<'JSON'
+{ "violations": [ { "rule": "no-leaf", "file": "src/x.ts", "to": "src/leaf.ts", "kind": "value" } ] }
+JSON
+CAST_JBASE="$(cd "$CASTKIN" && "$CAST_BIN" check --json 2>/dev/null)"; RC=$?
+printf '%s' "$CAST_JBASE" | node -e '
+let s = ""
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const c = JSON.parse(s).counts
+  console.log([c.violations, c.errors, c.baselined].join("|"))
+})' 2>/dev/null | grep -qx '2|0|1' \
+  || { fail "cast check json" "a baselined violation is not counted as one: $CAST_JBASE"; S=1; }
+[ "$RC" = 0 ] || { fail "cast check json" "a fully baselined error exited $RC, not 0"; S=1; }
+rm -f "$CASTKIN/.cast/baseline.json"
+# a clean run is a document too - break: printing nothing, or the plain line
+cat > "$CAST_KIN_RULES" <<'JSON'
+{ "forbidden": [ { "name": "no-lone-to-x", "severity": "error", "from": "src/lone.ts", "to": "src/x.ts" } ] }
+JSON
+CAST_JOK="$(cd "$CASTKIN" && "$CAST_BIN" check --json 2>/dev/null)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast check json" "a clean --json run exited $RC, not 0: $CAST_JOK"; S=1; }
+printf '%s' "$CAST_JOK" | node -e '
+let s = ""
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const d = JSON.parse(s)
+  if (!Array.isArray(d.violations) || d.violations.length) process.exit(1)
+})' 2>/dev/null \
+  || { fail "cast check json" "a clean run did not answer with an empty violation list: $CAST_JOK"; S=1; }
+[ "$S" = 0 ] && ok "cast check json"
+
+# --- cast: a dependency-cruiser configuration, translated -------------------
+# AC6 cast import <file> writes .cast/rules.json from a dependency-cruiser
+# configuration, and names on stderr every rule it could not translate whole
+S=0
+cat > "$CASTKIN/dc.json" <<'JSON'
+{ "forbidden": [
+    { "name": "no-x-to-leaf", "severity": "error",
+      "from": { "path": "^src/x\\.ts$" }, "to": { "path": "^src/leaf" } },
+    { "name": "no-circular", "severity": "warn", "from": {}, "to": { "circular": true } },
+    { "name": "typed-only", "from": {}, "to": { "path": "^src/", "dependencyTypes": ["npm"] } } ],
+  "allowed": [ { "from": { "path": "^src/gap" }, "to": { "path": "^src/" } } ],
+  "options": { "doNotFollow": "node_modules" } }
+JSON
+CAST_IMP_ERR="$(cd "$CASTKIN" && "$CAST_BIN" import dc.json 2>&1 >/dev/null)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast import" "importing a .json configuration exited $RC, not 0: $CAST_IMP_ERR"; S=1; }
+# break: dropping a rule that could not be translated without saying so
+printf '%s\n' "$CAST_IMP_ERR" | grep -qx 'not translated: typed-only: to.dependencyTypes' \
+  || { fail "cast import" "the attribute that could not be translated was not named on stderr: $CAST_IMP_ERR"; S=1; }
+# break: writing a rule whose attributes were not all translated, which checks
+# for something nobody wrote down
+grep -q 'typed-only' "$CAST_KIN_RULES" \
+  && { fail "cast import" "a rule carrying an untranslatable attribute was written: $(cat "$CAST_KIN_RULES")"; S=1; }
+# break: writing the dependency-cruiser regex through as a cast glob, which
+# leaves a rule that matches nothing
+CAST_IMPCHK="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast import" "the translated rule caught nothing, exit $RC: $CAST_IMPCHK / $(cat "$CAST_KIN_RULES")"; S=1; }
+printf '%s\n' "$CAST_IMPCHK" | grep -q '^    src/x.ts:2 -> src/leaf.ts (value)$' \
+  || { fail "cast import" "the translated path rule did not catch the edge it names: $CAST_IMPCHK"; S=1; }
+# break: reading `circular` as a path, or not reading it at all
+printf '%s\n' "$CAST_IMPCHK" | grep -q '^no-circular (warn) \*\* -> \*\* (circular) 2$' \
+  || { fail "cast import" "the circular rule did not survive the translation: $CAST_IMPCHK"; S=1; }
+# break: writing only the forbidden rules
+printf '%s\n' "$CAST_IMPCHK" | grep -q 'against 2 rules$' \
+  || { fail "cast import" "the translated file does not hold the two rules it could translate: $CAST_IMPCHK"; S=1; }
+CAST_IMP_ALLOWED="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).allowed.length)' "$CAST_KIN_RULES" 2>&1)"
+[ "$CAST_IMP_ALLOWED" = 1 ] \
+  || { fail "cast import" "the allowed rule was not translated: $CAST_IMP_ALLOWED"; S=1; }
+# a .js configuration is read the same way - break: parsing every file as JSON
+cat > "$CASTKIN/dc.js" <<'JS'
+module.exports = {
+  forbidden: [{ name: 'no-y-to-x', severity: 'error', from: { path: '^src/y' }, to: { path: '^src/x' } }],
+}
+JS
+CAST_IMPJS="$(cd "$CASTKIN" && "$CAST_BIN" import dc.js 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast import" "importing a .js configuration exited $RC, not 0: $CAST_IMPJS"; S=1; }
+CAST_IMPJSCHK="$(cd "$CASTKIN" && "$CAST_BIN" check 2>&1)"; RC=$?
+printf '%s\n' "$CAST_IMPJSCHK" | grep -q '^    src/y.ts:1 -> src/x.ts (value)$' \
+  || { fail "cast import" "the rule of the .js configuration caught nothing: $CAST_IMPJSCHK"; S=1; }
+rm -f "$CASTKIN/dc.js" "$CASTKIN/dc.json"
+[ "$S" = 0 ] && ok "cast import"
+
+# --- cast: the files a project starts from ----------------------------------
+# AC7 cast init writes a starter layers.json and an empty rules.json, and
+# refuses to overwrite either
+S=0
+CASTNEW="$(mktemp -d)"
+trap 'rm -rf "$FIX" "$PASSFIX" "$CTX" "$CASTFIX" "$CASTIDS" "$CMTFIX" "$CASTKIN" "$CASTNEW"' EXIT
+mkdir -p "$CASTNEW/src" "$CASTNEW/lib"
+printf "import { b } from '../lib/b'\n" > "$CASTNEW/src/a.ts"
+printf 'export const b = 1\n' > "$CASTNEW/lib/b.ts"
+printf 'export const t = 1\n' > "$CASTNEW/top.ts"
+(cd "$CASTNEW" && "$CAST_BIN" scan >/dev/null 2>&1) || { fail "cast init" "the fixture would not scan"; S=1; }
+CAST_INIT="$(cd "$CASTNEW" && "$CAST_BIN" init 2>&1)"; RC=$?
+[ "$RC" = 0 ] || { fail "cast init" "init exited $RC, not 0: $CAST_INIT"; S=1; }
+# break: writing the files and printing nothing, which leaves no path to open
+printf '%s\n' "$CAST_INIT" | grep -qx '.cast/layers.json' \
+  || { fail "cast init" "the layers file it wrote was not printed: $CAST_INIT"; S=1; }
+printf '%s\n' "$CAST_INIT" | grep -qx '.cast/rules.json' \
+  || { fail "cast init" "the rules file it wrote was not printed: $CAST_INIT"; S=1; }
+# break: writing a layering that is not read off the graph
+CAST_INIT_LAYERS="$(node -e '
+const l = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+console.log(Object.entries(l).map(([g, n]) => g + "=" + n).sort().join(" "))' "$CASTNEW/.cast/layers.json" 2>&1)"
+[ "$CAST_INIT_LAYERS" = '*=root lib/**=lib src/**=src' ] \
+  || { fail "cast init" "the starter layers are not the top directories of the graph: $CAST_INIT_LAYERS"; S=1; }
+# break: writing a rules file that already forbids something
+CAST_INIT_RULES="$(node -e '
+const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+console.log(r.forbidden.length + "|" + (r.allowed || []).length)' "$CASTNEW/.cast/rules.json" 2>&1)"
+[ "$CAST_INIT_RULES" = '0|0' ] \
+  || { fail "cast init" "the starter rules file does not hold zero rules: $CAST_INIT_RULES"; S=1; }
+# break: overwriting the layering a project edited
+printf '{ "src/**": "logic" }\n' > "$CASTNEW/.cast/layers.json"
+CAST_INIT2="$(cd "$CASTNEW" && "$CAST_BIN" init 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast init" "init over an existing file exited $RC, not 1: $CAST_INIT2"; S=1; }
+grep -q 'logic' "$CASTNEW/.cast/layers.json" \
+  || { fail "cast init" "init overwrote the layers file it refused to write: $(cat "$CASTNEW/.cast/layers.json")"; S=1; }
+# break: checking only one of the two files before writing both
+rm -f "$CASTNEW/.cast/rules.json"
+CAST_INIT3="$(cd "$CASTNEW" && "$CAST_BIN" init 2>&1)"; RC=$?
+[ "$RC" = 1 ] || { fail "cast init" "init exited $RC where layers.json still existed: $CAST_INIT3"; S=1; }
+[ -f "$CASTNEW/.cast/rules.json" ] \
+  && { fail "cast init" "a refused init still wrote a file: $CAST_INIT3"; S=1; }
+[ "$S" = 0 ] && ok "cast init"
+
 # AC8 a violation listed in .cast/baseline.json leaves the check green; one that
 # is not listed turns it red
 S=0

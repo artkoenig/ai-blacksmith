@@ -57,16 +57,10 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
   left, `mx` one `M.CLEAR` (16) past the boxes the span crosses (`flat`, less the ends and any box
   holding both, overlapping by y) - flat between neighbours, no lane, the stack at `PAD + CLEAR`.
-- `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges, id)` the panel's lines -
-  both pure, both tested in node. Highlighting only subtracts: `.edge.dim` outside the set. `pointerenter`/`pointerleave` are bound for `pointerType ===
-  'mouse'` alone or a touch screen highlights on every tap; touch is a `HOLD` timer from
-  `pointerdown`, cancelled by `SLOP`/release/cancel, its `click` eaten once by `suppress`.
+- `edgesAt(edges, id)` is every arrow touching a node, `edgeLines(edges, id)` the panel's lines - both pure, tested in node. Highlighting only subtracts: `.edge.dim` outside the set. `pointerenter`/`pointerleave` bind for `pointerType === 'mouse'` alone or a touch screen highlights on every tap; touch is a `HOLD` timer from `pointerdown`, cancelled by `SLOP`/release/cancel, its `click` eaten once by `suppress`.
 - `render` reads rules.json and baseline.json like `check`: severity colours and the rule label an
   arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, only a flagged one is
-  styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node
-  holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
-  `README.md`'s `--html` paragraph is its prose spec: a change to what a press hits or what an
-  arrow or a node shows leaves it false until that paragraph is edited in the same commit.
+  styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset. `README.md`'s `--html` paragraph is its prose spec: a change to what a press hits or what an arrow or a node shows leaves it false until that paragraph is edited in the same commit.
 - `graphFile(root)` is `os.tmpdir()/cast/<base>-<sha1>/`; every reader rederives it from `--root`.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
   `forbidden` names an edge that must not exist, `allowed` drops it; a side is a layer name where
@@ -98,3 +92,6 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   when a layer has neither. `cast render --plan` draws `simulateGraph(scan, readPlan(...))` before
   any write: an unapplicable plan exits 2 with no page, and layers, rules and baseline read against
   the simulated graph, not the scanned one.
+- `check --json` and the text listing come off one `checkResult`, which decides the exit code once - a second evaluation is how `--json` starts answering a code the plain run would not. The document is `violations` (rule, severity, file, line, to, kind, edge), `notEvaluated` and `counts` (the summary line's numbers); no rules file is that document plus a `message`, never a bare line.
+- `cast import <file>` translates a dependency-cruiser config once and writes rules.json; nothing reads a depcruise file at check time. A depcruise path is a regex and a cast side a glob, so `globOf` converts the plain shapes (anchors, `.*` -> `**`, escaped metacharacter) and answers null for anything else. A rule is written whole or not at all, every attribute that stopped it a `not translated: <rule>: <attr>` line on stderr; `IMPORT_RULE_KEYS`/`IMPORT_SIDE` are the surviving attributes. A translated `allowed` keeps cast's meaning - an exception - not depcruise's whitelist.
+- `cast init` reads the scanned graph for its top directories, writes layers.json and rules.json or neither, exit 1 naming what is in the way. `import` takes its positional before the flag loop like `plan`, `first = 2`.
