@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: Set up a project for forge - detect the commands and the issue backend, then write the adapter, the check commands, the rules and the settings. Runs unattended where the repository answers, and asks only where it does not. On a project that does not exist yet it grills once instead, and comes out with the scaffold, the architecture and the first issues. Use before the first /forge:issue in a repository, and whenever a session finds the project unconfigured.
+description: Set up a project for forge - detect the commands and the issue backend, then write the adapter, the check commands, the rules and the settings. Runs unattended where the repository answers, and asks only where it does not. On a project that does not exist yet it asks about the product only, recommends a stack and an architecture that follow from the answers, and comes out with the scaffold and the first issues. Use before the first /forge:issue in a repository, and whenever a session finds the project unconfigured.
 argument-hint: "[no arguments]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -41,28 +41,53 @@ nothing choosing between them, an issues folder and an active GitHub tracker bot
 carrying only the questions the repository left open. What you decided yourself goes in the report
 instead, where it is cheap to correct.
 
-## 2. A project that does not exist yet: grill once
+## 2. A project that does not exist yet: ask about it, recommend the rest
 
 Reaching here means the session is about to start something. Where nobody has said so - an empty
 checkout and a request about something else entirely - stop and say nothing. An empty directory is
 not a project, and a bootstrap nobody asked for is a round nobody gets back.
 
-Where they have, ask once. One round settles what the rest of this skill would otherwise drag out of
-the human a question at a time:
+Where they have, ask once, and ask about the product rather than about the machine. Nobody has to
+make a technical decision to get a project:
 
-- **What is being built, and what the first version does.** The boundary of the MVP - what is in it,
-  and what is deliberately left out. Everything below is cut from this answer.
-- **Stack and language.** They decide the commands, the subset flag, and whether cast can read the
-  project at all.
-- **Layers.** The two to four names the code divides into, and which may depend on which. Ask it as
-  a question about the project rather than about cast: what talks to the store, what draws the
-  screen, what neither.
-- **A user-facing surface?** Where there is one, the screens are worth drafting with the `design`
-  skill before any issue is cut - a screen settles an argument that prose keeps open. Where there is
-  none, do not raise it again.
+- **What is being built, and who uses it.** Three or four user stories in their own words - "as a
+  gardener I want to see what to sow this month". Everything below is derived from these, so take
+  them as they are said rather than tidying them into requirements.
+- **What the first version must do.** The boundary of the MVP - what is in it, and what is
+  deliberately left out.
+- **Where it runs, and what it must work without.** A phone, a browser, a terminal, a server; with
+  no network, with no account, with no sign-up. These are facts about the product, not technical
+  choices, and they decide more of the stack than a preference would.
+
+Never ask which language, which framework, which database, or how the code should be layered. A
+human who wants to decide those says so unprompted; one who does not still gets a project.
 
 Decide the issue backend from the remote, by section 1's order. Not everything is a question just
 because the files are empty.
+
+### Derive the stack and the layers, then recommend
+
+Read the stories for what actually constrains the build - the surface they need, what is stored and
+for how long, whether it works offline, who else has to read the code - and name the two or three
+stacks that fit. Put them to the human as one recommendation with the runners-up visible and the
+recommendation preselected, each with what it buys and what it costs in one line, in the terms of
+their stories rather than the industry's: "works on the phone with no server and no account" says
+more than "local-first".
+
+**Prefer a stack whose checks run where the agents run.** A recommendation whose tests need a
+device, an emulator or a paid service makes every issue's verify command theatre. Where the surface
+cannot be checked headlessly, say so and split it: the logic into a module the checks reach, the
+surface into one they do not, and cut the issues along that line. That split is a finding to report,
+not a preference - name what cannot be verified, and why.
+
+The layers come from the same reading. The nouns of the stories are what is stored, the verbs are
+the logic, what the human sees is the surface: two to four names, and which may depend on which.
+Recommend them the same way. Where the stories describe screens, the surface is real - draft them
+with the `design` skill before any issue is cut, because a screen settles an argument that prose
+keeps open.
+
+An override is not an argument. Take it, say in one line what it changes about the checks, and go
+on. Where nothing is overridden, the recommendation stands and the project gets built.
 
 Then, in this order:
 
