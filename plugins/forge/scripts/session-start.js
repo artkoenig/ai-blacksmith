@@ -92,7 +92,21 @@ if (config(input)) {
   const own = rules()
   if (own) say.push(own)
 } else {
-  say.push('forge is installed but this project is not set up. Run /forge:bootstrap.')
+  // The notice is an instruction, not advice. A line that told the human to run
+  // /forge:bootstrap left the setting up to a round that never came: the session
+  // read it as background, went on with the work it was opened for, and the
+  // project stayed unconfigured. Bootstrap decides what the repository answers
+  // and asks only where it does not, so running it unasked costs a tool call
+  // rather than a round.
+  say.push(
+    'forge is installed and this project is not set up for it. Invoke the ' +
+      'forge:bootstrap skill now, before the work this session was opened for - ' +
+      'do not ask for permission, and do not leave /forge:bootstrap to the human. ' +
+      "It detects the project's commands and issue backend itself and asks only " +
+      'where that is genuinely ambiguous, so it usually costs no round. Report in ' +
+      'one line what it wrote. It handles one case on its own: a project with no ' +
+      'build system yet gets nothing written.'
+  )
 }
 const outdated = stale()
 if (outdated) say.push(outdated)

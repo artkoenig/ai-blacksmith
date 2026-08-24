@@ -1,25 +1,44 @@
 ---
 name: bootstrap
-description: Set up a project for forge - interview once, then write the issue backend adapter, the check commands, the rules and the settings. Use before the first /forge:issue in a repository.
+description: Set up a project for forge - detect the commands and the issue backend, then write the adapter, the check commands, the rules and the settings. Runs unattended where the repository answers, and asks only where it does not. Use before the first /forge:issue in a repository, and whenever a session finds the project unconfigured.
 argument-hint: "[no arguments]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
 
 # Bootstrap a project for forge
 
-## 1. Detect, then confirm
+## 1. Detect, and decide what the repository answers
 
-Read `package.json` scripts, `pyproject.toml`, `Makefile`, `go.mod`, `Cargo.toml` or the CI
-workflow. Look for the issue backend: issues in use on GitHub, an `issues/` or `docs/issues/`
-folder, a `.jira` config.
+You may have been invoked with nobody asking - the session-start notice tells a session in an
+unconfigured project to run you. So decide from the repository, and spend a question only on what
+the repository genuinely leaves open.
 
-Propose what you found. Ask the user to confirm or correct it in one round:
+Read `package.json` scripts, `pyproject.toml`, `Makefile`, `go.mod`, `Cargo.toml`, the Gradle or
+Maven build files, or the CI workflow. Run every command before you write it down.
 
-- **Issue backend** - GitHub Issues, markdown files, or other. For markdown, settle directory and
-  file naming.
-- **Commands** - test, lint, typecheck, build. Leave any that do not exist empty.
-- **Subset flag** - how the test runner takes a pattern: `-t {pattern}`, `-k {pattern}`,
-  `-run {pattern}`.
+**Nothing to detect is an answer.** A repository with no build system - a fresh checkout, a project
+whose first source file is not written yet - gets no config at all. Say so in one line and stop.
+A config with empty commands silences the session-start notice for good, so the project that most
+needs setting up becomes the one that never gets it. Running again later costs nothing.
+
+**Issue backend.** The first that holds:
+
+- an `issues/` or `docs/issues/` folder already in the repository - markdown, there, keeping the
+  file naming in use;
+- a GitHub remote, and GitHub tooling available in this session - GitHub Issues;
+- neither - markdown in `docs/issues/`, named `<n>-<slug>.md`.
+
+**Commands.** test, lint, typecheck, build, read off the build files. Leave any that does not exist
+empty: an empty command answers `unconfigured`, which beats a command that does not run.
+
+**Subset flag.** It follows from the runner - jest and vitest `-t {pattern}`, pytest `-k {pattern}`,
+go `-run {pattern}`, cargo `{pattern}`, Gradle `--tests {pattern}`. Any other runner: read its
+`--help`.
+
+**Ask only where detection is genuinely ambiguous** - two test runners configured side by side with
+nothing choosing between them, an issues folder and an active GitHub tracker both in use. One round,
+carrying only the questions the repository left open. What you decided yourself goes in the report
+instead, where it is cheap to correct.
 
 ## 2. Check the precondition
 
@@ -110,4 +129,6 @@ Run `forge-test`. A green project answers one line and exits `0`; a red one list
 exits `1`. Exit `2` means the config is wrong - fix it before reporting success.
 
 Report in five lines at most: backend, commands wired, the two preconditions, next step
-(`/forge:issue`).
+(`/forge:issue`). Say which of them you decided rather than asked, so a wrong call is cheap to
+correct. Where the session-start notice invoked you rather than the human, stop there and get on
+with the work the session was opened for - setting the project up is not what it was opened for.
