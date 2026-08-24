@@ -29,11 +29,23 @@ to compose. `cast check` deliberately has none: it answers through its exit code
   named in the task reaches cast only as `ARGUMENTS=<dir>` in front of the line. Both agent files
   say so; without it a delegated question about one directory is answered about the whole project.
 - `plan` drafts `<root>/.cast/plans/<name>.json` itself and loops draft -> simulate -> judge ->
-  redraft, so it needs `Write` in `allowed-tools` and its `!` line reports the graph rather than
-  simulating a plan that does not exist yet. `cast plan simulate` is run per loop from the body.
+  redraft, so it needs `Write` in `allowed-tools`, and `cast plan simulate` is run per loop from
+  the body.
+- `plan`'s `!` line resolves a plan as well as a root, in that order: after `R`, any word of `$A`
+  that is an existing file, or a name with `$R/.cast/plans/<word>.json` under it, becomes `P`. It
+  echoes `cast plan: <name>` or `cast plan: none`, and where there is one it prints the plan and
+  simulates it - that is the state the loop continues from. Any word may be the plan, since the
+  trailing one is already spoken for by the root.
+- A word that names no plan must never reach `cast plan simulate`: its exit 2 is the preamble's
+  exit code and costs the skill its body. Same reason the simulate call ends in `|| echo ...`, and
+  the branch with no plan still falls back to the `ls` that cannot fail.
 - The judgement is prose the `cast plan skill` suite greps by heading: `## What accepts a
-  simulation`, `## What rejects it`, `## Edit nothing until it is accepted`. Renaming a heading
-  fails the suite - the headings are the contract, not decoration.
+  simulation`, `## What rejects it`, `## Edit nothing until it is accepted`, `## Continuing a plan
+  you were handed`. Renaming a heading fails the suite - the headings are the contract, not
+  decoration.
+- The `cast plan continue` suite runs the plan preamble against `$CASTFIX`, which holds
+  `.cast/plans/cut.json`; `module edges 8 -> 7` is that plan's simulation, the cheapest proof the
+  preamble really simulated what it was handed.
 - `render` is reached from the skills alone: the plan's `--mermaid --plan` is the picture an issue
   carries, `--html --plan` the manual look at the plan, `--html` in `map` the look at today.
 - Frontmatter is `name`, `description`, `argument-hint`, `allowed-tools` - `Bash, Read`. The

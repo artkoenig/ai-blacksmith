@@ -3060,6 +3060,17 @@ grep -qF '$SCRATCH/<name>.json' plugins/cast/agents/refactor-planner.md \
 # caller asked to keep is written where nothing looks for it
 grep -qF '<root>/.cast/plans/<name>.json' plugins/cast/agents/refactor-planner.md \
   || { fail "cast agents" "the planner never keeps a plan beside the code"; S=1; }
+# AC5 the planner can be handed a plan that already exists. break: taking the
+# plan out of the task and never putting it on the skill's line, where nothing
+# expands $ARGUMENTS for the agent - the plan is then silently redrafted.
+grep -qi 'your task may name a plan' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner does not take a plan from its task"; S=1; }
+grep -qF 'ARGUMENTS="<goal> <plan> <dir>"' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner never passes the plan to the skill line with the goal and the root"; S=1; }
+# break: returning a fresh scratch draft where a named plan was continued, so the
+# caller cannot tell which file now holds the plan
+grep -qF 'it is that file you return' plugins/cast/agents/refactor-planner.md \
+  || { fail "cast agents" "the planner does not return the file it continued"; S=1; }
 [ "$S" = 0 ] && ok "cast agents"
 
 
@@ -3112,6 +3123,21 @@ if [ ! -f "$F" ]; then fail "cast plan skill" "$F is missing"; S=1; else
     || { fail "cast plan skill" "the plan skill does not forbid editing before a simulation is accepted"; S=1; }
   grep -qF 'No source file is touched while this loop runs' "$F" \
     || { fail "cast plan skill" "the plan skill does not forbid touching a source file during the loop"; S=1; }
+  # AC4 break: taking a plan on the argument and never saying how it is carried
+  # on, which leaves a continued plan drafted from scratch under its own name
+  grep -q '^## Continuing a plan you were handed$' "$F" \
+    || { fail "cast plan skill" "the plan skill does not say how a plan it was handed is continued"; S=1; }
+  # break: copying the plan to a new name instead of editing the one named
+  grep -qF 'The named file is the one you edit' "$F" \
+    || { fail "cast plan skill" "the plan skill does not edit the plan file it was handed"; S=1; }
+  # break: appending an operation against the scanned graph, which names a module
+  # an earlier operation renamed away and dies as an unknown module
+  grep -qF 'the ids to spell are the ones the printed operations leave' "$F" \
+    || { fail "cast plan skill" "an appended operation is not told which module ids the plan leaves"; S=1; }
+  # break: simulating and judging the addition alone, so the operations the plan
+  # arrived with are never weighed again
+  grep -qF 'never the addition alone' "$F" \
+    || { fail "cast plan skill" "the continued plan is not judged whole"; S=1; }
 fi
 [ "$S" = 0 ] && ok "cast plan skill"
 
@@ -3220,6 +3246,86 @@ printf '%s\n' "$OUT" | grep -qF 'no plan written yet' \
   && { fail "cast skill preamble" "the plan preamble says there is no plan while listing one: $OUT"; S=1; }
 rm -rf "$PRE"
 [ "$S" = 0 ] && ok "cast skill preamble"
+
+# --- cast plan continue -----------------------------------------------------
+# #68 AC1-AC3: the plan skill takes a plan that is already written down beside
+# the goal and the directory. The preamble is run, not read - what the model gets
+# is its output, so every case here executes the line the skill carries.
+S=0
+PLAN_REPO="$PWD"
+plan_line() {
+  ARGS="$1" DIR="$2" PLAN_REPO="$PLAN_REPO" bash -c '
+    cd "$DIR" || exit 1
+    export CLAUDE_PLUGIN_ROOT="$PLAN_REPO/plugins/cast"
+    ARGUMENTS="$ARGS"
+    '"$(sed -n 's/^!`\(.*\)`$/\1/p' plugins/cast/skills/plan/SKILL.md)"'
+  ' 2>&1
+}
+# AC1 a bare name is read under <root>/.cast/plans/<name>.json, and the preamble
+# says which plan it read.
+# break: dropping the resolution, so a plan handed to the skill is redrafted
+CAST_PC="$(plan_line 'break the cycle cut' "$CASTFIX")"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast plan continue" "the plan preamble exited $RC on a plan it was handed: $CAST_PC"; S=1; }
+printf '%s\n' "$CAST_PC" | grep -qx 'cast plan: cut' \
+  || { fail "cast plan continue" "the preamble did not report the plan it read: $CAST_PC"; S=1; }
+# AC2 where a plan is named, its operations and its simulation come before any
+# drafting - against the graph the same line just scanned.
+# break: naming the plan and printing nothing about it, which leaves the loop
+# starting from scratch anyway
+printf '%s\n' "$CAST_PC" | grep -qF 'move src/rel.ts -> pkg/rel.ts' \
+  || { fail "cast plan continue" "the preamble did not show the operations of the plan it read: $CAST_PC"; S=1; }
+printf '%s\n' "$CAST_PC" | grep -q '^module edges 8 -> 7' \
+  || { fail "cast plan continue" "the preamble did not simulate the plan it read: $CAST_PC"; S=1; }
+printf '%s\n' "$CAST_PC" | grep -q '^modules ' \
+  || { fail "cast plan continue" "the preamble stopped reporting the graph it drafts against: $CAST_PC"; S=1; }
+# AC1 a path to a plan file anywhere is read too - that is where the agents keep
+# theirs. break: resolving every word under <root>/.cast/plans
+PLANC="$(mktemp -d)"; cp "$CASTFIX/.cast/plans/cut.json" "$PLANC/keep.json"
+CAST_PCP="$(plan_line "break the cycle $PLANC/keep.json" "$CASTFIX")"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast plan continue" "the plan preamble exited $RC on a plan given by path: $CAST_PCP"; S=1; }
+printf '%s\n' "$CAST_PCP" | grep -qxF "cast plan: $PLANC/keep.json" \
+  || { fail "cast plan continue" "the preamble did not report the plan path it read: $CAST_PCP"; S=1; }
+printf '%s\n' "$CAST_PCP" | grep -q '^module edges 8 -> 7' \
+  || { fail "cast plan continue" "a plan given by path was not simulated: $CAST_PCP"; S=1; }
+rm -rf "$PLANC"
+# the plan and the directory arrive together, and the trailing word is still the
+# root. break: reading the plan off the end of the argument, where the root is
+CAST_PCD="$(plan_line 'break the cycle cut .' "$CASTFIX")"
+printf '%s\n' "$CAST_PCD" | grep -qx 'cast root: .' \
+  || { fail "cast plan continue" "a plan before the directory cost the root: $CAST_PCD"; S=1; }
+printf '%s\n' "$CAST_PCD" | grep -qx 'cast plan: cut' \
+  || { fail "cast plan continue" "a plan before the directory was not read: $CAST_PCD"; S=1; }
+# AC2/AC3 a goal that names no plan lists what the project holds and drafts from
+# scratch, and AC3 costs nothing: the word is never handed to `cast plan
+# simulate`, whose exit 2 would cost the skill its body.
+# break: passing the trailing word of the goal to the simulator
+CAST_PN2="$(plan_line 'break the cycle between ui and data' "$CASTFIX")"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast plan continue" "a goal naming no plan exited $RC: $CAST_PN2"; S=1; }
+printf '%s\n' "$CAST_PN2" | grep -qx 'cast plan: none' \
+  || { fail "cast plan continue" "a word that names no plan was not reported as none: $CAST_PN2"; S=1; }
+printf '%s\n' "$CAST_PN2" | grep -qF 'no plan at ' \
+  && { fail "cast plan continue" "a word that names no plan was handed to the simulator: $CAST_PN2"; S=1; }
+printf '%s\n' "$CAST_PN2" | grep -qF 'cut.json' \
+  || { fail "cast plan continue" "the preamble no longer lists the plans it found: $CAST_PN2"; S=1; }
+# AC3 a project that holds no plan at all is the same: exit 0, and none.
+# break: `cat` or `ls` on a directory that is not there deciding the exit code
+PLANE="$(mktemp -d)"
+CAST_PE="$(plan_line 'break the cycle cut' "$PLANE")"; RC=$?
+[ "$RC" = 0 ] \
+  || { fail "cast plan continue" "the plan preamble exited $RC in a project holding no plan: $CAST_PE"; S=1; }
+printf '%s\n' "$CAST_PE" | grep -qx 'cast plan: none' \
+  || { fail "cast plan continue" "a project holding no plan did not report none: $CAST_PE"; S=1; }
+rm -rf "$PLANE"
+# the body says what the two lines mean, or the model reads an unexplained one
+# break: teaching the line and leaving the skill body behind
+for t in 'cast plan: <name>' 'cast plan: none'; do
+  grep -qF "$t" plugins/cast/skills/plan/SKILL.md \
+    || { fail "cast plan continue" "the plan skill never says what $t means"; S=1; }
+done
+[ "$S" = 0 ] && ok "cast plan continue"
 
 # --- the cast rule reaches a project that installs cast ---------------------
 # The rule is injected at SessionStart, never copied into the project: a copy
