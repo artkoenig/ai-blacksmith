@@ -39,7 +39,8 @@ Ask only what the grounding left open, in as few rounds as possible:
 - How would you check it? Push for something runnable.
 - What must not change?
 
-Never ask what the codebase answers. Where the grounding contradicts the user, put the finding to
+Never ask what the codebase answers, and never ask again what a bootstrap interview settled
+earlier in this session - it grilled for exactly these answers. Where the grounding contradicts the user, put the finding to
 them with its `path:line` rather than asking the question again.
 
 ## 3. Write it
