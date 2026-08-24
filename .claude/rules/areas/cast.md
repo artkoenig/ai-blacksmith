@@ -50,8 +50,8 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   `M.TAP` (44) floors `H` and `HEAD`: `place` gives a node a header band `hx/hy/hw/hh` and only that
   band toggles - the ground of an open box answers no press. Transparent `hit`/`grab` shapes widen
   what is too thin to press; `marker` is the glyph, on a node with children alone; `toggleOpen`
-  deletes one id and nothing below it, so reopening restores it. Phone: viewport meta, a self-sized
-  svg in `#graph-scroll`, `overflow-x:hidden`, no `svg{max-width:100%}`.
+  deletes one id and nothing below it. Phone: viewport meta, a self-sized svg in `#graph-scroll`,
+  `overflow-x:hidden`, no `svg{max-width:100%}`.
 - An arrow is a bare curve and a `TAP`-wide transparent grab: no head, no label, no backing, and
   `width`/`height` end at the furthest `mx` and the last box. `weight`, `label`, `kinds`,
   `kindCounts`, `kindLabel`, `rule`, `state` and `sites` stay on it as data. Direction is the side: `down` (`y2 >= y1`) anchors both ends right of their boxes, up
@@ -65,51 +65,36 @@ shims; all behaviour is `scripts/cast.js`, every fact about a language an adapte
   arrow, the baseline greys it `(inherited)`, live wins on a shared arrow, only a flagged one is
   styled. A mark sits on the module edge, so an intra-layer violation gets no arrow until the node
   holding both is opened. The page fetches nothing: data in a `<script>`, `<` escaped, no asset.
-  `README.md`'s `--html` paragraph is its prose spec: a change to what a press hits or what an arrow
-  or a node shows leaves it false until that paragraph is edited in the same commit.
-- The graph leaves no file in the checkout: `graphFile(root)` is `os.tmpdir()/cast/<base>-<sha1>/`,
-  `CAST_GRAPH` overrides it, `scan` prints it, every reader rederives it from `--root`.
+  `README.md`'s `--html` paragraph is its prose spec: a change to what a press hits or what an
+  arrow or a node shows leaves it false until that paragraph is edited in the same commit.
+- `graphFile(root)` is `os.tmpdir()/cast/<base>-<sha1>/`; every reader rederives it from `--root`.
 - Rules are read at check time from `<root>/.cast/rules.json`, like layers.json: no rescan.
-  `forbidden` names an edge that must not exist, `allowed` drops it. A side is a layer name where
-  `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise; layer wins a tie, so
-  a rule inside one layer must name the files.
-- `cast check` reads every resolved module edge, never mermaid's aggregate (`cast check altitude`).
-  The exit code comes from severity, not the count: `warn` is listed and leaves 0; the summary is
-  the last line, the only one on a clean project. `die()` is exit 2 throughout: an unreadable or
-  invalid `rules.json` is "could not run", not a violation or a pass; validate in `readRules`.
-- A rule names one subject: an edge between two sides, or one shape of the graph - `circular`,
-  `orphan`, `couldNotResolve` (`SUBJECTS`, `readRule` sets `r.subject`), two in one rule is exit 2.
-  On a shape rule `from`/`to` are optional filters, `fromSpec`/`toSpec` fall back to `**` for the
-  listing, an orphan takes no `to`, and an unresolved `to` is a glob over the specifier text (side
-  read with `names` empty), never a layer. `candidates(graph, of, subject)` builds each set and
-  carries the violation it becomes in `.v`, so past it the listing, the baseline and the page read
-  one shape; `hits(rule, c, of)` takes a candidate, not an edge. An orphan is a module with no
-  edge of any resolution and no module edge arriving, `file`/`to` its id, `kind` `orphan`, `line`
-  0, printed `  <path>` under a `(orphan)` header rather than grouped by layer edge.
-- `SEVERITIES` is `error, warn, info, ignore`: only `error` moves the exit code, `ignore` is
-  skipped in `violations()` so it is neither listed nor counted, and an unknown one is exit 2
-  naming all four. Adding one means the message in `readRule` names it too.
-- The cast rule fixtures are two: `CASTFIX`, whose module and edge counts half the suites assert -
-  never add a file to it - and `CASTKIN`, the small one for the shape rules (a cycle, an edge
-  outside it, an orphan, an unresolved import), scanned once with no `layers.json`.
-- An unknown rule attribute is `not evaluated: <rule>: <key>`: a new attribute means adding it to
-  `RULE_KEYS` in the same change. `readRule` validates one rule wherever it is written down, and
-  `group()` renders rule/edge/site for the check and the plan report alike. Trying a rule before
-  enforcing it is `severity: "warn"`, not a command of its own - there is no `rules` subcommand.
+  `forbidden` names an edge that must not exist, `allowed` drops it; a side is a layer name where
+  `assign()` reports one (`unassigned` included), a `globToRe` glob otherwise, layer winning a tie,
+  so a rule inside one layer must name the files. An unknown attribute is `not evaluated: <rule>:
+  <key>` - add it to `RULE_KEYS` in the same change; `group()` renders rule/edge/site everywhere.
+- `cast check` reads every resolved module edge, never mermaid's aggregate. Severity sets the exit,
+  not the count: of `SEVERITIES` (`error, warn, info, ignore`) only `error` moves it, `warn` lists
+  and leaves 0, `ignore` is skipped in `violations()`; an unknown one, or an invalid `rules.json`,
+  is `die()` exit 2 from `readRules`. The summary is the last line, the only one when clean.
+- A rule names one subject: an edge, or a shape - `circular`, `orphan`, `couldNotResolve`
+  (`SUBJECTS`, `readRule` sets `r.subject`), two in one rule is exit 2. On a shape `from`/`to` only
+  filter (`fromSpec`/`toSpec` default `**`); an orphan takes no `to` and prints under an `(orphan)`
+  header, an unresolved `to` globs specifier text, never a layer. `candidates(graph, of, subject)`
+  carries the violation in `.v`; `hits()` takes one. Fixture: `CASTKIN`, never `CASTFIX`.
 - `bin/cast-check` scans before it checks: no arguments, never a stale graph, every `bin/*`
   executable. `plan` takes a subcommand and a positional: `main` reads `argv[1]` and `argv[2]`
   before the flag loop, which starts at 3; a `--root` that is no directory is exit 2 there. `.cast`
   is in `ALWAYS_IGNORED` - adapters are loaded, never scanned; walking skips dot dirs.
 - `.cast/baseline.json` holds inherited violations, read at check time like the rules: a held one
-  drops out of the listing and the exit code, counted as the summary suffix `, N baselined`, keyed
-  by rule, file, imported module and edge kind, never by line, which churns (`baselineKey`).
-  `--update` refuses (exit 1, no write) a baseline bigger than the one it replaces - the ratchet.
-- Plans are read at simulate time; `cast plan simulate` writes nothing, ops applying in order to a
-  deep copy, each on the graph the one before left; `apply()` dies on an unknown module, `readPlan`
-  on an unknown op or key. An op resites its edges: `move`/`merge` via `resite()`, `split` per
-  part, `invert` at `line` 0. `planFile()` resolves the argument for `plan simulate` and
-  `render --plan` alike: a `/` or `.json` is a path against cwd, else a name under `.cast/plans/`.
+  drops out of the listing and the exit code, counted as the suffix `, N baselined`, keyed by rule,
+  file, imported module and edge kind, never by line, which churns (`baselineKey`). `--update`
+  refuses (exit 1, no write) a baseline bigger than the one it replaces - the ratchet.
+- Plans are read at simulate time, ops applying in order to a deep copy, each on the graph the one
+  before left; `apply()` dies on an unknown module, `readPlan` on an unknown op or key. An op
+  resites its edges: `move`/`merge` via `resite()`, `split` per part, `invert` at `line` 0.
+  `planFile()` takes a `/` or `.json` as a path against cwd, else a name under `.cast/plans/`.
 - Plan metrics count edges crossing a layer boundary alone: `I = fan-out / (fan-in + fan-out)`, 0
-  when a layer has neither, no baseline. `cast render --plan` draws `simulateGraph(scan,
-  readPlan(...))` before any write: an unapplicable plan exits 2 with no page, and layers, rules
-  and baseline read against the simulated graph, not the scanned one.
+  when a layer has neither. `cast render --plan` draws `simulateGraph(scan, readPlan(...))` before
+  any write: an unapplicable plan exits 2 with no page, and layers, rules and baseline read against
+  the simulated graph, not the scanned one.
