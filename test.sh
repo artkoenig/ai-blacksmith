@@ -416,6 +416,50 @@ I="$(grep -n '^## [0-9]\+\. Interview$' plugins/forge/skills/issue/SKILL.md | cu
   || { fail grounding "the issue skill no longer grounds itself before it asks"; S=1; }
 [ "$S" = 0 ] && ok "the interview starts grounded"
 
+# --- a screen is drawn before it is specified -------------------------------
+# An issue about something a person looks at is written against a drawing, not
+# a sentence. The offer rides in the interview round that is already happening,
+# and the drafting is its own step between the interview and the writing.
+S=0
+F=plugins/forge/skills/issue/SKILL.md
+IL="$(grep -n '^## [0-9]\+\. Interview$' "$F" | cut -d: -f1)"
+DL="$(grep -n '^## [0-9]\+\. Draft the mockup$' "$F" | cut -d: -f1)"
+WL="$(grep -n '^## [0-9]\+\. Write it$' "$F" | cut -d: -f1)"
+# break: dropping the mockup question from the Interview section
+{ [ -n "$IL" ] && [ -n "$DL" ] \
+  && sed -n "${IL},$((DL-1))p" "$F" | grep -qi 'mockup'; } \
+  || { fail mockup "the issue interview no longer offers a mockup"; S=1; }
+# break: making the offer a round of its own instead of part of the interview
+sed -n "${IL},$((DL-1))p" "$F" | grep -qi 'never as a round of its own' \
+  || { fail mockup "the mockup question no longer rides in the interview round"; S=1; }
+# break: dropping the exclusion, so terminal-only work is asked about too
+sed -n "${IL},$((DL-1))p" "$F" | grep -qi 'terminal' \
+  || { fail mockup "work that only changes terminal output now raises the question"; S=1; }
+# break: removing the drafting step, or moving it after "Write it"
+{ [ -n "$DL" ] && [ -n "$WL" ] && [ "$DL" -gt "$IL" ] && [ "$DL" -lt "$WL" ]; } \
+  || { fail mockup "the mockup is no longer drafted between the interview and the writing"; S=1; }
+# break: drafting it with something other than the design skill
+sed -n "${DL},$((WL-1))p" "$F" | grep -q '`design` skill' \
+  || { fail mockup "the mockup step no longer names the design skill"; S=1; }
+# break: dropping Skill from allowed-tools, so the design skill cannot be invoked
+grep -q '^allowed-tools:.*Skill' "$F" \
+  || { fail mockup "the issue skill can no longer invoke the design skill"; S=1; }
+# break: dropping the Mockup section from the issue template
+T=plugins/forge/skills/issue/issue-template.md
+grep -qiE '^## .*(Mockup|Design|Canvas)' "$T" \
+  || { fail mockup "the issue template carries no section for the drafted canvas"; S=1; }
+# the "Write it" step, from its heading to the next one
+W="$(awk -v s="$WL" 'NR>s && /^## /{exit} NR>=s' "$F")"
+# break: dropping the instruction to fill that section with the published link
+printf '%s\n' "$W" | grep -qi 'Mockup' \
+  || { fail mockup "writing the issue no longer fills the mockup section"; S=1; }
+printf '%s\n' "$W" | grep -qi 'link' \
+  || { fail mockup "the mockup section is no longer filled with the published link"; S=1; }
+# break: dropping the instruction to remove the section where nothing was drafted
+printf '%s\n' "$W" | grep -qi 'drop the section' \
+  || { fail mockup "an issue with no mockup now keeps an empty section"; S=1; }
+[ "$S" = 0 ] && ok "a screen is drawn before it is specified"
+
 # --- the run starts on demand -----------------------------------------------
 # Writing an issue spends no dispatch. The behaviour lives in prose, so the
 # prose is what is checked: a skill that ends by invoking the workflow starts

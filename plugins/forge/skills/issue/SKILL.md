@@ -39,15 +39,38 @@ Ask only what the grounding left open, in as few rounds as possible:
 - How would you check it? Push for something runnable.
 - What must not change?
 
+Where the work adds or changes something a person looks at - a screen, a page, a control - carry
+one more question in the same round: should a mockup be drafted with the `design` skill first? Ask
+it alongside the questions above, never as a round of its own. Work that only changes what a
+terminal prints - a command's output, a log line, an exit code - has nothing to draw, so the
+question does not come up there.
+
 Never ask what the codebase answers, and never ask again what a bootstrap interview settled
 earlier in this session - it grilled for exactly these answers. Where the grounding contradicts the user, put the finding to
 them with its `path:line` rather than asking the question again.
 
-## 3. Write it
+## 3. Draft the mockup
 
-Use `${CLAUDE_SKILL_DIR}/issue-template.md`. The issue holds a goal, its acceptance criteria,
-and what is out of scope. Nothing else: no file paths, no line ranges, no plan, no agent.
+Only on a yes to that question, and before a line of the issue is written. Invoke the `design`
+skill with what the interview settled: the screens or controls the work adds, what each one is for,
+and the states that have to be visible. It comes back with a canvas the user can open and refine.
 
+Drawing it first is what makes the criteria specific - what the screen shows becomes something the
+issue can assert, instead of a sentence about a screen nobody has seen. The canvas is the one
+reference the criteria are written against, so it goes in the issue's own `## Mockup` section.
+
+On a no, on work with nothing to draw, or where the `design` skill is not installed, skip this and
+go on.
+
+## 4. Write it
+
+Use `${CLAUDE_SKILL_DIR}/issue-template.md`. The issue holds a goal, the mockup where one was
+drafted, its acceptance criteria, and what is out of scope. Nothing else: no file paths, no line
+ranges, no plan, no agent.
+
+- Fill `## Mockup` with the published link the `design` skill came back with, and nothing else.
+  Where no canvas was drafted, drop the section - an empty heading reads as a mockup that went
+  missing.
 - Number the criteria `AC1`, `AC2`, … One verifiable statement each.
 - Append `| verify: <command>` wherever a command decides it. Prefer `forge-test --run <pattern>`.
 
@@ -69,7 +92,7 @@ Persist through the project's `issue-backend` skill. Where it does not exist, in
 `forge:bootstrap` skill and then persist - an issue that cannot be stored was written for nothing.
 Where bootstrap writes no config because the project has nothing to detect yet, say that and stop.
 
-## 4. Decide the cut
+## 5. Decide the cut
 
 You are the only place that sees the whole issue at once. Decide now.
 
@@ -94,7 +117,7 @@ rules. A cut adds a dispatch set, and its reviews run one after another. It halv
 **Dependencies are your assertion.** Nothing proves two increments disjoint. Assert independence
 only where the criteria are about different things. A wrong call surfaces as a merge conflict.
 
-## 5. Hand it over
+## 6. Hand it over
 
 Start nothing. Filing an issue is not asking for it to be built: a run spends agent dispatches, and
 when to pay them is the user's call. Never invoke `/forge:work` off the back of writing an issue.
