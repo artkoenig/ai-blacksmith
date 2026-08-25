@@ -28,3 +28,8 @@ paths:
 - A skill's supporting file is behaviour too: `skills/issue/issue-template.md` is the issue's
   shape, and a section added there is dead unless `SKILL.md` says how to fill it and when to drop
   it. `test.sh` greps both files, so they change together.
+- `skills/bootstrap/SKILL.md` orders its greenfield path as a numbered markdown *list*, not as
+  headings; `test.sh`'s `base-branch` suite pins that order by comparing the line of the push step
+  with the line of `^[0-9]\+\. \*\*The MVP issues`. Reordering or rewording those items fails it.
+- Several suites grep a skill for an exact phrase, so a sentence that wraps between the two words
+  being grepped fails a check the prose still satisfies. Keep such phrases on one line.

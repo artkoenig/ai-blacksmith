@@ -476,6 +476,42 @@ grep -niq 'starts\? the run' plugins/forge/skills/issue/SKILL.md \
   && { fail handoff "forge:issue still advertises that it starts the run"; S=1; }
 [ "$S" = 0 ] && ok "the run starts on demand"
 
+# --- the base branch is pushed before the issues ----------------------------
+# On an empty GitHub repository the default branch is whichever branch is pushed
+# first. Bootstrap's greenfield path therefore commits the scaffold and pushes it
+# as `main` before the first feature branch exists - and before the MVP issues,
+# because a run cutting a worktree off an unpushed checkout is what hands the
+# remote the wrong default.
+S=0
+F=plugins/forge/skills/bootstrap/SKILL.md
+CL="$(grep -n 'git push -u origin main' "$F" | head -1 | cut -d: -f1)"
+ML="$(grep -n '^[0-9]\+\. \*\*The MVP issues' "$F" | head -1 | cut -d: -f1)"
+# break: taking the commit-and-push step out of the greenfield path
+[ -n "$CL" ] \
+  || { fail base-branch "bootstrap no longer pushes the base branch"; S=1; }
+# break: the same step without the commit, so there is nothing to push
+grep -q 'git add -A' "$F" \
+  || { fail base-branch "bootstrap no longer commits the scaffold"; S=1; }
+# break: moving the push after "The MVP issues", or dropping that step's number
+{ [ -n "$CL" ] && [ -n "$ML" ] && [ "$CL" -lt "$ML" ]; } \
+  || { fail base-branch "the base branch is no longer pushed before the MVP issues"; S=1; }
+# break: pushing whatever branch the checkout is on instead of naming main
+grep -q 'git branch -M main' "$F" \
+  || { fail base-branch "the base branch is no longer forced to main"; S=1; }
+# break: dropping the push permission, so the push prompts mid-run
+grep -q 'Bash(git push:\*)' "$F" \
+  || { fail base-branch "the settings bootstrap writes no longer allow git push"; S=1; }
+# break: failing on a checkout with no origin instead of committing and reporting
+grep -q 'git remote get-url origin' "$F" \
+  || { fail base-branch "bootstrap no longer detects a missing origin remote"; S=1; }
+grep -qi 'skip the push' "$F" \
+  || { fail base-branch "a checkout with no origin no longer skips the push"; S=1; }
+# break: skipping the push silently, so the report claims a pushed base branch
+R="$(awk '/^## [0-9]+\. Verify, then report$/{f=1} f' "$F")"
+printf '%s\n' "$R" | grep -qi 'base branch' \
+  || { fail base-branch "the report no longer says what happened to the base branch"; S=1; }
+[ "$S" = 0 ] && ok "the base branch is pushed before the issues"
+
 # --- the readme states no behaviour -----------------------------------------
 # Behaviour is defined in the skill, agent, workflow and hook that implement it.
 # A second copy in the README is maintained by nobody and drifts.
