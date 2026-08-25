@@ -102,7 +102,17 @@ Then, in this order:
    against them from the first. cast reads a language only through an adapter and ships few - where
    the project's has none, say so in one line: the layers are recorded, the check is unavailable
    until an adapter exists, and writing one is an issue of its own.
-4. **The MVP issues.** Invoke the `forge:issue` skill once per item of the boundary. It carries the
+4. **The base branch, committed and pushed.** On an empty GitHub repository the default branch is
+   whichever branch is pushed first, so the scaffold has to land on the remote before any feature
+   branch exists. `git add -A`, commit, then `git branch -M main` and `git push -u origin main` -
+   `main` whatever branch the checkout happens to be on, so a checkout that opened on some
+   generated branch name does not hand the repository that name as its default. Do it here, before
+   the issues are written: an issue whose run cuts a worktree off an unpushed checkout leaves the
+   remote with a feature branch as its default, and that is not undone from inside a run. Where the
+   checkout has no `origin` remote - `git remote get-url origin` fails - commit anyway and
+   skip the push, rather than failing: say so in section 5's report, so the human knows the base
+   branch is local and the first push is theirs to make.
+5. **The MVP issues.** Invoke the `forge:issue` skill once per item of the boundary. It carries the
    criteria discipline and decides the cut - repeating either here would be a second copy to
    maintain - and it does not re-ask what this interview settled.
 
@@ -160,14 +170,17 @@ Merge into `.claude/settings.json`, keeping existing keys:
       "Bash(forge-context:*)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
       "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git worktree:*)",
-      "Bash(git merge:*)", "Bash(cd:*)"
+      "Bash(git merge:*)", "Bash(git push:*)", "Bash(cd:*)"
     ]
   }
 }
 ```
 
 Every entry you drop turns into a prompt mid-run. `git worktree` is on the list because the reviewer
-runs checks at the base commit, and because cut issues get a worktree per increment.
+runs checks at the base commit, and because cut issues get a worktree per increment. `git push` is
+on it because section 2 pushes the base branch, and a prompt there stops an unattended bootstrap
+halfway. It permits nothing to the implementer and the reviewer, which are forbidden to push by
+their own rules.
 
 Never add deny rules for the raw runners. A deny rule is evaluated whatever the guard hook returns,
 so it blocks the rewrite instead of saving a turn.
@@ -194,7 +207,8 @@ Anything printed names the rule that swallows it - usually a blanket `.claude/`.
 Run `forge-test`. A green project answers one line and exits `0`; a red one lists its failures and
 exits `1`. Exit `2` means the config is wrong - fix it before reporting success.
 
-Report in five lines at most: backend, commands wired, the two preconditions, next step
+Report in five lines at most: backend, commands wired, the two preconditions, the base branch where
+section 2 ran - pushed as `main`, or committed and not pushed because there is no `origin` - next step
 (`/forge:issue`, or `/forge:work` where section 2 already wrote the issues - name them and their
 ids). Say which of it you decided rather than asked, so a wrong call is cheap to correct. Where the
 session-start notice invoked you rather than the human, stop there and get on with the work the
