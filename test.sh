@@ -1839,6 +1839,83 @@ CAST_SITES="$(CASTFIX="$CASTFIX" CAST_GRAPH_FILE="$CAST_GRAPH_FILE" CAST_JS="$PW
 [ -z "$CAST_SITES" ] || { fail "cast plan sites" "$CAST_SITES"; S=1; }
 [ "$S" = 0 ] && ok "cast plan sites"
 
+# --- cast: a plan that redirects an edge through a facade ---------------------
+# src/rel.ts already imports src/t.ts, so it is the facade src/a.ts should reach
+# src/t.ts through. One redirected edge is the whole repair: nothing is renamed,
+# nothing is regrouped, and the import stays in src/a.ts.
+cat > "$CASTFIX/.cast/plans/door.json" <<'JSON'
+{ "operations": [
+  { "op": "redirect", "from": "src/a.ts", "to": "src/t.ts", "via": "src/rel.ts" }
+] }
+JSON
+
+# AC1/AC2 a plan whose only operation is a redirect is parsed, reported and
+# applied: the after graph carries from -> via where it carried from -> to
+S=0
+CAST_RD="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate door 2>&1)"; RC=$?
+# break: leaving redirect out of PLAN_KEYS, which makes it an unknown op and
+# kills the plan at parse time
+[ "$RC" = 0 ] || { fail "cast plan redirect" "simulating the redirect exited $RC: $CAST_RD"; S=1; }
+# break: applying the operation without printing it, so a plan's own report does
+# not say what it did
+printf '%s\n' "$CAST_RD" | grep -qF 'redirect src/a.ts -> src/t.ts via src/rel.ts' \
+  || { fail "cast plan redirect" "the plan did not report the operation: $CAST_RD"; S=1; }
+# a redirect rehangs an edge, it does not add or drop one
+# break: pushing the redirected edge onto via instead of retargeting it in from,
+# which would leave from -> to standing and count one edge too many
+printf '%s\n' "$CAST_RD" | grep -q '^module edges 8 -> 8' \
+  || { fail "cast plan redirect" "the redirect changed the edge count: $CAST_RD"; S=1; }
+# AC3 the edge kept its kind and its site: unlike an inversion the import never
+# left src/a.ts, so the file and the line the scan read stay real
+CAST_RDG="$(CASTFIX="$CASTFIX" CAST_GRAPH_FILE="$CAST_GRAPH_FILE" CAST_JS="$PWD/plugins/cast/scripts/cast.js" node -e '
+  const cast = require(process.env.CAST_JS)
+  const root = process.env.CASTFIX
+  const graph = JSON.parse(require("fs").readFileSync(process.env.CAST_GRAPH_FILE, "utf8"))
+  const before = graph.modules.find((x) => x.id === "src/a.ts").edges.find((e) => e.to === "src/t.ts")
+  const after = cast.simulateGraph(graph, cast.readPlan(root, "door"))
+  const a = after.modules.find((x) => x.id === "src/a.ts")
+  const bad = []
+  if (a.edges.some((e) => e.to === "src/t.ts")) bad.push("src/a.ts still reaches src/t.ts directly")
+  const e = a.edges.find((x) => x.to === "src/rel.ts")
+  if (!e) bad.push("src/a.ts does not reach src/rel.ts")
+  else {
+    if (e.kind !== before.kind) bad.push("the kind became " + e.kind + ", not " + before.kind)
+    if (e.file !== "src/a.ts") bad.push("the site moved to " + e.file)
+    if (e.line !== before.line) bad.push("the line became " + e.line + ", not " + before.line)
+  }
+  // the facade edge is not invented: rel.ts imports t.ts on its own already, and
+  // nothing new was hung on it
+  const rel = after.modules.find((x) => x.id === "src/rel.ts")
+  if (rel.edges.length !== 1) bad.push("src/rel.ts carries " + rel.edges.length + " edges, not the one it wrote")
+  console.log(bad.join("; "))
+' 2>&1)"
+# break: setting line 0 or refiling the edge on via the way invert does, which
+# names a site nobody wrote the import at
+[ -z "$CAST_RDG" ] || { fail "cast plan redirect" "$CAST_RDG"; S=1; }
+# AC4 a redirect naming an edge the graph does not carry is an error, never a
+# silent no-op
+cat > "$CASTFIX/.cast/plans/nodoor.json" <<'JSON'
+{ "operations": [
+  { "op": "redirect", "from": "src/rel.ts", "to": "src/b.ts", "via": "src/t.ts" }
+] }
+JSON
+CAST_RDX="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate nodoor 2>&1)"; RC=$?
+# break: filtering the edges and returning when none match, which reports a
+# repair the graph never had
+[ "$RC" = 2 ] || { fail "cast plan redirect" "a redirect of no edge exited $RC, not 2: $CAST_RDX"; S=1; }
+printf '%s\n' "$CAST_RDX" | grep -qF 'src/rel.ts -> src/b.ts' \
+  || { fail "cast plan redirect" "the missing edge was not named: $CAST_RDX"; S=1; }
+# AC5 the simulation still writes nothing when the plan holds a redirect
+CAST_RD_BEFORE="$( (cd "$CASTFIX" && find . -type f | sort | xargs cksum) )"
+CAST_RD2="$(cd "$CASTFIX" && "$CAST_BIN" plan simulate door 2>&1)"; RC=$?
+CAST_RD_AFTER="$( (cd "$CASTFIX" && find . -type f | sort | xargs cksum) )"
+[ "$RC" = 0 ] || { fail "cast plan redirect" "the second simulation exited $RC: $CAST_RD2"; S=1; }
+# break: rewriting the source import or writing the after graph back to disk
+[ "$CAST_RD_BEFORE" = "$CAST_RD_AFTER" ] \
+  || { fail "cast plan redirect" "the simulation changed the project: $(diff <(printf '%s\n' "$CAST_RD_BEFORE") <(printf '%s\n' "$CAST_RD_AFTER"))"; S=1; }
+rm -f "$CASTFIX/.cast/plans/nodoor.json"
+[ "$S" = 0 ] && ok "cast plan redirect"
+
 # AC2 every source file is byte-identical before and after the simulation
 S=0
 sums() { (cd "$CASTFIX" && find . -type f | sort | xargs cksum); }
