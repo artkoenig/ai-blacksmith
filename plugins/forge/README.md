@@ -42,7 +42,7 @@ The levers, each with the file that owns it:
 ## Install
 
 ```bash
-/plugin marketplace add artkoenig/test
+/plugin marketplace add artkoenig/ai-blacksmith
 /plugin install forge@artkoenig-marketplace
 ```
 
