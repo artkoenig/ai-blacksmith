@@ -155,6 +155,7 @@ without being written into the checkout at all. `--plan` on `cast render` reads 
     { "op": "move", "module": "src/rel.ts", "to": "pkg/rel.ts" },
     { "op": "merge", "modules": ["src/b.ts", "src/c.ts"], "into": "src/bc.ts" },
     { "op": "invert", "from": "src/a.ts", "to": "src/bc.ts" },
+    { "op": "redirect", "from": "src/a.ts", "to": "src/t.ts", "via": "src/rel.ts" },
     { "op": "split", "module": "src/multi.ts", "into": [
       { "id": "src/multi-core.ts", "imports": ["src/t.ts"], "importedBy": ["src/a.ts"] },
       { "id": "src/multi-shell.ts" } ] }
@@ -165,7 +166,11 @@ without being written into the checkout at all. `--plan` on `cast render` reads 
 `move` renames a module and every edge that pointed at it - a module moved into another directory
 lands in whatever layer the globs give its new path. `merge` folds several modules into one; an
 edge between two of them stops being an edge. `invert` turns the edges between two modules around,
-keeping their kind and their site. `split` breaks one module into parts: an outgoing edge lands on
+keeping their kind and their site. `redirect` rehangs every edge `from -> to` on `via`, the facade
+that is meant to stand between them: the import stays in `from`, at the file and the line it sits on
+today, and keeps its kind - only what it names changes. The facade's own edge `via -> to` is not
+created; where `via` does not import `to` already, writing that import is the implementer's work,
+not the simulator's to invent. `split` breaks one module into parts: an outgoing edge lands on
 the part whose `imports` names its target, an incoming one on the part whose `importedBy` names
 its importer, and the first part takes everything no part claims.
 

@@ -41,7 +41,9 @@ which goal the graph will not give up.
    to the graph the one before it left behind, so a module a `move` renamed is named by its new id
    from there on. The operations are `{"op":"move","module":"<id>","to":"<id>"}`,
    `{"op":"merge","modules":["<id>",...],"into":"<id>"}`,
-   `{"op":"invert","from":"<id>","to":"<id>"}` and
+   `{"op":"invert","from":"<id>","to":"<id>"}`,
+   `{"op":"redirect","from":"<id>","to":"<id>","via":"<id>"}` - the edge `from -> to` rehung on the
+   facade `via`, the repair for a boundary that exists but is bypassed - and
    `{"op":"split","module":"<id>","into":[{"id":"<id>","imports":[],"importedBy":[]},...]}`.
    Every id is a module the report above named, spelled exactly.
 2. **Simulate.** `cast plan simulate <name> --root <root>`, or the path where the draft is not in

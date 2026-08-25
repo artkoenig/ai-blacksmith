@@ -1763,6 +1763,7 @@ const PLAN_KEYS = {
   split: ['op', 'module', 'into'],
   merge: ['op', 'modules', 'into'],
   invert: ['op', 'from', 'to'],
+  redirect: ['op', 'from', 'to', 'via'],
 }
 
 function planString(o, key, at) {
@@ -1789,6 +1790,13 @@ function readOperation(o, at) {
     return { op: 'merge', modules: planList(o, 'modules', at), into: planString(o, 'into', at) }
   if (o.op === 'invert')
     return { op: 'invert', from: planString(o, 'from', at), to: planString(o, 'to', at) }
+  if (o.op === 'redirect')
+    return {
+      op: 'redirect',
+      from: planString(o, 'from', at),
+      to: planString(o, 'to', at),
+      via: planString(o, 'via', at),
+    }
   if (!Array.isArray(o.into) || o.into.length < 2) die(`${at}: split needs two or more parts in into`)
   const into = o.into.map((p, i) => {
     const pat = `${at}: into[${i}]`
@@ -1852,6 +1860,7 @@ function describe(o) {
   if (o.op === 'move') return `move ${o.module} -> ${o.to}`
   if (o.op === 'merge') return `merge ${o.modules.join(', ')} -> ${o.into}`
   if (o.op === 'invert') return `invert ${o.from} -> ${o.to}`
+  if (o.op === 'redirect') return `redirect ${o.from} -> ${o.to} via ${o.via}`
   return `split ${o.module} -> ${o.into.map((p) => p.id).join(', ')}`
 }
 
@@ -1918,6 +1927,24 @@ function apply(graph, o, at) {
     // carrying it over would name a line of the target nobody wrote it on.
     for (const e of inverted)
       target.edges.push({ ...e, target: o.from, to: o.from, file: o.to, line: 0, resolution: 'module' })
+    return
+  }
+  if (o.op === 'redirect') {
+    const from = findModule(graph, o.from, at)
+    findModule(graph, o.to, at)
+    findModule(graph, o.via, at)
+    const rehung = from.edges.filter((e) => e.resolution === 'module' && e.to === o.to)
+    if (!rehung.length) die(`${at}: no edge ${o.from} -> ${o.to} to redirect`)
+    // The import does not leave `from`, which is the whole difference from an
+    // inversion: the file and the line the scan read it at stay real, and the
+    // edge keeps its kind. Only what it names changes. `via -> to` is not
+    // created here - where the facade does not import `to` already, writing
+    // that import is the implementer's work, and a simulation inventing it
+    // would report a boundary repaired that nobody has to write.
+    for (const e of rehung) {
+      e.to = o.via
+      e.target = o.via
+    }
     return
   }
   const m = findModule(graph, o.module, at)
